@@ -3,11 +3,12 @@ LoadPlugin("..\x64\Debug\InvertNegCUDA.dll")
 #LoadPlugin("..\x64\Release\InvertNegCUDA.dll")
 
 srcfile = "test.ts"
-LWLibavVideoSource(srcfile)
+LWLibavVideoSource(srcfile).Time("Source")
 
-OnCPU()
+OnCPU().Time("OnCPU")
 
-InvertNeg()
-InvertNeg()
+InvertNeg().Time("InvertNeg")
+InvertNeg().Time("InvertNeg2")
 
-OnCUDA()
+OnCUDA().Time("OnCUDA")
+
