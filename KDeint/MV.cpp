@@ -46,6 +46,11 @@ struct MVData
   VECTOR data[1];
 };
 
+struct LevelInfo {
+  int nBlkX; // number of blocks along X
+  int nBlkY; // number of blocks along Y
+};
+
 struct KMVParam
 {
   enum
@@ -106,10 +111,10 @@ struct KMVParam
   int nOverlapX; // overlap block size - v1.1
   int nOverlapY; // vertical overlap - v1.7
 
-  int nBlkX; // number of blocks along X
-  int nBlkY; // number of blocks along Y
+  std::vector<LevelInfo> levelInfo;
 
   int chromaSADScale; // P.F. chroma SAD ratio, 0:stay(YV12) 1:div2 2:div4(e.g.YV24)
+
 
   KMVParam(int data_type)
     : nMagicKey(MAGIC_KEY)
@@ -470,6 +475,7 @@ public:
     //
   }
 
+  int GetNPel() const { return nPel; }
   int GetPitch() const { return nPitch; }
   int GetWidth() const { return nWidth; }
   int GetHeight() const { return nHeight; }
@@ -575,47 +581,43 @@ public:
 
 class KMFrame
 {
+  const KMVParam* param;
+
   std::unique_ptr<KMPlaneBase> pYPlane;
   std::unique_ptr<KMPlaneBase> pUPlane;
   std::unique_ptr<KMPlaneBase> pVPlane;
 
-  bool chroma;
-  bool isse;
-  int xRatioUV;
-  int yRatioUV;
-  int nPixelSize;
-  int nBitsPerPixel;
+  //bool chroma;
+  //bool isse;
+  //int xRatioUV;
+  //int yRatioUV;
+  //int nPixelSize;
+  //int nBitsPerPixel;
 
   template <typename pixel_t>
   void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, bool mt_flag)
   {
-    pYPlane = std::unique_ptr<KMPlaneBase>(
-      new KMPlane<uint8_t>(nWidth, nHeight, nPel, nHPad, nVPad, nBitsPerPixel, isse, mt_flag));
-    if (chroma) {
-      pUPlane = std::unique_ptr<KMPlaneBase>(
-        new KMPlane<uint8_t>(nWidth / xRatioUV, nHeight / yRatioUV, nPel, nHPad / xRatioUV, nVPad / yRatioUV, nBitsPerPixel, isse, mt_flag));
-      pVPlane = std::unique_ptr<KMPlaneBase>(
-        new KMPlane<uint8_t>(nWidth / xRatioUV, nHeight / yRatioUV, nPel, nHPad / xRatioUV, nVPad / yRatioUV, nBitsPerPixel, isse, mt_flag));
+    pYPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
+      nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, true, mt_flag));
+    if (param->chroma) {
+      pUPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
+        nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
+        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, true, mt_flag));
+      pVPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
+        nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
+        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, true, mt_flag));
     }
   }
 
 public:
-  KMFrame(
-    int nWidth, int nHeight, int nPel, int nHPad, int nVPad, bool chroma,
-    bool isse, int xRatioUV, int yRatioUV,
-    int nPixelSize, int nBitsPerPixel, bool mt_flag)
-    : chroma(chroma)
-    , isse(isse)
-    , xRatioUV(xRatioUV)
-    , yRatioUV(yRatioUV)
-    , nPixelSize(nPixelSize)
-    , nBitsPerPixel(nBitsPerPixel)
+  KMFrame(const KMVParam* param)
+    : param(param)
   {
-    if (nPixelSize == 1) {
-      CreatePlanes<uint8_t>(nWidth, nHeight, nPel, nHPad, nVPad, mt_flag);
+    if (param->nPixelSize == 1) {
+      CreatePlanes<uint8_t>(param->nWidth, param->nHeight, param->nPel, param->nHPad, param->nVPad, false);
     }
-    else if (nPixelSize == 2) {
-      CreatePlanes<uint16_t>(nWidth, nHeight, nPel, nHPad, nVPad, mt_flag);
+    else if (param->nPixelSize == 2) {
+      CreatePlanes<uint16_t>(param->nWidth, param->nHeight, param->nPel, param->nHPad, param->nVPad, false);
     }
   }
 
@@ -626,7 +628,7 @@ public:
   void SetTarget(uint8_t * pSrcY, int pitchY, uint8_t * pSrcU, int pitchU, uint8_t *pSrcV, int pitchV)
   {
     pYPlane->SetTarget(pSrcY, pitchY);
-    if (chroma) {
+    if (param->chroma) {
       pUPlane->SetTarget(pSrcU, pitchU);
       pVPlane->SetTarget(pSrcV, pitchV);
     }
@@ -635,7 +637,7 @@ public:
   void Fill(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
   {
     pYPlane->Fill(pSrcY, pitchY);
-    if (chroma) {
+    if (param->chroma) {
       pUPlane->Fill(pSrcU, pitchU);
       pVPlane->Fill(pSrcV, pitchV);
     }
@@ -653,7 +655,7 @@ public:
   void	Refine()
   {
     pYPlane->Refine();
-    if (chroma) {
+    if (param->chroma) {
       pUPlane->Refine();
       pVPlane->Refine();
     }
@@ -662,7 +664,7 @@ public:
   void	Pad()
   {
     pYPlane->Pad();
-    if (chroma) {
+    if (param->chroma) {
       pUPlane->Pad();
       pVPlane->Pad();
     }
@@ -671,7 +673,7 @@ public:
   void	ReduceTo(KMFrame *pFrame)
   {
     pYPlane->ReduceTo(pFrame->GetYPlane());
-    if (chroma) {
+    if (param->chroma) {
       pUPlane->ReduceTo(pFrame->GetUPlane());
       pVPlane->ReduceTo(pFrame->GetVPlane());
     }
@@ -680,56 +682,37 @@ public:
 
 class KMSuperFrame
 {
-  int nLevelCount;
+  const KMVParam* param;
   std::unique_ptr<std::unique_ptr<KMFrame>[]> pFrames;
-
-  int nWidth;
-  int nHeight;
-  int nPel;
-  int nHPad;
-  int nVPad;
-  int xRatioUV; // PF 160729
-  int yRatioUV;
-  int nPixelSize; // PF 160729
-  int nBitsPerPixel; // PF 160927
 
 public:
   // xRatioUV PF 160729
-  KMSuperFrame(
-    int nLevelCount, int nWidth, int nHeight, int nPel, int nHPad, int nVPad,
-    bool chroma, bool isse, int xRatioUV, int yRatioUV,
-    int nPixelSize, int nBitsPerPixel, bool mt_flag)
-    : nLevelCount(nLevelCount)
-    , pFrames(new std::unique_ptr<KMFrame>[nLevelCount])
-    , nWidth(nWidth)
-    , nHeight(nHeight)
-    , nPel(nPel)
-    , nHPad(nHPad)
-    , nVPad(nVPad)
-    , xRatioUV(xRatioUV)
-    , yRatioUV(yRatioUV)
-    , nPixelSize(nPixelSize)
-    , nBitsPerPixel(nBitsPerPixel)
+  KMSuperFrame(const KMVParam* param)
+    : param(param)
+    , pFrames(new std::unique_ptr<KMFrame>[param->nLevels])
   {
-    pFrames[0] = std::unique_ptr<KMFrame>(
-      new KMFrame(nWidth, nHeight, nPel, nHPad, nVPad, chroma, isse, xRatioUV, yRatioUV, nPixelSize, nBitsPerPixel, mt_flag));
-    for (int i = 1; i < nLevelCount; i++)
+    pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param));
+    for (int i = 1; i < param->nLevels; i++)
     {
-      int nWidthi = PlaneWidthLuma(nWidth, i, xRatioUV, nHPad);
-      int nHeighti = PlaneHeightLuma(nHeight, i, yRatioUV, nVPad);
+      int nWidthi = PlaneWidthLuma(param->nWidth, i, param->xRatioUV, param->nHPad);
+      int nHeighti = PlaneHeightLuma(param->nHeight, i, param->yRatioUV, param->nVPad);
       pFrames[i] = std::unique_ptr<KMFrame>(
-        new KMFrame(nWidthi, nHeighti, 1, nHPad, nVPad, chroma, isse, xRatioUV, yRatioUV, nPixelSize, nBitsPerPixel, mt_flag));
+        new KMFrame(param));
     }
   }
 
   void SetTarget(uint8_t * pSrcY, int pitchY, uint8_t * pSrcU, int pitchU, uint8_t *pSrcV, int pitchV)
   {
-    for (int i = 0; i < nLevelCount; i++)
+    for (int i = 0; i < param->nLevels; i++)
     {
-      unsigned int offY = PlaneSuperOffset(false, nHeight, i, nPel, nVPad, pitchY, yRatioUV); // no need here xRatioUV and pixelsize
-      unsigned int offU = PlaneSuperOffset(true, nHeight / yRatioUV, i, nPel, nVPad / yRatioUV, pitchU, yRatioUV);
-      unsigned int offV = PlaneSuperOffset(true, nHeight / yRatioUV, i, nPel, nVPad / yRatioUV, pitchV, yRatioUV);
-      pFrames[i]->SetTarget(pSrcY + offY * nPixelSize, pitchY, pSrcU + offU * nPixelSize, pitchU, pSrcV + offV * nPixelSize, pitchV);
+      unsigned int offY = PlaneSuperOffset(
+        false, param->nHeight, i, param->nPel, param->nVPad, pitchY, param->yRatioUV); // no need here xRatioUV and pixelsize
+      unsigned int offU = PlaneSuperOffset(
+        true, param->nHeight / param->yRatioUV, i, param->nPel, param->nVPad / param->yRatioUV, pitchU, param->yRatioUV);
+      unsigned int offV = PlaneSuperOffset(
+        true, param->nHeight / param->yRatioUV, i, param->nPel, param->nVPad / param->yRatioUV, pitchV, param->yRatioUV);
+      pFrames[i]->SetTarget(
+        pSrcY + offY * param->nPixelSize, pitchY, pSrcU + offU * param->nPixelSize, pitchU, pSrcV + offV * param->nPixelSize, pitchV);
     }
   }
 
@@ -739,7 +722,7 @@ public:
     pFrames[0]->Pad();
     pFrames[0]->Refine();
 
-    for (int i = 0; i < nLevelCount - 1; i++)
+    for (int i = 0; i < param->nLevels - 1; i++)
     {
       pFrames[i]->ReduceTo(pFrames[i + 1].get());
       pFrames[i + 1]->Pad();
@@ -748,7 +731,7 @@ public:
 
   KMFrame *GetFrame(int nLevel)
   {
-    if ((nLevel < 0) || (nLevel >= nLevelCount)) {
+    if ((nLevel < 0) || (nLevel >= param->nLevels)) {
       return nullptr;
     }
     return pFrames[nLevel].get();
@@ -830,9 +813,7 @@ public:
 
     KMVParam::SetParam(vi, &params);
 
-    pSrcGOF = std::unique_ptr<KMSuperFrame>(
-      new KMSuperFrame(nLevels, params.nWidth, params.nHeight, nPel, nHPad, nVPad, chroma,
-        false, params.xRatioUV, params.yRatioUV, params.nPixelSize, params.nBitsPerPixel, false));
+    pSrcGOF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
 
     //pSrcGOF->SetInterp(nRfilter, nSharp);
   }
@@ -1861,7 +1842,7 @@ class GroupOfPlanes
 public:
   GroupOfPlanes(
     int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nPel, bool chroma,
-    int nOverlapX, int nOverlapY, int nBlkX, int nBlkY, int xRatioUV, int yRatioUV,
+    int nOverlapX, int nOverlapY, const LevelInfo* linfo, int xRatioUV, int yRatioUV,
     int divideExtra, int nPixelSize, int nBitsPerPixel,
     bool mt_flag, int chromaSADScale, 
     
@@ -1875,13 +1856,10 @@ public:
     , global(global)
     , planes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
   {
-    int				nWidth_B = (nBlkSizeX - nOverlapX) * nBlkX + nOverlapX;
-    int				nHeight_B = (nBlkSizeY - nOverlapY) * nBlkY + nOverlapY;
-
     for (int i = 0; i < nLevelCount; i++) {
       int nPelLevel = (i == 0) ? nPel : 1;
-      int nBlkX = ((nWidth_B >> i) - nOverlapX) / (nBlkSizeX - nOverlapX);
-      int nBlkY = ((nHeight_B >> i) - nOverlapY) / (nBlkSizeY - nOverlapY);
+      int nBlkX = linfo[i].nBlkX;
+      int nBlkY = linfo[i].nBlkY;
 
       // full search for coarse planes
       SearchType searchTypeLevel =
@@ -2075,11 +2053,15 @@ public:
       chroma = false;
     }
 
-    const int nBlkX = (params.nWidth - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX);
-    const int nBlkY = (params.nHeight - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY);
-
-    params.nBlkX = nBlkX;
-    params.nBlkY = nBlkY;
+    // 各階層のブロック数を計算
+    params.levelInfo.clear();
+    for (int i = 0; i < params.nLevels; i++) {
+      LevelInfo linfo = {
+        ((params.nWidth >> i) - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX),
+        ((params.nHeight >> i) - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY)
+      };
+      params.levelInfo.push_back(linfo);
+    }
 
     KMVParam::SetParam(vi, &params);
 
@@ -2128,17 +2110,9 @@ public:
       nSearchParam = (stp < 1) ? 1 : stp;
     }
 
+    pSrcSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
+    pRefSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
 
-    pSrcSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(
-      params.nLevels, params.nWidth, params.nHeight,
-      params.nPel, params.nHPad, params.nVPad, params.chroma,
-      isse, params.xRatioUV, params.yRatioUV, nPixelSize, nBitsPerPixel, mt_flag
-    ));
-    pRefSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(
-      params.nLevels, params.nWidth, params.nHeight,
-      params.nPel, params.nHPad, params.nVPad, params.chroma,
-      isse, params.xRatioUV, params.yRatioUV, nPixelSize, nBitsPerPixel, mt_flag
-    ));
     _vectorfields_aptr = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
       params.nBlkSizeY,
@@ -2147,8 +2121,7 @@ public:
       params.chroma,
       params.nOverlapX,
       params.nOverlapY,
-      params.nBlkX,
-      params.nBlkY,
+      params.levelInfo.data(),
       params.xRatioUV, // PF
       params.yRatioUV,
       0,
@@ -2183,7 +2156,6 @@ public:
 
   PVideoFrame __stdcall	GetFrame(int n, ::IScriptEnvironment* env)
   {
-    _RPT2(0, "MAnalyze GetFrame, frame=%d id=%d\n", n, _instance_id);
     const int nsrc = n;
     const int nbr_src_frames = child->GetVideoInfo().num_frames;
     const int offset = (params.isBackward) ? params.nDeltaFrame : -params.nDeltaFrame;
@@ -2204,7 +2176,6 @@ public:
     else
     {
       //		DebugPrintf ("MVAnalyse: Get src frame %d",nsrc);
-      _RPT3(0, "MAnalyze GetFrame, frame_nsrc=%d nref=%d id=%d\n", nsrc, nref, _instance_id);
       ::PVideoFrame	src = child->GetFrame(nsrc, env); // v2.0
       LoadSourceFrame(pSrcSF.get(), src);
 
@@ -2216,7 +2187,6 @@ public:
       _vectorfields_aptr->SearchMVs(pSrcSF.get(), pSrcSF.get(), pDst);
     }
 
-    _RPT3(0, "MAnalyze GetFrame END, frame_nsrc=%d nref=%d id=%d\n", nsrc, nref, _instance_id);
     return dst;
   }
 
@@ -2281,9 +2251,252 @@ public:
   }
 };
 
+class KMSuperCheck : public GenericVideoFilter
+{
+  PClip kmsuper;
+  PClip mvsuper;
+
+  const KMVParam* params;
+
+  std::unique_ptr<KMSuperFrame> pKSF;
+  std::unique_ptr<KMSuperFrame> pMSF;
+
+  void LoadSourceFrame(KMSuperFrame *sf, PVideoFrame &src)
+  {
+    const unsigned char *	pSrcY;
+    const unsigned char *	pSrcU;
+    const unsigned char *	pSrcV;
+    int				nSrcPitchY;
+    int				nSrcPitchUV;
+
+    pSrcY = src->GetReadPtr(PLANAR_Y);
+    pSrcU = src->GetReadPtr(PLANAR_U);
+    pSrcV = src->GetReadPtr(PLANAR_V);
+    nSrcPitchY = src->GetPitch(PLANAR_Y) >> params->nPixelShift;
+    nSrcPitchUV = src->GetPitch(PLANAR_U) >> params->nPixelShift;
+
+    sf->SetTarget(
+      (BYTE*)pSrcY, nSrcPitchY,
+      (BYTE*)pSrcU, nSrcPitchUV,
+      (BYTE*)pSrcV, nSrcPitchUV
+    ); // v2.0
+  }
+
+  template <typename pixel_t>
+  void CheckPlane(const KMPlane<pixel_t>* kPlane, const KMPlane<pixel_t>* mPlane, IScriptEnvironment* env)
+  {
+    int nPel = kPlane->GetNPel();
+    int nPlanes = nPel * nPel;
+    int nPitch = kPlane->GetPitch();
+    int w = kPlane->GetExtendedWidth();
+    int h = kPlane->GetExtendedHeight();
+
+    // サブピクセルループ
+    for (int sy = 0; sy < nPel; ++sy) {
+      for (int sx = 0; sx < nPel; ++sx) {
+        const pixel_t* kptr = kPlane->GetAbsolutePointer(sx, sy);
+        const pixel_t* mptr = mPlane->GetAbsolutePointer(sx, sy);
+        // 画素ループ
+        for (int y = 0; y < h; ++y) {
+          for (int x = 0; x < w; ++x) {
+            pixel_t kv = kptr[x + y * nPitch];
+            pixel_t mv = mptr[x + y * nPitch];
+            if (std::abs(kv - mv) > 1) {
+              env->ThrowError("ERROR !!!");
+            }
+          }
+        }
+      }
+    }
+
+  }
+
+  void CheckPlane(const KMPlaneBase* kPlane, const KMPlaneBase* mPlane, IScriptEnvironment* env)
+  {
+    if (params->nPixelSize == 1) {
+      CheckPlane<uint8_t>(static_cast<const KMPlane<uint8_t>*>(kPlane), static_cast<const KMPlane<uint8_t>*>(mPlane), env);
+    }
+    else {
+      CheckPlane<uint16_t>(static_cast<const KMPlane<uint16_t>*>(kPlane), static_cast<const KMPlane<uint16_t>*>(mPlane), env);
+    }
+  }
+
+public:
+  KMSuperCheck(PClip kmsuper, PClip mvsuper, PClip view, IScriptEnvironment* env)
+    : GenericVideoFilter(view)
+    , kmsuper(kmsuper)
+    , mvsuper(mvsuper)
+    , params(KMVParam::GetParam(kmsuper->GetVideoInfo(), env))
+    , pKSF(new KMSuperFrame(params))
+    , pMSF(new KMSuperFrame(params))
+  {
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    PVideoFrame ret = child->GetFrame(n, env);
+    PVideoFrame ksuper = kmsuper->GetFrame(n, env);
+    PVideoFrame msuper = mvsuper->GetFrame(n, env);
+
+    LoadSourceFrame(pKSF.get(), ksuper);
+    LoadSourceFrame(pMSF.get(), msuper);
+
+    for (int i = 0; i < params->nLevels; ++i) {
+      KMFrame* kframe = pKSF->GetFrame(i);
+      KMFrame* mframe = pMSF->GetFrame(i);
+
+      CheckPlane(kframe->GetYPlane(), mframe->GetYPlane(), env);
+      if (params->chroma) {
+        CheckPlane(kframe->GetUPlane(), mframe->GetUPlane(), env);
+        CheckPlane(kframe->GetVPlane(), mframe->GetVPlane(), env);
+      }
+    }
+
+    return ret;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KMSuperCheck(args[0].AsClip(), args[1].AsClip(), args[2].AsClip(), env);
+  }
+};
+
+class KMAnalyzeCheck : public GenericVideoFilter
+{
+  PClip kmv;
+  PClip mvv;
+
+  const KMVParam* params;
+
+  template <typename pixel_t>
+  void CheckPlane(const KMPlane<pixel_t>* kPlane, const KMPlane<pixel_t>* mPlane)
+  {
+    int nPel = kPlane->GetNPel();
+    int nPlanes = nPel * nPel;
+    int nPitch = kPlane->GetPitch();
+    int w = kPlane->GetExtendedWidth();
+    int h = kPlane->GetExtendedHeight();
+
+    // サブピクセルループ
+    for (int sy = 0; sy < nPel; ++sy) {
+      for (int sx = 0; sx < nPel; ++sx) {
+        const pixel_t* kptr = kPlane->GetAbsolutePointer(sx, sy);
+        const pixel_t* mptr = mPlane->GetAbsolutePointer(sx, sy);
+        // 画素ループ
+        for (int y = 0; y < h; ++y) {
+          for (int x = 0; x < w; ++x) {
+            pixel_t kv = kptr[x + y * nPitch];
+            pixel_t mv = mptr[x + y * nPitch];
+            if (std::abs(kv - mv) > 1) {
+              //
+            }
+          }
+        }
+      }
+    }
+
+  }
+
+  void CheckPlane(const KMPlaneBase* kPlane, const KMPlaneBase* mPlane)
+  {
+    if (params->nPixelSize == 1) {
+      CheckPlane<uint8_t>(static_cast<const KMPlane<uint8_t>*>(kPlane), static_cast<const KMPlane<uint8_t>*>(mPlane));
+    }
+    else {
+      CheckPlane<uint16_t>(static_cast<const KMPlane<uint16_t>*>(kPlane), static_cast<const KMPlane<uint16_t>*>(mPlane));
+    }
+  }
+
+  void GetMVData(int n, const int*& pMv, int& data_size, IScriptEnvironment* env)
+  {
+    VideoInfo vi = mvv->GetVideoInfo();
+    PVideoFrame mmvframe = mvv->GetFrame(n, env);
+
+    // vector clip is rgb32
+    const int		bytes_per_pix = vi.BitsPerPixel() >> 3;
+    // for calculation of buffer size 
+
+    const int		line_size = vi.width * bytes_per_pix;	// in bytes
+    data_size = vi.height * line_size / sizeof(int);	// in 32-bit words
+
+    pMv = reinterpret_cast<const int*>(mmvframe->GetReadPtr());
+    int header_size = pMv[0];
+    int nMagicKey1 = pMv[1];
+    if (nMagicKey1 != 0x564D)
+    {
+      env->ThrowError("MVTools: invalid vector stream");
+    }
+    int nVersion1 = pMv[2];
+    if (nVersion1 != 5)
+    {
+      env->ThrowError("MVTools: incompatible version of vector stream");
+    }
+
+    // 17.05.22 filling from motion vector clip
+    const int		hs_i32 = header_size / sizeof(int);
+    pMv += hs_i32;									// go to data - v1.8.1
+    data_size -= hs_i32;
+  }
+
+public:
+  KMAnalyzeCheck(PClip kmv, PClip mvv, PClip view, IScriptEnvironment* env)
+    : GenericVideoFilter(view)
+    , kmv(kmv)
+    , mvv(mvv)
+    , params(KMVParam::GetParam(kmv->GetVideoInfo(), env))
+  {
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    PVideoFrame ret = child->GetFrame(n, env);
+    PVideoFrame kmvframe = kmv->GetFrame(n, env);
+
+    const MVDataGroup* kdata = reinterpret_cast<const MVDataGroup*>(kmvframe->GetReadPtr());
+    const MVData* kptr = reinterpret_cast<const MVData*>(kdata->data);
+
+    const int* pMv;
+    int data_size;
+    GetMVData(n, pMv, data_size, env);
+
+    // validity
+    if (kdata->isValid != pMv[1]) {
+      env->ThrowError("Validity missmatch");
+    }
+    pMv += 2;
+
+    for (int i = params->nLevels - 1; i >= 0; i--) {
+      int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+      int length = pMv[0];
+      
+      for (int v = 0; v < nBlkCount; ++v) {
+        VECTOR kmv = kptr->data[v];
+        VECTOR mmv = { pMv[v * 3 + 1], pMv[v * 3 + 2], pMv[v * 3 + 3] };
+        if (kmv.x != mmv.x || kmv.y != mmv.y || kmv.sad != mmv.sad) {
+          env->ThrowError("Motion vector missmatch");
+        }
+      }
+
+      pMv += length;
+      kptr = reinterpret_cast<const MVData*>(&kptr->data[kptr->nCount]);
+    }
+
+    return ret;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KMAnalyzeCheck(args[0].AsClip(), args[1].AsClip(), args[2].AsClip(), env);
+  }
+};
+
 void AddFuncMV(IScriptEnvironment* env)
 {
+  env->AddFunction("KMSuper", "c[debug]i", KMSuper::Create, 0);
   env->AddFunction("KMAnalyse",
     "c[blocksize]i[overlap]i[isbackward]b[chroma]b[deltaframe]i[lambda]i[lsad]i[global]b[meander]b",
     KMSuper::Create, 0);
+
+  env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
+  env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);
 }

@@ -5,6 +5,7 @@
 #include <string>
 
 void AddFuncKernel(IScriptEnvironment* env);
+void AddFuncMV(IScriptEnvironment* env);
 
 static void init_console()
 {
@@ -51,6 +52,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
 	init_console();
 
 	AddFuncKernel(env);
+  AddFuncMV(env);
 
 	return "CUDA Accelerated Deinterlace Plugin";
 }
