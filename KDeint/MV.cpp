@@ -587,13 +587,6 @@ class KMFrame
   std::unique_ptr<KMPlaneBase> pUPlane;
   std::unique_ptr<KMPlaneBase> pVPlane;
 
-  //bool chroma;
-  //bool isse;
-  //int xRatioUV;
-  //int yRatioUV;
-  //int nPixelSize;
-  //int nBitsPerPixel;
-
   template <typename pixel_t>
   void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, bool mt_flag)
   {
@@ -610,14 +603,14 @@ class KMFrame
   }
 
 public:
-  KMFrame(const KMVParam* param)
+  KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param)
     : param(param)
   {
     if (param->nPixelSize == 1) {
-      CreatePlanes<uint8_t>(param->nWidth, param->nHeight, param->nPel, param->nHPad, param->nVPad, false);
+      CreatePlanes<uint8_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad, false);
     }
     else if (param->nPixelSize == 2) {
-      CreatePlanes<uint16_t>(param->nWidth, param->nHeight, param->nPel, param->nHPad, param->nVPad, false);
+      CreatePlanes<uint16_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad, false);
     }
   }
 
@@ -691,13 +684,12 @@ public:
     : param(param)
     , pFrames(new std::unique_ptr<KMFrame>[param->nLevels])
   {
-    pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param));
+    pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param));
     for (int i = 1; i < param->nLevels; i++)
     {
       int nWidthi = PlaneWidthLuma(param->nWidth, i, param->xRatioUV, param->nHPad);
       int nHeighti = PlaneHeightLuma(param->nHeight, i, param->yRatioUV, param->nVPad);
-      pFrames[i] = std::unique_ptr<KMFrame>(
-        new KMFrame(param));
+      pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param));
     }
   }
 
@@ -779,8 +771,8 @@ public:
     
     params.nWidth = vi.width;
     params.nHeight = vi.height;
-    params.yRatioUV = vi.GetPlaneHeightSubsampling(PLANAR_U);
-    params.xRatioUV = vi.GetPlaneWidthSubsampling(PLANAR_U);
+    params.yRatioUV = 1 << vi.GetPlaneHeightSubsampling(PLANAR_U);
+    params.xRatioUV = 1 << vi.GetPlaneWidthSubsampling(PLANAR_U);
 
     params.nPixelSize = vi.ComponentSize();
     params.nBitsPerPixel = vi.BitsPerComponent();
@@ -891,6 +883,7 @@ unsigned int(*get_sad_function(int nBlkWidth, int nBlkHeight, IScriptEnvironment
   else {
     env->ThrowError("Not supported blocksize (%d,%d)", nBlkWidth, nBlkHeight);
   }
+  return nullptr;
 }
 
 class PlaneOfBlocksBase {
@@ -1558,7 +1551,7 @@ public:
 
         // decreased padding of coarse levels
         int nHPaddingScaled = pSrcYPlane->GetHPadding() >> nLogScale;
-        int nVPaddingScaled = pSrcUPlane->GetVPadding() >> nLogScale;
+        int nVPaddingScaled = pSrcYPlane->GetVPadding() >> nLogScale;
         /* computes search boundaries */
         nDxMax = nPel * (pSrcYPlane->GetExtendedWidth() - x[0] - nBlkSizeX - pSrcYPlane->GetHPadding() + nHPaddingScaled);
         nDyMax = nPel * (pSrcYPlane->GetExtendedHeight() - y[0] - nBlkSizeY - pSrcYPlane->GetVPadding() + nVPaddingScaled);
@@ -1927,7 +1920,7 @@ public:
         reinterpret_cast<MVData*>(ptr)
       );
 
-      ptr += planes[nLevelCount - 1]->GetArraySize();
+      ptr += planes[i]->GetArraySize();
     }
   }
 
@@ -2053,12 +2046,44 @@ public:
       chroma = false;
     }
 
+    const int nBlkX = (params.nWidth - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX);
+    const int nBlkY = (params.nHeight - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY);
+    const int nWidth_B = (params.nBlkSizeX - params.nOverlapX) * nBlkX + params.nOverlapX; // covered by blocks
+    const int nHeight_B = (params.nBlkSizeY - params.nOverlapY) * nBlkY + params.nOverlapY;
+
+    // calculate valid levels
+    int				nLevelsMax = 0;
+    // at last one block
+    while (((nWidth_B >> nLevelsMax) - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX) > 0
+      && ((nHeight_B >> nLevelsMax) - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY) > 0)
+    {
+      ++nLevelsMax;
+    }
+
+    int nAnalyzeLevel = (lv > 0) ? lv : nLevelsMax + lv;
+    if (nAnalyzeLevel > params.nLevels)
+    {
+      env->ThrowError(
+        "MAnalyse: it is not enough levels  in super clip (%d), "
+        "while MAnalyse asks %d", params.nLevels, nAnalyzeLevel
+      );
+    }
+    if (nAnalyzeLevel < 1
+      || nAnalyzeLevel > nLevelsMax)
+    {
+      env->ThrowError(
+        "MAnalyse: non-valid number of levels (%d)", nAnalyzeLevel
+      );
+    }
+
+    params.isBackward = isb;
+
     // äeäKëwÇÃÉuÉçÉbÉNêîÇåvéZ
     params.levelInfo.clear();
-    for (int i = 0; i < params.nLevels; i++) {
+    for (int i = 0; i < nAnalyzeLevel; i++) {
       LevelInfo linfo = {
-        ((params.nWidth >> i) - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX),
-        ((params.nHeight >> i) - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY)
+        ((nWidth_B >> i) - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX),
+        ((nHeight_B >> i) - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY)
       };
       params.levelInfo.push_back(linfo);
     }
@@ -2116,7 +2141,7 @@ public:
     _vectorfields_aptr = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
       params.nBlkSizeY,
-      params.nLevels,
+      int(params.levelInfo.size()),
       params.nPel,
       params.chroma,
       params.nOverlapX,
@@ -2184,7 +2209,7 @@ public:
       ::PVideoFrame	ref = child->GetFrame(nref, env); // v2.0
       LoadSourceFrame(pRefSF.get(), ref);
 
-      _vectorfields_aptr->SearchMVs(pSrcSF.get(), pSrcSF.get(), pDst);
+      _vectorfields_aptr->SearchMVs(pSrcSF.get(), pRefSF.get(), pDst);
     }
 
     return dst;
@@ -2465,7 +2490,7 @@ public:
     }
     pMv += 2;
 
-    for (int i = params->nLevels - 1; i >= 0; i--) {
+    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
       
@@ -2494,8 +2519,8 @@ void AddFuncMV(IScriptEnvironment* env)
 {
   env->AddFunction("KMSuper", "c[debug]i", KMSuper::Create, 0);
   env->AddFunction("KMAnalyse",
-    "c[blocksize]i[overlap]i[isbackward]b[chroma]b[deltaframe]i[lambda]i[lsad]i[global]b[meander]b",
-    KMSuper::Create, 0);
+    "c[blksize]i[overlap]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b",
+    KMAnalyse::Create, 0);
 
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);
