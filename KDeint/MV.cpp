@@ -9,6 +9,7 @@
 #undef min
 #undef max
 
+const long double	PI = 3.1415926535897932384626433832795L;
 
 /* returns the biggest integer x such as 2^x <= i */
 inline static int ilog2(int i)
@@ -200,6 +201,16 @@ void Copy(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int wi
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       dst[x + y * dst_pitch] = src[x + y * src_pitch];
+    }
+  }
+}
+
+template <typename pixel_t>
+void MemZoneSet(pixel_t* dst, int dst_pitch, pixel_t v, int width, int height)
+{
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      dst[x + y * dst_pitch] = v;
     }
   }
 }
@@ -436,6 +447,7 @@ void HorizontalWiener(pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
 
 class KMPlaneBase {
 public:
+  virtual ~KMPlaneBase() { }
   //virtual void SetInterp(int nRfilter, int nSharp) = 0;
   virtual void SetTarget(uint8_t* pSrc, int _nPitch) = 0;
   virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch) = 0;
@@ -522,6 +534,11 @@ public:
     {
       return GetAbsolutePointerPel <2>(nX, nY);
     }
+  }
+
+  const pixel_t *GetPointer(int nX, int nY) const
+  {
+    return GetAbsolutePointer(nX + nHPaddingPel, nY + nVPaddingPel);
   }
 
   const pixel_t *GetAbsolutePelPointer(int nX, int nY) const
@@ -860,6 +877,16 @@ enum SearchType
   VSEARCH = 128   // v.2.5.11
 };
 
+static int ScaleSadChroma(int sad, int effective_scale) {
+  // effective scale: 1 -> div 2
+  //                  2 -> div 4 (YV24 default)
+  //                 -2 -> *4
+  //                 -1 -> *2
+  if (effective_scale == 0) return sad;
+  if (effective_scale > 0) return sad >> effective_scale;
+  return sad << (-effective_scale);
+}
+
 static unsigned int SADABS(int x) { return (x < 0) ? -x : x; }
 
 template<int nBlkWidth, int nBlkHeight, typename pixel_t>
@@ -896,6 +923,7 @@ unsigned int(*get_sad_function(int nBlkWidth, int nBlkHeight, IScriptEnvironment
 
 class PlaneOfBlocksBase {
 public:
+  virtual ~PlaneOfBlocksBase() { }
   virtual void EstimateGlobalMVDoubled(VECTOR* globalMV) = 0;
   virtual void InterpolatePrediction(const PlaneOfBlocksBase* pob) = 0;
   virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, MVData *out) = 0;
@@ -2523,9 +2551,194 @@ public:
 
 #pragma endregion
 
+
+class OverlapWindows
+{
+  int nx; // window sizes
+  int ny;
+  int ox; // overap sizes
+  int oy;
+  int size; // full window size= nx*ny
+
+  short * Overlap9Windows;
+
+  float *fWin1UVx;
+  float *fWin1UVxfirst;
+  float *fWin1UVxlast;
+  float *fWin1UVy;
+  float *fWin1UVyfirst;
+  float *fWin1UVylast;
+public:
+
+  OverlapWindows(int _nx, int _ny, int _ox, int _oy)
+  {
+    nx = _nx;
+    ny = _ny;
+    ox = _ox;
+    oy = _oy;
+    size = nx*ny;
+
+    //  windows
+    fWin1UVx = new float[nx];
+    fWin1UVxfirst = new float[nx];
+    fWin1UVxlast = new float[nx];
+    for (int i = 0; i<ox; i++)
+    {
+      fWin1UVx[i] = float(cos(PI*(i - ox + 0.5f) / (ox * 2)));
+      fWin1UVx[i] = fWin1UVx[i] * fWin1UVx[i];// left window (rised cosine)
+      fWin1UVxfirst[i] = 1; // very first window
+      fWin1UVxlast[i] = fWin1UVx[i]; // very last
+    }
+    for (int i = ox; i<nx - ox; i++)
+    {
+      fWin1UVx[i] = 1;
+      fWin1UVxfirst[i] = 1; // very first window
+      fWin1UVxlast[i] = 1; // very last
+    }
+    for (int i = nx - ox; i<nx; i++)
+    {
+      fWin1UVx[i] = float(cos(PI*(i - nx + ox + 0.5f) / (ox * 2)));
+      fWin1UVx[i] = fWin1UVx[i] * fWin1UVx[i];// right window (falled cosine)
+      fWin1UVxfirst[i] = fWin1UVx[i]; // very first window
+      fWin1UVxlast[i] = 1; // very last
+    }
+
+    fWin1UVy = new float[ny];
+    fWin1UVyfirst = new float[ny];
+    fWin1UVylast = new float[ny];
+    for (int i = 0; i<oy; i++)
+    {
+      fWin1UVy[i] = float(cos(PI*(i - oy + 0.5f) / (oy * 2)));
+      fWin1UVy[i] = fWin1UVy[i] * fWin1UVy[i];// left window (rised cosine)
+      fWin1UVyfirst[i] = 1; // very first window
+      fWin1UVylast[i] = fWin1UVy[i]; // very last
+    }
+    for (int i = oy; i<ny - oy; i++)
+    {
+      fWin1UVy[i] = 1;
+      fWin1UVyfirst[i] = 1; // very first window
+      fWin1UVylast[i] = 1; // very last
+    }
+    for (int i = ny - oy; i<ny; i++)
+    {
+      fWin1UVy[i] = float(cos(PI*(i - ny + oy + 0.5f) / (oy * 2)));
+      fWin1UVy[i] = fWin1UVy[i] * fWin1UVy[i];// right window (falled cosine)
+      fWin1UVyfirst[i] = fWin1UVy[i]; // very first window
+      fWin1UVylast[i] = 1; // very last
+    }
+
+
+    Overlap9Windows = new short[size * 9];
+
+    short *winOverUVTL = Overlap9Windows;
+    short *winOverUVTM = Overlap9Windows + size;
+    short *winOverUVTR = Overlap9Windows + size * 2;
+    short *winOverUVML = Overlap9Windows + size * 3;
+    short *winOverUVMM = Overlap9Windows + size * 4;
+    short *winOverUVMR = Overlap9Windows + size * 5;
+    short *winOverUVBL = Overlap9Windows + size * 6;
+    short *winOverUVBM = Overlap9Windows + size * 7;
+    short *winOverUVBR = Overlap9Windows + size * 8;
+
+    for (int j = 0; j<ny; j++)
+    {
+      for (int i = 0; i<nx; i++)
+      {
+        winOverUVTL[i] = (int)(fWin1UVyfirst[j] * fWin1UVxfirst[i] * 2048 + 0.5f);
+        winOverUVTM[i] = (int)(fWin1UVyfirst[j] * fWin1UVx[i] * 2048 + 0.5f);
+        winOverUVTR[i] = (int)(fWin1UVyfirst[j] * fWin1UVxlast[i] * 2048 + 0.5f);
+        winOverUVML[i] = (int)(fWin1UVy[j] * fWin1UVxfirst[i] * 2048 + 0.5f);
+        winOverUVMM[i] = (int)(fWin1UVy[j] * fWin1UVx[i] * 2048 + 0.5f);
+        winOverUVMR[i] = (int)(fWin1UVy[j] * fWin1UVxlast[i] * 2048 + 0.5f);
+        winOverUVBL[i] = (int)(fWin1UVylast[j] * fWin1UVxfirst[i] * 2048 + 0.5f);
+        winOverUVBM[i] = (int)(fWin1UVylast[j] * fWin1UVx[i] * 2048 + 0.5f);
+        winOverUVBR[i] = (int)(fWin1UVylast[j] * fWin1UVxlast[i] * 2048 + 0.5f);
+      }
+      winOverUVTL += nx;
+      winOverUVTM += nx;
+      winOverUVTR += nx;
+      winOverUVML += nx;
+      winOverUVMM += nx;
+      winOverUVMR += nx;
+      winOverUVBL += nx;
+      winOverUVBM += nx;
+      winOverUVBR += nx;
+    }
+  }
+
+  ~OverlapWindows()
+  {
+    delete[] Overlap9Windows;
+    delete[] fWin1UVx;
+    delete[] fWin1UVxfirst;
+    delete[] fWin1UVxlast;
+    delete[] fWin1UVy;
+    delete[] fWin1UVyfirst;
+    delete[] fWin1UVylast;
+  }
+
+  int Getnx() const { return nx; }
+  int Getny() const { return ny; }
+  int GetSize() const { return size; }
+  short *GetWindow(int i) const { return Overlap9Windows + size*i; }
+};
+
+template<int level>
+void	norm_weights(int &WSrc, int(&WRefB)[MAX_DEGRAIN], int(&WRefF)[MAX_DEGRAIN])
+{
+  WSrc = 256;
+  int WSum;
+  if (level == 6)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + WRefB[5] + WRefF[5] + 1;
+  else if (level == 5)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + 1;
+  else if (level == 4)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + 1;
+  else if (level == 3)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + 1;
+  else if (level == 2)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + 1;
+  else if (level == 1)
+    WSum = WRefB[0] + WRefF[0] + WSrc + 1;
+  WRefB[0] = WRefB[0] * 256 / WSum; // normalize weights to 256
+  WRefF[0] = WRefF[0] * 256 / WSum;
+  if (level >= 2) {
+    WRefB[1] = WRefB[1] * 256 / WSum; // normalize weights to 256
+    WRefF[1] = WRefF[1] * 256 / WSum;
+  }
+  if (level >= 3) {
+    WRefB[2] = WRefB[2] * 256 / WSum; // normalize weights to 256
+    WRefF[2] = WRefF[2] * 256 / WSum;
+  }
+  if (level >= 4) {
+    WRefB[3] = WRefB[3] * 256 / WSum; // normalize weights to 256
+    WRefF[3] = WRefF[3] * 256 / WSum;
+  }
+  if (level >= 5) {
+    WRefB[4] = WRefB[4] * 256 / WSum; // normalize weights to 256
+    WRefF[4] = WRefF[4] * 256 / WSum;
+  }
+  if (level >= 6) {
+    WRefB[5] = WRefB[5] * 256 / WSum; // normalize weights to 256
+    WRefF[5] = WRefF[5] * 256 / WSum;
+  }
+  if (level == 6)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3] - WRefB[4] - WRefF[4] - WRefB[5] - WRefF[5];
+  else if (level == 5)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3] - WRefB[4] - WRefF[4];
+  else if (level == 4)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3];
+  else if (level == 3)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2];
+  else if (level == 2)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1];
+  else if (level == 1)
+    WSrc = 256 - WRefB[0] - WRefF[0];
+}
+
 template <typename pixel_t, int blockWidth, int blockHeight>
 // pDst is short* for 8 bit, int * for 16 bit
-void Overlaps_C(std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
+void Overlaps_C(typename std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
   int nDstPitch, const pixel_t *pSrc, int nSrcPitch, short *pWin, int nWinPitch)
 {
   // pWin from 0 to 2048
@@ -2547,8 +2760,8 @@ void Overlaps_C(std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
 }
 
 template<typename pixel_t, int level, int blockWidth, int blockHeight>
-void Degrain1to6_C(pixel_t *pDst, int WidthHeightForC, int nDstPitch, const pixel_t *pSrc, int nSrcPitch,
-  const pixel_t *pRefB[MAX_DEGRAIN], int BPitch[MAX_DEGRAIN], const pixel_t *pRefF[MAX_DEGRAIN], int FPitch[MAX_DEGRAIN],
+void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch,
+  const pixel_t *pRefB[MAX_DEGRAIN], const pixel_t *pRefF[MAX_DEGRAIN], int nRefPitch,
   int WSrc, int WRefB[MAX_DEGRAIN], int WRefF[MAX_DEGRAIN])
 {
   // avoid unnecessary templates. C implementation is here for the sake of correctness and for very small block sizes
@@ -2573,16 +2786,15 @@ void Degrain1to6_C(pixel_t *pDst, int WidthHeightForC, int nDstPitch, const pixe
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      /*
       else if (level == 3) {
-        const int		val = pSrc)[x] * WSrc +
+        const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
           pRefF[2][x] * WRefF[2] + pRefB[2][x] * WRefB[2];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
       else if (level == 4) {
-        const int		val = pSrc)[x] * WSrc +
+        const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
           pRefF[2][x] * WRefF[2] + pRefB[2][x] * WRefB[2] +
@@ -2590,7 +2802,7 @@ void Degrain1to6_C(pixel_t *pDst, int WidthHeightForC, int nDstPitch, const pixe
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
       else if (level == 5) {
-        const int		val = pSrc)[x] * WSrc +
+        const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
           pRefF[2][x] * WRefF[2] + pRefB[2][x] * WRefB[2] +
@@ -2599,7 +2811,7 @@ void Degrain1to6_C(pixel_t *pDst, int WidthHeightForC, int nDstPitch, const pixe
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
       else if (level == 6) {
-        const int		val = pSrc)[x] * WSrc +
+        const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
           pRefF[2][x] * WRefF[2] + pRefB[2][x] * WRefB[2] +
@@ -2608,234 +2820,62 @@ void Degrain1to6_C(pixel_t *pDst, int WidthHeightForC, int nDstPitch, const pixe
           pRefF[5][x] * WRefF[5] + pRefB[5][x] * WRefB[5];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      */
     }
     pDst += nDstPitch;
     pSrc += nSrcPitch;
-    pRefB[0] += BPitch[0];
-    pRefF[0] += FPitch[0];
+    pRefB[0] += nRefPitch;
+    pRefF[0] += nRefPitch;
     if (level >= 2) {
-      pRefB[1] += BPitch[1];
-      pRefF[1] += FPitch[1];
-      /*
+      pRefB[1] += nRefPitch;
+      pRefF[1] += nRefPitch;
       if (level >= 3) {
-        pRefB[2] += BPitch[2];
-        pRefF[2] += FPitch[2];
+        pRefB[2] += nRefPitch;
+        pRefF[2] += nRefPitch;
         if (level >= 4) {
-          pRefB[3] += BPitch[3];
-          pRefF[3] += FPitch[3];
+          pRefB[3] += nRefPitch;
+          pRefF[3] += nRefPitch;
           if (level >= 5) {
-            pRefB[4] += BPitch[4];
-            pRefF[4] += FPitch[4];
+            pRefB[4] += nRefPitch;
+            pRefF[4] += nRefPitch;
             if (level >= 6) {
-              pRefB[5] += BPitch[5];
-              pRefF[5] += FPitch[5];
+              pRefB[5] += nRefPitch;
+              pRefF[5] += nRefPitch;
             }
           }
         }
       }
-      */
     }
   }
 }
 
-//template <typename pixel_t>
-class KMDegrainCore
+template <typename pixel_t, typename tmp_t>
+void Short2Bytes(pixel_t *pDst, int nDstPitch, tmp_t *pSrc, int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
 {
-  typedef uint8_t pixel_t;
-
-  std::unique_ptr<pixel_t[]> tmpBlock;
-
-  void (*OVERLAP)(std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
-    int nDstPitch, const pixel_t *pSrc, int nSrcPitch, short *pWin, int nWinPitch);
-  void(*DEGRAIN)(pixel_t *pDst, int WidthHeightForC, int nDstPitch, const pixel_t *pSrc, int nSrcPitch,
-    const pixel_t *pRefB[MAX_DEGRAIN], int BPitch[MAX_DEGRAIN], const pixel_t *pRefF[MAX_DEGRAIN], int FPitch[MAX_DEGRAIN],
-    int WSrc, int WRefB[MAX_DEGRAIN], int WRefF[MAX_DEGRAIN]);
-
-public:
-  KMDegrainCore()
-    : tmpBlock(new pixel_t[MAX_BLOCK_SIZE * MAX_BLOCK_SIZE])
+  const int max_pixel_value = (1 << bits_per_pixel) - 1;
+  const int shift = sizeof(pixel_t) == 1 ? 5 : (5 + 6);
+  for (int h = 0; h<nHeight; h++)
   {
-  }
-
-  void Proc(
-    int level,
-    int nBlkX, int nBlkY,
-    int nOverlapX, int nOverlapY,
-    bool isUsableB[MAX_DEGRAIN], bool isUsableF[MAX_DEGRAIN]
-  )
-  {
-    if (nOverlapX == 0 && nOverlapY == 0)
+    for (int i = 0; i<nWidth; i++)
     {
-      for (int by = 0; by < nBlkY; by++)
-      {
-        int xx = 0; // logical offset. Mul by 2 for pixelsize_super==2. Don't mul for indexing int* array
-        for (int bx = 0; bx < nBlkX; bx++)
-        {
-          int i = by*nBlkX + bx;
-          const BYTE * pB[MAX_DEGRAIN], *pF[MAX_DEGRAIN];
-          int npB[MAX_DEGRAIN], npF[MAX_DEGRAIN];
-          int WSrc;
-          int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
-
-          for (int j = 0; j < level; j++) {
-            use_block_y(pB[j], npB[j], WRefB[j], isUsableB[j], *mvClipB[j], i, pPlanesB[0][j], pSrcCur[0], xx << pixelsize_super_shift, nSrcPitches[0]);
-            use_block_y(pF[j], npF[j], WRefF[j], isUsableF[j], *mvClipF[j], i, pPlanesF[0][j], pSrcCur[0], xx << pixelsize_super_shift, nSrcPitches[0]);
-          }
-#ifndef LEVEL_IS_TEMPLATE
-          NORMWEIGHTS(WSrc, WRefB, WRefF);
-#else
-          norm_weights<level>(WSrc, WRefB, WRefF);
-#endif
-
-          // luma
-          DEGRAINLUMA(pDstCur[0] + (xx << pixelsize_super_shift), pDstCur[0] + lsb_offset_y + (xx << pixelsize_super_shift),
-            WidthHeightForC, nDstPitches[0], pSrcCur[0] + (xx << pixelsize_super_shift), nSrcPitches[0],
-            pB, npB, pF, npF,
-            WSrc, WRefB, WRefF
-          );
-
-          xx += nBlkSizeX; // xx: indexing offset
-
-          if (bx == nBlkX - 1 && nWidth_B < nWidth) // right non-covered region
-          {
-            // luma
-            BitBlt(pDstCur[0] + (nWidth_B << pixelsize_super_shift), nDstPitches[0],
-              pSrcCur[0] + (nWidth_B << pixelsize_super_shift), nSrcPitches[0], (nWidth - nWidth_B) << pixelsize_super_shift, nBlkSizeY, isse_flag);
-          }
-        }	// for bx
-
-        pDstCur[0] += (nBlkSizeY) * (nDstPitches[0]);
-        pSrcCur[0] += (nBlkSizeY) * (nSrcPitches[0]);
-
-        if (by == nBlkY - 1 && nHeight_B < nHeight) // bottom uncovered region
-        {
-          // luma
-          BitBlt(pDstCur[0], nDstPitches[0], pSrcCur[0], nSrcPitches[0], nWidth << pixelsize_super_shift, nHeight - nHeight_B, isse_flag);
-        }
-      }	// for by
-    }	// nOverlapX==0 && nOverlapY==0
-
-      // -----------------------------------------------------------------
-
-    else // overlap
-    {
-      unsigned short *pDstShort = DstShort;
-      int *pDstInt = DstInt;
-      const int tmpPitch = nBlkSizeX;
-
-      if (lsb_flag || pixelsize_super == 2)
-      {
-        MemZoneSet(reinterpret_cast<unsigned char*>(pDstInt), 0,
-          nWidth_B * sizeof(int), nHeight_B, 0, 0, dstIntPitch * sizeof(int));
-      }
-      else
-      {
-        MemZoneSet(reinterpret_cast<unsigned char*>(pDstShort), 0,
-          nWidth_B * sizeof(short), nHeight_B, 0, 0, dstShortPitch * sizeof(short));
-      }
-
-      for (int by = 0; by < nBlkY; by++)
-      {
-        int wby = ((by + nBlkY - 3) / (nBlkY - 2)) * 3;
-        int xx = 0; // logical offset. Mul by 2 for pixelsize_super==2. Don't mul for indexing int* array
-        for (int bx = 0; bx < nBlkX; bx++)
-        {
-          // select window
-          int wbx = (bx + nBlkX - 3) / (nBlkX - 2);
-          short *winOver = OverWins->GetWindow(wby + wbx);
-
-          int i = by*nBlkX + bx;
-
-          const BYTE * pB[MAX_DEGRAIN], *pF[MAX_DEGRAIN];
-          int npB[MAX_DEGRAIN], npF[MAX_DEGRAIN];
-          int WSrc;
-          int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
-
-          for (int j = 0; j < level; j++) {
-            use_block_y(pB[j], npB[j], WRefB[j], isUsableB[j], *mvClipB[j], i, pPlanesB[0][j], pSrcCur[0], xx << pixelsize_super_shift, nSrcPitches[0]);
-            use_block_y(pF[j], npF[j], WRefF[j], isUsableF[j], *mvClipF[j], i, pPlanesF[0][j], pSrcCur[0], xx << pixelsize_super_shift, nSrcPitches[0]);
-          }
-#ifndef LEVEL_IS_TEMPLATE
-          NORMWEIGHTS(WSrc, WRefB, WRefF);
-#else
-          norm_weights<level>(WSrc, WRefB, WRefF);
-#endif
-          // luma
-          DEGRAINLUMA(tmpBlock, tmpBlockLsb, WidthHeightForC, tmpPitch << pixelsize_super_shift, pSrcCur[0] + (xx << pixelsize_super_shift), nSrcPitches[0],
-            pB, npB, pF, npF,
-            WSrc,
-            WRefB, WRefF
-          );
-          if (lsb_flag)
-          {
-            OVERSLUMALSB(pDstInt + xx, dstIntPitch, tmpBlock, tmpBlockLsb, tmpPitch, winOver, nBlkSizeX);
-          }
-          else if (pixelsize_super == 1)
-          {
-            OVERSLUMA(pDstShort + xx, dstShortPitch, tmpBlock, tmpPitch, winOver, nBlkSizeX);
-          }
-          else if (pixelsize_super == 2) {
-            OVERSLUMA16((uint16_t *)(pDstInt + xx), dstIntPitch, tmpBlock, tmpPitch << pixelsize_super_shift, winOver, nBlkSizeX);
-          }
-
-          xx += (nBlkSizeX - nOverlapX);
-        }	// for bx
-
-        pSrcCur[0] += (nBlkSizeY - nOverlapY) * (nSrcPitches[0]); // byte pointer
-        pDstShort += (nBlkSizeY - nOverlapY) * dstShortPitch; // short pointer
-        pDstInt += (nBlkSizeY - nOverlapY) * dstIntPitch; // int pointer
-      }	// for by
-      if (lsb_flag)
-      {
-        Short2BytesLsb(pDst[0], pDst[0] + lsb_offset_y, nDstPitches[0], DstInt, dstIntPitch, nWidth_B, nHeight_B);
-      }
-      else if (pixelsize_super == 1)
-      {
-        if (isse_flag)
-          Short2Bytes_sse2(pDst[0], nDstPitches[0], DstShort, dstShortPitch, nWidth_B, nHeight_B);
-        else
-          Short2Bytes(pDst[0], nDstPitches[0], DstShort, dstShortPitch, nWidth_B, nHeight_B);
-      }
-      else if (pixelsize_super == 2)
-      {
-        Short2Bytes_Int32toWord16((uint16_t *)(pDst[0]), nDstPitches[0], DstInt, dstIntPitch, nWidth_B, nHeight_B, bits_per_pixel_super);
-        //Short2Bytes_Int32toWord16_sse4((uint16_t *)(pDst[0]), nDstPitches[0], DstInt, dstIntPitch, nWidth_B, nHeight_B, bits_per_pixel_super);
-      }
-      else if (pixelsize_super == 4)
-      {
-        Short2Bytes_FloatInInt32ArrayToFloat((float *)(pDst[0]), nDstPitches[0], DstInt, dstIntPitch, nWidth_B, nHeight_B);
-      }
-      if (nWidth_B < nWidth)
-      {
-        BitBlt(pDst[0] + (nWidth_B << pixelsize_super_shift), nDstPitches[0],
-          pSrc[0] + (nWidth_B << pixelsize_super_shift), nSrcPitches[0],
-          (nWidth - nWidth_B) << pixelsize_super_shift, nHeight_B, isse_flag);
-      }
-      if (nHeight_B < nHeight) // bottom noncovered region
-      {
-        BitBlt(pDst[0] + nHeight_B*nDstPitches[0], nDstPitches[0],
-          pSrc[0] + nHeight_B*nSrcPitches[0], nSrcPitches[0],
-          nWidth << pixelsize_super_shift, nHeight - nHeight_B, isse_flag);
-      }
-    }	// overlap - end
-
-    if (nLimit < (1 << bits_per_pixel_super) - 1)
-    {
-      if ((pixelsize_super == 1) && isse_flag)
-      {
-        LimitChanges_sse2(pDst[0], nDstPitches[0], pSrc[0], nSrcPitches[0], nWidth, nHeight, nLimit);
-      }
-      else
-      {
-        if (pixelsize_super == 1)
-          LimitChanges_c<uint8_t>(pDst[0], nDstPitches[0], pSrc[0], nSrcPitches[0], nWidth, nHeight, nLimit);
-        else
-          LimitChanges_c<uint16_t>(pDst[0], nDstPitches[0], pSrc[0], nSrcPitches[0], nWidth, nHeight, nLimit);
-      }
+      int a = (pSrc[i]) >> shift;
+      pDst[i] = min(max_pixel_value, a); // PF everyone can understand it
     }
+    pDst += nDstPitch;
+    pSrc += nSrcPitch;
   }
-};
+}
+
+template<typename pixel_t>
+void LimitChanges(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch, int nWidth, int nHeight, int nLimit)
+{
+  for (int h = 0; h<nHeight; h++)
+  {
+    for (int i = 0; i<nWidth; i++)
+      pDst[i] = (pixel_t)clamp((int)pDst[i], pSrc[i] - nLimit, pSrc[i] + nLimit);
+    pDst += nDstPitch;
+    pSrc += nSrcPitch;
+  }
+}
 
 struct BlockData
 {
@@ -2854,7 +2894,7 @@ class KMVClip
     const int nOverlapX;
     const int nOverlapY;
 
-    MVData* pdata;
+    const MVData* pdata;
 
     KMVFrame(int nBlkX, int nBlkY, int nBlkSizeX, int nBlkSizeY, int nOverlapX, int nOverlapY)
       : nBlkX(nBlkX)
@@ -2867,20 +2907,33 @@ class KMVClip
       //
     }
 
-    void SetData(MVData* _pdata)
+    void SetData(const MVData* _pdata)
     {
       pdata = _pdata;
     }
 
-    BlockData GetBlock(int ix, int iy)
+    BlockData GetBlock(int ix, int iy) const
     {
       int i = ix + iy * nBlkX;
       BlockData ret = { ix * (nBlkSizeX - nOverlapX), iy * (nBlkSizeY - nOverlapY), pdata->data[i] };
       return ret;
     }
+
+    bool IsSceneChange(int nTh1, int nTh2) const
+    {
+      int sum = 0;
+      for (int iy = 0; iy < nBlkY; ++iy) {
+        for (int ix = 0; ix < nBlkX; ++ix) {
+          int i = ix + iy * nBlkX;
+          sum += (pdata->data[i].sad > nTh1) ? 1 : 0;
+        }
+      }
+
+      return (sum > nTh2);
+    }
   };
 
-  const int nLevels;
+  const KMVParam* params;
   std::unique_ptr<std::unique_ptr<KMVFrame>[]> pFrames;
 
   int nSCD1;
@@ -2890,7 +2943,7 @@ class KMVClip
 
 public:
   KMVClip(const KMVParam* params, int _nSCD1, int _nSCD2)
-    : nLevels(params->levelInfo.size())
+    : params(params)
     , pFrames(new std::unique_ptr<KMVFrame>[params->levelInfo.size()])
   {
 
@@ -2902,7 +2955,7 @@ public:
     nSCD1 = (uint64_t)nSCD1 * (params->nBlkSizeX * params->nBlkSizeY) / (8 * 8); // this is normalized to 8x8 block sizes
     if (params->chroma) {
       nSCD1 += ScaleSadChroma(nSCD1 * 2, params->chromaSADScale) / 4; // base: YV12
-      // nSCD1 += nSCD1 / (xRatioUV * yRatioUV) * 2; // Old method: *2: two additional planes: UV
+                                                                      // nSCD1 += nSCD1 / (xRatioUV * yRatioUV) * 2; // Old method: *2: two additional planes: UV
     }
 
     // Threshold which sets how many blocks have to change for the frame to be considered as a scene change. 
@@ -2910,7 +2963,7 @@ public:
     int nBlkCount = params->levelInfo[0].nBlkX * params->levelInfo[0].nBlkY;
     nSCD2 = _nSCD2 * nBlkCount / 256;
 
-    for (int i = 0; i < nLevels; ++i) {
+    for (int i = 0; i < params->nLevels; ++i) {
       LevelInfo info = params->levelInfo[i];
       pFrames[i] = std::unique_ptr<KMVFrame>(new KMVFrame(
         info.nBlkX, info.nBlkY,
@@ -2918,19 +2971,386 @@ public:
     }
   }
 
-  void SetData(MVDataGroup* pgroup)
+  void SetData(const MVDataGroup* pgroup)
   {
-    isValid = pgroup->isValid;
-    MVData* pdata = reinterpret_cast<MVData*>(pgroup->data);
-    for (int i = 0; i < nLevels; ++i) {
+    isValid = pgroup->isValid != 0;
+    const MVData* pdata = reinterpret_cast<const MVData*>(pgroup->data);
+    for (int i = 0; i < params->nLevels; ++i) {
       pFrames[i]->SetData(pdata);
-      pdata = reinterpret_cast<MVData*>(&pdata->data[pdata->nCount]);
+      pdata = reinterpret_cast<const MVData*>(&pdata->data[pdata->nCount]);
     }
   }
 
-  BlockData GetBlock(int nLevel, int ix, int iy)
+  int GetThSCD1() const { return nSCD1; }
+  int GetThSCD2() const { return nSCD2; }
+
+  BlockData GetBlock(int nLevel, int ix, int iy) const
   {
     pFrames[nLevel]->GetBlock(ix, iy);
+  }
+
+  // usable_flag is an input and output variable, it must be initialised
+  // before calling the function.
+  PVideoFrame GetRefFrame(bool &usable_flag, PClip &super, int n, IScriptEnvironment *env)
+  {
+    usable_flag = isValid && !pFrames[0]->IsSceneChange(nSCD1, nSCD2);
+    if (usable_flag)
+    {
+      int ref_index;
+      int off = params->nDeltaFrame;
+      if (off > 0)
+      {
+        off *= params->isBackward ? 1 : -1;
+        ref_index = n + off;
+      }
+      else
+      {
+        ref_index = -off;
+      }
+
+      const ::VideoInfo &vi_super = super->GetVideoInfo();
+      if (ref_index < 0 || ref_index >= vi_super.num_frames)
+      {
+        usable_flag = false;
+      }
+      else {
+        return super->GetFrame(ref_index, env);
+      }
+    }
+    return PVideoFrame();
+  }
+};
+
+int DegrainWeight(int thSAD, int blockSAD)
+{
+  // Returning directly prevents a divide by 0 if thSAD == blockSAD == 0.
+  if (thSAD <= blockSAD)
+  {
+    return 0;
+  }
+  // here thSAD > blockSAD
+  if (thSAD <= 0x7FFF) { // 170507 avoid overflow even in 8 bits! in sqr
+                         // can occur even for 32x32 block size
+                         // problem emerged in blksize=64 tests
+    const int thSAD2 = thSAD    * thSAD;
+    const int blockSAD2 = blockSAD * blockSAD;
+    const int num = thSAD2 - blockSAD2;
+    const int den = thSAD2 + blockSAD2;
+    // res = num*256/den
+    const int      res = int((num < (1 << 23))
+      ? (num << 8) / den      // small numerator
+      : num / (den >> 8)); // very large numerator, prevent overflow
+    return (res);
+  }
+  else {
+    // int overflows with 8+ bits_per_pixel scaled power of 2
+    /* float is faster
+    const int64_t sq_thSAD = int64_t(thSAD) * thSAD;
+    const int64_t sq_blockSAD = int64_t(blockSAD) * blockSAD;
+    return (int)((256*(sq_thSAD - sq_blockSAD)) / (sq_thSAD + sq_blockSAD));
+    */
+    const float sq_thSAD = float(thSAD) * float(thSAD); // std::powf(float(thSAD), 2.0f); 
+                                                        // smart compiler makes x*x, VS2015 calls __libm_sse2_pow_precise, way too slow
+    const float sq_blockSAD = float(blockSAD) * float(blockSAD); // std::powf(float(blockSAD), 2.0f);
+    return (int)(256.0f*(sq_thSAD - sq_blockSAD) / (sq_thSAD + sq_blockSAD));
+  }
+}
+
+class KMDegrainCoreBase
+{
+public:
+  virtual ~KMDegrainCoreBase() { }
+};
+
+template <typename pixel_t>
+class KMDegrainCore : public KMDegrainCoreBase
+{
+  typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
+
+  typedef void(*NormWeightsFunction)(int &WSrc, int(&WRefB)[MAX_DEGRAIN], int(&WRefF)[MAX_DEGRAIN]);
+  typedef void(*OverlapFunction)(tmp_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch, short *pWin, int nWinPitch);
+  typedef void(*DegrainFunction)(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch,
+    const pixel_t *pRefB[MAX_DEGRAIN], const pixel_t *pRefF[MAX_DEGRAIN], int nRefPitch,
+    int WSrc, int WRefB[MAX_DEGRAIN], int WRefF[MAX_DEGRAIN]);
+
+  const KMVParam* params;
+  const bool isUV;
+  const int thSAD;
+  const int nLimit;
+
+  const KMVClip* mvClipB[MAX_DEGRAIN];
+  const KMVClip* mvClipF[MAX_DEGRAIN];
+
+  const OverlapWindows* OverWins;
+
+  std::unique_ptr<pixel_t[]> tmpBlock;
+  std::unique_ptr<tmp_t[]> tmpDst;
+
+  NormWeightsFunction NORMWEIGHTS;
+  OverlapFunction OVERLAP;
+  DegrainFunction DEGRAIN;
+
+  static NormWeightsFunction GetNormWeightsFunction(int level) {
+    switch (level) {
+    case 1: return norm_weights<1>;
+    case 2: return norm_weights<2>;
+    //case 3: return norm_weights<3>;
+    //case 4: return norm_weights<4>;
+    //case 5: return norm_weights<5>;
+    //case 6: return norm_weights<6>;
+    }
+  }
+
+  static OverlapFunction GetOverlapFunction(int blockWidth, int blockHeight)
+  {
+    if (blockWidth == 8 && blockHeight == 8) {
+      return Overlaps_C<pixel_t, 8, 8>;
+    }
+    if (blockWidth == 16 && blockHeight == 16) {
+      return Overlaps_C<pixel_t, 16, 16>;
+    }
+    if (blockWidth == 32 && blockHeight == 32) {
+      return Overlaps_C<pixel_t, 32, 32>;
+    }
+    return nullptr;
+  }
+
+  template <int level>
+  static DegrainFunction GetDegrainFunction(int blockWidth, int blockHeight)
+  {
+    if (blockWidth == 8 && blockHeight == 8) {
+      return Degrain1to6_C<pixel_t, level, 8, 8>;
+    }
+    if (blockWidth == 16 && blockHeight == 16) {
+      return Degrain1to6_C<pixel_t, level, 16, 16>;
+    }
+    if (blockWidth == 32 && blockHeight == 32) {
+      return Degrain1to6_C<pixel_t, level, 32, 32>;
+    }
+    return nullptr;
+  }
+
+  static DegrainFunction GetDegrainFunction(int level, int blockWidth, int blockHeight) {
+    switch (level) {
+    case 1: return GetDegrainFunction<1>(blockWidth, blockHeight);
+    case 2: return GetDegrainFunction<2>(blockWidth, blockHeight);
+    //case 3: return GetDegrainFunction<3>(blockWidth, blockHeight);
+    //case 4: return GetDegrainFunction<4>(blockWidth, blockHeight);
+    //case 5: return GetDegrainFunction<5>(blockWidth, blockHeight);
+    //case 6: return GetDegrainFunction<6>(blockWidth, blockHeight);
+    }
+  }
+
+  void	use_block(
+    const pixel_t * &p, int &WRef,
+    bool isUsable, const KMVClip &mvclip, int ix, int iy, 
+    const KMPlane<pixel_t> *pPlane, const pixel_t *pSrcCur,
+    int thSAD, int nLogxRatio, int nLogyRatio,
+    int nPel, int xx)
+  {
+    if (isUsable)
+    {
+      const BlockData block = mvclip.GetBlock(0, ix, iy);
+      int blx = block.x * nPel + block.vector.x;
+      int bly = block.y * nPel + block.vector.y;
+      p = pPlane->GetPointer(blx >> nLogxRatio, bly >> nLogyRatio);
+      WRef = DegrainWeight(thSAD, block.vector.sad);
+    }
+    else
+    {
+      p = pSrcCur + xx;
+      WRef = 0;
+    }
+  }
+public:
+  KMDegrainCore(const KMVParam* params,
+    bool isUV, int thSAD, int nLimit,
+    KMVClip* mvClipB_[MAX_DEGRAIN],
+    KMVClip* mvClipF_[MAX_DEGRAIN],
+    const OverlapWindows* OverWins, IScriptEnvironment* env)
+    : params(params)
+    , isUV(isUV)
+    , thSAD(thSAD)
+    , nLimit(nLimit)
+    , mvClipB()
+    , mvClipF()
+    , OverWins(OverWins)
+    , tmpBlock(new pixel_t[MAX_BLOCK_SIZE * MAX_BLOCK_SIZE])
+    , tmpDst(new tmp_t[params->nWidth * params->nHeight])
+  {
+    const int level = params->nLevels;
+    const int nBlkSizeX = params->nBlkSizeX;
+    const int nBlkSizeY = params->nBlkSizeY;
+    const int nLogxRatio = isUV ? params->xRatioUV : 0;
+    const int nLogyRatio = isUV ? params->yRatioUV : 0;
+
+    const int blockWidth = nBlkSizeX >> nLogxRatio;
+    const int blockHeight = nBlkSizeY >> nLogyRatio;
+
+    for (int i = 0; i < level; ++i) {
+      mvClipB[i] = mvClipB_[i];
+      mvClipF[i] = mvClipF_[i];
+    }
+
+    NORMWEIGHTS = GetNormWeightsFunction(level);
+    OVERLAP = GetOverlapFunction(blockWidth, blockHeight);
+    DEGRAIN = GetDegrainFunction(level, blockWidth, blockHeight);
+
+    if (!NORMWEIGHTS)
+      env->ThrowError("KMDegrain%d : no valid NORMWEIGHTS function for %dx%d, level=%d", level, blockWidth, blockHeight, level);
+    if (!OVERLAP)
+      env->ThrowError("KMDegrain%d : no valid OVERSCHROMA function for %dx%d, level=%d", level, blockWidth, blockHeight, level);
+    if (!DEGRAIN)
+      env->ThrowError("KMDegrain%d : no valid DEGRAINLUMA function for %dx%d, level=%d", level, blockWidth, blockHeight, level);
+  }
+
+  void Proc(
+    bool enabled,
+    const pixel_t* src, int nSrcPitch,
+    pixel_t* dst, int nDstPitch,
+    const KMPlane<pixel_t>* pPlanesB[MAX_DEGRAIN],
+    const KMPlane<pixel_t>* pPlanesF[MAX_DEGRAIN],
+    bool isUsableB[MAX_DEGRAIN],
+    bool isUsableF[MAX_DEGRAIN]
+  )
+  {
+    const int level = params->nLevels;
+    const int nWidth = params->nWidth;
+    const int nHeight = params->nHeight;
+    const int nOverlapX = params->nOverlapX;
+    const int nOverlapY = params->nOverlapY;
+    const int nBlkX = params->levelInfo[0].nBlkX;
+    const int nBlkY = params->levelInfo[0].nBlkY;
+    const int nBlkSizeX = params->nBlkSizeX;
+    const int nBlkSizeY = params->nBlkSizeY;
+    const int nPixelShift = params->nPixelShift;
+    const int nBitsPerPixel = params->nBitsPerPixel;
+    const int nPel = params->nPel;
+
+    const int nWidth_B = nBlkX*(nBlkSizeX - nOverlapX) + nOverlapX;
+    const int nHeight_B = nBlkY*(nBlkSizeY - nOverlapY) + nOverlapY;
+    const int nLogxRatio = isUV ? params->xRatioUV : 0;
+    const int nLogyRatio = isUV ? params->yRatioUV : 0;
+
+    const int nSuperPitch = pPlanesB[0]->GetPitch();
+
+    if (!enabled) {
+      Copy(dst, nDstPitch, src, nSrcPitch, nWidth >> nLogxRatio, nHeight >> nLogyRatio);
+      return;
+    }
+
+    if (nOverlapX == 0 && nOverlapY == 0)
+    {
+      const pixel_t* pSrcCur = src;
+      pixel_t* pDstCur = dst;
+
+      for (int by = 0; by < nBlkY; by++)
+      {
+        int xx = 0;
+        for (int bx = 0; bx < nBlkX; bx++)
+        {
+          const pixel_t * pB[MAX_DEGRAIN], *pF[MAX_DEGRAIN];
+          int WSrc;
+          int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
+
+          for (int j = 0; j < level; j++) {
+            use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
+            use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
+          }
+
+          NORMWEIGHTS(WSrc, WRefB, WRefF);
+
+          DEGRAIN(pDstCur + xx, nDstPitch, pSrcCur + xx, nSrcPitch,
+            pB, pF, nSuperPitch, WSrc, WRefB, WRefF);
+
+          xx += (nBlkSizeX >> nLogxRatio);
+
+          if (bx == nBlkX - 1 && nWidth_B < nWidth) // right non-covered region
+          {
+            Copy(pDstCur + (nWidth_B >> nLogxRatio), nDstPitch,
+              pSrcCur + (nWidth_B >> nLogxRatio), nSrcPitch,
+              (nWidth - nWidth_B) >> nLogxRatio,
+              nBlkSizeY >> nLogyRatio);
+          }
+        }	// for bx
+
+        pDstCur += (nBlkSizeY >> nLogyRatio) * nDstPitch;
+        pSrcCur += (nBlkSizeY >> nLogyRatio) * nSrcPitch;
+
+        if (by == nBlkY - 1 && nHeight_B < nHeight) // bottom uncovered region
+        {
+          Copy(pDstCur, nDstPitch, pSrcCur, nSrcPitch,
+            nWidth >> nLogxRatio, (nHeight - nHeight_B) >> nLogyRatio);
+        }
+      }	// for by
+    }	// nOverlapX==0 && nOverlapY==0
+
+    else // overlap
+    {
+      const pixel_t* pSrcCur = src;
+
+      pixel_t *pTmpBlock = tmpBlock.get();
+      const int tmpBlockPitch = nBlkSizeX;
+
+      tmp_t *pTmpDst = tmpDst.get();
+      const int tmpDstPitch = nWidth;
+
+      MemZoneSet<tmp_t>(pTmpDst, tmpDstPitch, 0, nWidth_B >> nLogxRatio, nHeight_B >> nLogyRatio);
+
+      for (int by = 0; by < nBlkY; by++)
+      {
+        int xx = 0;
+        int wby = ((by + nBlkY - 3) / (nBlkY - 2)) * 3;
+        for (int bx = 0; bx < nBlkX; bx++)
+        {
+          // select window
+          int wbx = (bx + nBlkX - 3) / (nBlkX - 2);
+          short *winOver = OverWins->GetWindow(wby + wbx);
+
+          const BYTE * pB[MAX_DEGRAIN], *pF[MAX_DEGRAIN];
+          int npB[MAX_DEGRAIN], npF[MAX_DEGRAIN];
+          int WSrc;
+          int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
+
+          for (int j = 0; j < level; j++) {
+            use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
+            use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
+          }
+
+          NORMWEIGHTS(WSrc, WRefB, WRefF);
+
+          DEGRAIN(pTmpBlock, tmpBlockPitch, pSrcCur + xx, nSrcPitch,
+            pB, pF, nSuperPitch, WSrc, WRefB, WRefF);
+
+          OVERLAP(pTmpDst + xx, tmpDstPitch, pTmpBlock, tmpBlockPitch, winOver, nBlkSizeX >> nLogxRatio);
+
+          xx += ((nBlkSizeX - nOverlapX) >> nLogxRatio);
+        }	// for bx
+
+        pSrcCur += ((nBlkSizeY - nOverlapY) >> nLogyRatio) * nSrcPitch;
+        pTmpDst += ((nBlkSizeY - nOverlapY) >> nLogyRatio) * tmpDstPitch;
+      }	// for by
+
+      Short2Bytes(src, nDstPitch, pTmpDst, tmpDstPitch, nWidth_B >> nLogxRatio, nHeight_B >> nLogyRatio, nBitsPerPixel);
+
+      if (nWidth_B < nWidth)
+      {
+        Copy(dst + (nWidth_B >> nLogxRatio),
+          nDstPitch, src + (nWidth_B >> nLogxRatio), nSrcPitch,
+          (nWidth - nWidth_B) >> nLogxRatio, nHeight_B >> nLogyRatio);
+      }
+      if (nHeight_B < nHeight) // bottom noncovered region
+      {
+        Copy(dst + (nHeight_B*nDstPitch >> nLogyRatio), nDstPitch,
+          src + (nHeight_B*nSrcPitch >> nLogyRatio), nSrcPitch,
+          (nWidth >> nLogxRatio), (nHeight - nHeight_B) >> nLogyRatio);
+      }
+    }	// overlap - end
+
+    if (nLimit < (1 << nBitsPerPixel) - 1)
+    {
+      LimitChanges(dst, nDstPitch, src, nSrcPitch, nWidth >> nLogxRatio, nHeight >> nLogyRatio, nLimit);
+    }
   }
 };
 
@@ -2940,8 +3360,38 @@ class KMDegrainX : public GenericVideoFilter
 
   int level;
 
+  PClip super;
+  PClip rawClipB[MAX_DEGRAIN];
+  PClip rawClipF[MAX_DEGRAIN];
+
   std::unique_ptr<KMVClip> mvClipB[MAX_DEGRAIN];
   std::unique_ptr<KMVClip> mvClipF[MAX_DEGRAIN];
+
+  int thSAD;
+  int thSADC;
+
+  std::unique_ptr<OverlapWindows> OverWins;
+  std::unique_ptr<OverlapWindows> OverWinsUV;
+
+  std::unique_ptr<KMDegrainCoreBase> core;
+  std::unique_ptr<KMDegrainCoreBase> coreUV;
+
+  KMDegrainCoreBase* CreateCore(
+    bool isUV, int nLimit,
+    KMVClip* mvClipB[MAX_DEGRAIN],
+    KMVClip* mvClipF[MAX_DEGRAIN],
+    IScriptEnvironment* env)
+  {
+    int th = isUV ? thSADC : thSAD;
+    const OverlapWindows* wins = (isUV ? OverWinsUV : OverWins).get();
+
+    if (params->nPixelSize == 1) {
+      new KMDegrainCore<uint8_t>(params, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
+    }
+    else {
+      new KMDegrainCore<uint16_t>(params, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
+    }
+  }
 
 public:
   KMDegrainX(PClip child, PClip super,
@@ -2952,19 +3402,80 @@ public:
     : GenericVideoFilter(child)
     , params(KMVParam::GetParam(mvbw->GetVideoInfo(), env))
     , level(_level)
+    , super(super)
+    , OverWins()
+    , OverWinsUV()
   {
-    PClip mvb[] = { mvbw, mvbw2 };
-    PClip mvf[] = { mvfw, mvfw2 };
+    rawClipB[0] = mvbw;
+    rawClipF[0] = mvfw;
+    rawClipB[1] = mvbw2;
+    rawClipF[1] = mvfw2;
+
+    KMVClip *pmvClipB[MAX_DEGRAIN];
+    KMVClip *pmvClipF[MAX_DEGRAIN];
 
     for (int i = 0; i < level; ++i) {
-      mvClipB[i] = std::unique_ptr<KMVClip>(new KMVClip(KMVParam::GetParam(mvb[i]->GetVideoInfo(), env)));
-      mvClipB[i] = std::unique_ptr<KMVClip>(new KMVClip(KMVParam::GetParam(mvf[i]->GetVideoInfo(), env)));
+      mvClipB[i] = std::unique_ptr<KMVClip>(pmvClipB[i] =
+        new KMVClip(KMVParam::GetParam(rawClipB[i]->GetVideoInfo(), env), _nSCD1, _nSCD2));
+      mvClipF[i] = std::unique_ptr<KMVClip>(pmvClipF[i] =
+        new KMVClip(KMVParam::GetParam(rawClipF[i]->GetVideoInfo(), env), _nSCD1, _nSCD2));
     }
+
+    // e.g. 10000*999999 is too much
+    thSAD = (uint64_t)_thSAD * mvClipB[0]->GetThSCD1() / _nSCD1; // normalize to block SAD
+    thSADC = (uint64_t)_thSADC * mvClipB[0]->GetThSCD1() / _nSCD1; // chroma
+    // nSCD1 is already scaled in MVClip constructor, no further scale is needed
+
+    const int nOverlapX = params->nOverlapX;
+    const int nOverlapY = params->nOverlapY;
+    const int nBlkSizeX = params->nBlkSizeX;
+    const int nBlkSizeY = params->nBlkSizeY;
+    const int nLogxRatioUV = params->xRatioUV;
+    const int nLogyRatioUV = params->yRatioUV;
+
+    if (nOverlapX > 0 || nOverlapY > 0)
+    {
+      OverWins = std::unique_ptr<OverlapWindows>(
+        new OverlapWindows(nBlkSizeX, nBlkSizeY, nOverlapX, nOverlapY));
+      OverWinsUV = std::unique_ptr<OverlapWindows>(
+        new OverlapWindows(nBlkSizeX >> nLogxRatioUV, nBlkSizeY >> nLogyRatioUV, nOverlapX >> nLogxRatioUV, nOverlapY >> nLogyRatioUV));
+    }
+
+    core = std::unique_ptr<KMDegrainCoreBase>(
+      CreateCore(false, _nLimit, pmvClipB, pmvClipF, env));
+    coreUV = std::unique_ptr<KMDegrainCoreBase>(
+      CreateCore(false, _nLimitC, pmvClipB, pmvClipF, env));
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
   {
-    //
+    bool isUsableF[MAX_DEGRAIN];
+    PVideoFrame mvF[MAX_DEGRAIN];
+    PVideoFrame refF[MAX_DEGRAIN];
+
+    // mv,refŽæ“¾
+    for (int j = level - 1; j >= 0; j--)
+    {
+      mvF[j] = rawClipF[j]->GetFrame(n, env);
+      mvClipF[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvF[j]->GetReadPtr()));
+      refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
+    }
+
+    bool isUsableB[MAX_DEGRAIN];
+    PVideoFrame mvB[MAX_DEGRAIN];
+    PVideoFrame refB[MAX_DEGRAIN];
+
+    for (int j = 0; j < level; j++)
+    {
+      mvB[j] = rawClipB[j]->GetFrame(n, env);
+      mvClipB[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvB[j]->GetReadPtr()));
+      refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
+    }
+
+    PVideoFrame	src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    // TODO:
   }
 };
 
