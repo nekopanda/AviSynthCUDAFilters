@@ -889,6 +889,17 @@ public:
   }
 };
 
+void SetSuperFrameTarget(KMSuperFrame* sf, PVideoFrame& frame, int nPixelShift)
+{
+  if (!frame) return;
+  const BYTE* pY = frame->GetReadPtr(PLANAR_Y);
+  const BYTE* pU = frame->GetReadPtr(PLANAR_U);
+  const BYTE* pV = frame->GetReadPtr(PLANAR_V);
+  int nPitchY = frame->GetPitch(PLANAR_Y) >> nPixelShift;
+  int nPitchUV = frame->GetPitch(PLANAR_U) >> nPixelShift;
+  sf->SetTarget((BYTE*)pY, nPitchY, (BYTE*)pU, nPitchUV, (BYTE*)pV, nPitchUV);
+}
+
 #pragma endregion
 
 #pragma region Analyze
@@ -2389,7 +2400,8 @@ class KMSuperCheck : public GenericVideoFilter
           for (int x = 0; x < w; ++x) {
             pixel_t kv = kptr[x + y * nPitch];
             pixel_t mv = mptr[x + y * nPitch];
-            if (std::abs(kv - mv) > 1) {
+            //if (std::abs(kv - mv) > 1) {
+            if (kv != mv) {
               env->ThrowError("ERROR !!!");
             }
           }
@@ -2455,45 +2467,6 @@ class KMAnalyzeCheck : public GenericVideoFilter
   PClip mvv;
 
   const KMVParam* params;
-
-  template <typename pixel_t>
-  void CheckPlane(const KMPlane<pixel_t>* kPlane, const KMPlane<pixel_t>* mPlane)
-  {
-    int nPel = kPlane->GetNPel();
-    int nPlanes = nPel * nPel;
-    int nPitch = kPlane->GetPitch();
-    int w = kPlane->GetExtendedWidth();
-    int h = kPlane->GetExtendedHeight();
-
-    // サブピクセルループ
-    for (int sy = 0; sy < nPel; ++sy) {
-      for (int sx = 0; sx < nPel; ++sx) {
-        const pixel_t* kptr = kPlane->GetAbsolutePointer(sx, sy);
-        const pixel_t* mptr = mPlane->GetAbsolutePointer(sx, sy);
-        // 画素ループ
-        for (int y = 0; y < h; ++y) {
-          for (int x = 0; x < w; ++x) {
-            pixel_t kv = kptr[x + y * nPitch];
-            pixel_t mv = mptr[x + y * nPitch];
-            if (std::abs(kv - mv) > 1) {
-              //
-            }
-          }
-        }
-      }
-    }
-
-  }
-
-  void CheckPlane(const KMPlaneBase* kPlane, const KMPlaneBase* mPlane)
-  {
-    if (params->nPixelSize == 1) {
-      CheckPlane<uint8_t>(static_cast<const KMPlane<uint8_t>*>(kPlane), static_cast<const KMPlane<uint8_t>*>(mPlane));
-    }
-    else {
-      CheckPlane<uint16_t>(static_cast<const KMPlane<uint16_t>*>(kPlane), static_cast<const KMPlane<uint16_t>*>(mPlane));
-    }
-  }
 
   void GetMVData(int n, const int*& pMv, int& data_size, IScriptEnvironment* env)
   {
@@ -2788,6 +2761,22 @@ void Overlaps_C(typename std::conditional <sizeof(pixel_t) == 1, short, int>::ty
   }
 }
 
+template <typename pixel_t>
+void (*GetOverlapFunction(int blockWidth, int blockHeight))(typename std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
+  int nDstPitch, const pixel_t *pSrc, int nSrcPitch, short *pWin, int nWinPitch)
+{
+  if (blockWidth == 8 && blockHeight == 8) {
+    return Overlaps_C<pixel_t, 8, 8>;
+  }
+  if (blockWidth == 16 && blockHeight == 16) {
+    return Overlaps_C<pixel_t, 16, 16>;
+  }
+  if (blockWidth == 32 && blockHeight == 32) {
+    return Overlaps_C<pixel_t, 32, 32>;
+  }
+  return nullptr;
+}
+
 template<typename pixel_t, int delta, int blockWidth, int blockHeight>
 void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch,
   const pixel_t *pRefB[MAX_DEGRAIN], const pixel_t *pRefF[MAX_DEGRAIN], int nRefPitch,
@@ -3018,6 +3007,22 @@ public:
     return pFrames[nLevel]->GetBlock(ix, iy);
   }
 
+  int GetRefFrameIndex(int n) const
+  {
+    int ref_index;
+    int off = params->nDeltaFrame;
+    if (off > 0)
+    {
+      off *= params->isBackward ? 1 : -1;
+      ref_index = n + off;
+    }
+    else
+    {
+      ref_index = -off;
+    }
+    return ref_index;
+  }
+
   // usable_flag is an input and output variable, it must be initialised
   // before calling the function.
   PVideoFrame GetRefFrame(bool &usable_flag, PClip &super, int n, IScriptEnvironment *env)
@@ -3025,18 +3030,7 @@ public:
     usable_flag = isValid && !pFrames[0]->IsSceneChange(nSCD1, nSCD2);
     if (usable_flag)
     {
-      int ref_index;
-      int off = params->nDeltaFrame;
-      if (off > 0)
-      {
-        off *= params->isBackward ? 1 : -1;
-        ref_index = n + off;
-      }
-      else
-      {
-        ref_index = -off;
-      }
-
+      int ref_index = GetRefFrameIndex(n);
       const ::VideoInfo &vi_super = super->GetVideoInfo();
       if (ref_index < 0 || ref_index >= vi_super.num_frames)
       {
@@ -3132,20 +3126,6 @@ class KMDegrainCore : public KMDegrainCoreBase
     return nullptr;
   }
 
-  static OverlapFunction GetOverlapFunction(int blockWidth, int blockHeight)
-  {
-    if (blockWidth == 8 && blockHeight == 8) {
-      return Overlaps_C<pixel_t, 8, 8>;
-    }
-    if (blockWidth == 16 && blockHeight == 16) {
-      return Overlaps_C<pixel_t, 16, 16>;
-    }
-    if (blockWidth == 32 && blockHeight == 32) {
-      return Overlaps_C<pixel_t, 32, 32>;
-    }
-    return nullptr;
-  }
-
   template <int delta>
   static DegrainFunction GetDegrainFunction(int blockWidth, int blockHeight)
   {
@@ -3173,12 +3153,32 @@ class KMDegrainCore : public KMDegrainCoreBase
     return nullptr;
   }
 
-  void	use_block(
+  bool get_super_info(int& nSuperPitch, const pixel_t*& pDummyPlane,
+    const KMPlane<pixel_t>* pPlanesB[MAX_DEGRAIN],
+    const KMPlane<pixel_t>* pPlanesF[MAX_DEGRAIN])
+  {
+    for (int j = 0; j < delta; j++) {
+      if (pPlanesB[j] != nullptr) {
+        nSuperPitch = pPlanesB[j]->GetPitch();
+        pDummyPlane = pPlanesB[j]->GetPointer(0, 0);
+        return true;
+      }
+      if (pPlanesF[j] != nullptr) {
+        nSuperPitch = pPlanesF[j]->GetPitch();
+        pDummyPlane = pPlanesF[j]->GetPointer(0, 0);
+        return true;
+      }
+    }
+    // 有効な参照フレームが1枚もない
+    return false;
+  }
+
+  void use_block(
     const pixel_t * &p, int &WRef,
     bool isUsable, const KMVClip &mvclip, int ix, int iy, 
-    const KMPlane<pixel_t> *pPlane, const pixel_t *pSrcCur,
+    const KMPlane<pixel_t> *pPlane, const pixel_t *pDummyPlane,
     int thSAD, int nLogxRatio, int nLogyRatio,
-    int nPel, int xx)
+    int nPel)
   {
     if (isUsable)
     {
@@ -3190,7 +3190,7 @@ class KMDegrainCore : public KMDegrainCoreBase
     }
     else
     {
-      p = pSrcCur + xx;
+      p = pDummyPlane;
       WRef = 0;
     }
   }
@@ -3226,7 +3226,7 @@ public:
     }
 
     NORMWEIGHTS = GetNormWeightsFunction(delta);
-    OVERLAP = GetOverlapFunction(blockWidth, blockHeight);
+    OVERLAP = GetOverlapFunction<pixel_t>(blockWidth, blockHeight);
     DEGRAIN = GetDegrainFunction(delta, blockWidth, blockHeight);
 
     if (!NORMWEIGHTS)
@@ -3264,7 +3264,10 @@ public:
     const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
     const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
 
-    const int nSuperPitch = pPlanesB[0]->GetPitch();
+    int nSuperPitch;
+    const pixel_t* pDummyPlane;
+
+    enabled &= get_super_info(nSuperPitch, pDummyPlane, pPlanesB, pPlanesF);
 
     if (!enabled) {
       Copy(dst, nDstPitch, src, nSrcPitch, nWidth >> nLogxRatio, nHeight >> nLogyRatio);
@@ -3286,8 +3289,8 @@ public:
           int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
 
           for (int j = 0; j < delta; j++) {
-            use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
-            use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
+            use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pDummyPlane, thSAD, nLogxRatio, nLogyRatio, nPel);
+            use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pDummyPlane, thSAD, nLogxRatio, nLogyRatio, nPel);
           }
 
           NORMWEIGHTS(WSrc, WRefB, WRefF);
@@ -3344,8 +3347,8 @@ public:
           int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
 
           for (int j = 0; j < delta; j++) {
-            use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
-            use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
+            use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pDummyPlane, thSAD, nLogxRatio, nLogyRatio, nPel);
+            use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pDummyPlane, thSAD, nLogxRatio, nLogyRatio, nPel);
           }
 
           NORMWEIGHTS(WSrc, WRefB, WRefF);
@@ -3426,17 +3429,6 @@ class KMDegrainX : public GenericVideoFilter
     else {
       return new KMDegrainCore<uint16_t>(params, delta, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
     }
-  }
-
-  void SetSuperFrameTarget(KMSuperFrame* sf, PVideoFrame& frame)
-  {
-    if (!frame) return;
-    const BYTE* pY = frame->GetReadPtr(PLANAR_Y);
-    const BYTE* pU = frame->GetReadPtr(PLANAR_U);
-    const BYTE* pV = frame->GetReadPtr(PLANAR_V);
-    int nPitchY = frame->GetPitch(PLANAR_Y) >> params->nPixelShift;
-    int nPitchUV = frame->GetPitch(PLANAR_U) >> params->nPixelShift;
-    sf->SetTarget((BYTE*)pY, nPitchY, (BYTE*)pU, nPitchUV, (BYTE*)pV, nPitchUV);
   }
 
   template <typename pixel_t>
@@ -3570,7 +3562,7 @@ public:
       mvF[j] = rawClipF[j]->GetFrame(n, env);
       mvClipF[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvF[j]->GetReadPtr()));
       refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
-      SetSuperFrameTarget(superF[j].get(), refF[j]);
+      SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
     }
 
     bool isUsableB[MAX_DEGRAIN];
@@ -3582,7 +3574,7 @@ public:
       mvB[j] = rawClipB[j]->GetFrame(n, env);
       mvClipB[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvB[j]->GetReadPtr()));
       refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
-      SetSuperFrameTarget(superB[j].get(), refB[j]);
+      SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
     }
 
     if (params->nPixelSize == 1) {
@@ -3663,18 +3655,417 @@ public:
   }
 };
 
+
+template<typename pixel_t, int nBlkWidth, int nBlkHeight>
+void Copy_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
+{
+  for (int j = 0; j < nBlkHeight; j++)
+  {
+    //      for ( int i = 0; i < nBlkWidth; i++ )  //  waste cycles removed by Fizick in v1.2
+    memcpy(pDst, pSrc, nBlkWidth * sizeof(pixel_t));
+    pDst += nDstPitch;
+    pSrc += nSrcPitch;
+  }
+}
+
+template <typename pixel_t>
+void (*GetCopyFunction(int blockWidth, int blockHeight))(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
+{
+  if (blockWidth == 8 && blockHeight == 8) {
+    return Copy_C<pixel_t, 8, 8>;
+  }
+  if (blockWidth == 16 && blockHeight == 16) {
+    return Copy_C<pixel_t, 16, 16>;
+  }
+  if (blockWidth == 32 && blockHeight == 32) {
+    return Copy_C<pixel_t, 32, 32>;
+  }
+  return nullptr;
+}
+
+class KMCompensateCoreBase
+{
+public:
+  virtual ~KMCompensateCoreBase() { }
+};
+
+template <typename pixel_t>
+class KMCompensateCore : public KMCompensateCoreBase
+{
+  typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
+
+  typedef void (*CopyFuntion)(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch);
+  typedef void(*OverlapFunction)(tmp_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch, short *pWin, int nWinPitch);
+
+  const KMVParam* params;
+  const bool isUV;
+  const int time256;
+  const int thSAD;
+  const int fieldShift;
+
+  const KMVClip* mvClip;
+  const OverlapWindows* OverWins;
+
+  std::unique_ptr<tmp_t[]> tmpDst;
+
+  CopyFuntion COPY;
+  OverlapFunction OVERLAP;
+
+  const pixel_t* use_block(
+    int ix, int iy,
+    const KMPlane<pixel_t> *ref0, 
+    const KMPlane<pixel_t> *ref,
+    int nLogxRatio, int nLogyRatio,
+    int nPel)
+  {
+    const BlockData block = mvClip->GetBlock(0, ix, iy);
+    if (block.vector.sad < thSAD) {
+      const int blx = block.x * nPel + block.vector.x * time256 / 256; // 2.5.11.22
+      const int bly = block.y * nPel + block.vector.y * time256 / 256 + fieldShift; // 2.5.11.22
+      return ref->GetPointer(blx >> nLogxRatio, bly >> nLogyRatio);
+    }
+    const int blx = block.x * nPel;
+    const int bly = block.y * nPel + fieldShift;
+    return ref0->GetPointer(blx >> nLogxRatio, bly >> nLogyRatio);
+  }
+public:
+  KMCompensateCore(const KMVParam* params,
+    bool isUV, int time256, int thSAD, int fieldShift,
+    const KMVClip* mvClip, const OverlapWindows* OverWins,
+    IScriptEnvironment* env)
+    : params(params)
+    , isUV(isUV)
+    , time256(time256)
+    , thSAD(thSAD)
+    , fieldShift(fieldShift)
+    , mvClip(mvClip)
+    , OverWins(OverWins)
+    , tmpDst(new tmp_t[params->nWidth * params->nHeight])
+  {
+    const int nBlkSizeX = params->nBlkSizeX;
+    const int nBlkSizeY = params->nBlkSizeY;
+    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
+
+    const int blockWidth = nBlkSizeX >> nLogxRatio;
+    const int blockHeight = nBlkSizeY >> nLogyRatio;
+
+    COPY = GetCopyFunction<pixel_t>(blockWidth, blockHeight);
+    OVERLAP = GetOverlapFunction<pixel_t>(blockWidth, blockHeight);
+
+    if (!COPY)
+      env->ThrowError("KMCompensate : no valid COPY function for %dx%d, delta=%d", blockWidth, blockHeight);
+    if (!OVERLAP)
+      env->ThrowError("KMCompensate : no valid OVERLAP function for %dx%d, delta=%d", blockWidth, blockHeight);
+  }
+
+  void Proc(
+    const pixel_t* src, int nSrcPitch,
+    pixel_t* dst, int nDstPitch,
+    const KMPlane<pixel_t>* ref0,
+    const KMPlane<pixel_t>* ref)
+  {
+    const int nWidth = params->nWidth;
+    const int nHeight = params->nHeight;
+    const int nOverlapX = params->nOverlapX;
+    const int nOverlapY = params->nOverlapY;
+    const int nBlkX = params->levelInfo[0].nBlkX;
+    const int nBlkY = params->levelInfo[0].nBlkY;
+    const int nBlkSizeX = params->nBlkSizeX;
+    const int nBlkSizeY = params->nBlkSizeY;
+    const int nPixelShift = params->nPixelShift;
+    const int nBitsPerPixel = params->nBitsPerPixel;
+    const int nPel = params->nPel;
+
+    const int nWidth_B = nBlkX*(nBlkSizeX - nOverlapX) + nOverlapX;
+    const int nHeight_B = nBlkY*(nBlkSizeY - nOverlapY) + nOverlapY;
+    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
+
+    const int nSuperPitch = ref0->GetPitch();
+
+    if (nOverlapX == 0 && nOverlapY == 0)
+    {
+      const pixel_t* pSrcCur = src;
+      pixel_t* pDstCur = dst;
+
+      for (int by = 0; by < nBlkY; by++)
+      {
+        int xx = 0;
+        for (int bx = 0; bx < nBlkX; bx++)
+        {
+          const pixel_t * pPatch = use_block(bx, by, ref0, ref, nLogxRatio, nLogyRatio, nPel);
+
+          COPY(pDstCur, nDstPitch, pPatch, nSuperPitch);
+
+          xx += (nBlkSizeX >> nLogxRatio);
+
+          if (bx == nBlkX - 1 && nWidth_B < nWidth) // right non-covered region
+          {
+            Copy(pDstCur + (nWidth_B >> nLogxRatio), nDstPitch,
+              pSrcCur + (nWidth_B >> nLogxRatio), nSrcPitch,
+              (nWidth - nWidth_B) >> nLogxRatio,
+              nBlkSizeY >> nLogyRatio);
+          }
+        }	// for bx
+
+        pDstCur += (nBlkSizeY >> nLogyRatio) * nDstPitch;
+        pSrcCur += (nBlkSizeY >> nLogyRatio) * nSrcPitch;
+
+        if (by == nBlkY - 1 && nHeight_B < nHeight) // bottom uncovered region
+        {
+          Copy(pDstCur, nDstPitch, pSrcCur, nSrcPitch,
+            nWidth >> nLogxRatio, (nHeight - nHeight_B) >> nLogyRatio);
+        }
+      }	// for by
+    }	// nOverlapX==0 && nOverlapY==0
+
+    else // overlap
+    {
+      const pixel_t* pSrcCur = src;
+
+      tmp_t *pTmpDst = tmpDst.get();
+      const int tmpDstPitch = nWidth;
+
+      MemZoneSet<tmp_t>(pTmpDst, tmpDstPitch, 0, nWidth_B >> nLogxRatio, nHeight_B >> nLogyRatio);
+
+      for (int by = 0; by < nBlkY; by++)
+      {
+        int xx = 0;
+        int wby = ((by + nBlkY - 3) / (nBlkY - 2)) * 3;
+        for (int bx = 0; bx < nBlkX; bx++)
+        {
+          // select window
+          int wbx = (bx + nBlkX - 3) / (nBlkX - 2);
+          short *winOver = OverWins->GetWindow(wby + wbx);
+
+          const pixel_t * pPatch = use_block(bx, by, ref0, ref, nLogxRatio, nLogyRatio, nPel);
+
+          OVERLAP(pTmpDst + xx, tmpDstPitch, pPatch, nSuperPitch, winOver, nBlkSizeX >> nLogxRatio);
+
+          xx += ((nBlkSizeX - nOverlapX) >> nLogxRatio);
+        }	// for bx
+
+        pSrcCur += ((nBlkSizeY - nOverlapY) >> nLogyRatio) * nSrcPitch;
+        pTmpDst += ((nBlkSizeY - nOverlapY) >> nLogyRatio) * tmpDstPitch;
+      }	// for by
+
+      Short2Bytes(dst, nDstPitch, tmpDst.get(), tmpDstPitch, nWidth_B >> nLogxRatio, nHeight_B >> nLogyRatio, nBitsPerPixel);
+
+      if (nWidth_B < nWidth)
+      {
+        Copy(dst + (nWidth_B >> nLogxRatio),
+          nDstPitch, src + (nWidth_B >> nLogxRatio), nSrcPitch,
+          (nWidth - nWidth_B) >> nLogxRatio, nHeight_B >> nLogyRatio);
+      }
+      if (nHeight_B < nHeight) // bottom noncovered region
+      {
+        Copy(dst + (nHeight_B*nDstPitch >> nLogyRatio), nDstPitch,
+          src + (nHeight_B*nSrcPitch >> nLogyRatio), nSrcPitch,
+          (nWidth >> nLogxRatio), (nHeight - nHeight_B) >> nLogyRatio);
+      }
+    }	// overlap - end
+  }
+};
+
+class KMCompensate : public GenericVideoFilter
+{
+  const KMVParam *params;
+
+  const bool scBehavior;
+
+  PClip super;
+  PClip vectors;
+
+  std::unique_ptr<OverlapWindows> OverWins;
+  std::unique_ptr<OverlapWindows> OverWinsUV;
+
+  std::unique_ptr<KMSuperFrame> superFrame[2]; // ref0, ref
+  std::unique_ptr<KMVClip> mvClip;
+
+  std::unique_ptr<KMCompensateCoreBase> core;
+  std::unique_ptr<KMCompensateCoreBase> coreUV;
+
+  KMCompensateCoreBase* CreateCore(
+    bool isUV, int time256, int thSAD,
+    IScriptEnvironment* env)
+  {
+    const OverlapWindows* wins = (isUV ? OverWinsUV : OverWins).get();
+
+    if (params->nPixelSize == 1) {
+      return new KMCompensateCore<uint8_t>(params, isUV, time256, thSAD, 0, mvClip.get(), wins, env);
+    }
+    else {
+      return new KMCompensateCore<uint16_t>(params, isUV, time256, thSAD, 0, mvClip.get(), wins, env);
+    }
+  }
+
+  template <typename pixel_t>
+  PVideoFrame Proc(
+    int n, IScriptEnvironment* env)
+  {
+    PVideoFrame	src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    KMCompensateCore<pixel_t>* pCore = static_cast<KMCompensateCore<pixel_t>*>(core.get());
+    KMCompensateCore<pixel_t>* pCoreUV = static_cast<KMCompensateCore<pixel_t>*>(coreUV.get());
+
+    const KMPlane<pixel_t> *refY[2] = { 0 };
+    const KMPlane<pixel_t> *refU[2] = { 0 };
+    const KMPlane<pixel_t> *refV[2] = { 0 };
+
+    for (int i = 0; i < 2; ++i) {
+      refY[i] = static_cast<const KMPlane<pixel_t>*>(superFrame[i]->GetFrame(0)->GetYPlane());
+      refU[i] = static_cast<const KMPlane<pixel_t>*>(superFrame[i]->GetFrame(0)->GetUPlane());
+      refV[i] = static_cast<const KMPlane<pixel_t>*>(superFrame[i]->GetFrame(0)->GetVPlane());
+    }
+
+    pCore->Proc(
+      reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y)),
+      src->GetPitch(PLANAR_Y) >> params->nPixelShift,
+      reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y)),
+      dst->GetPitch(PLANAR_Y) >> params->nPixelShift,
+      refY[0], refY[1]);
+
+    pCoreUV->Proc(
+      reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U)),
+      src->GetPitch(PLANAR_U) >> params->nPixelShift,
+      reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U)),
+      dst->GetPitch(PLANAR_U) >> params->nPixelShift,
+      refU[0], refU[1]);
+
+    pCoreUV->Proc(
+      reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V)),
+      src->GetPitch(PLANAR_V) >> params->nPixelShift,
+      reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V)),
+      dst->GetPitch(PLANAR_V) >> params->nPixelShift,
+      refV[0], refV[1]);
+
+    return dst;
+  }
+public:
+  KMCompensate(
+    PClip _child, PClip _super, PClip vectors, bool sc, double _recursionPercent,
+    int thsad, bool _fields, double _time100, int nSCD1, int nSCD2, bool _isse2, bool _planar,
+    bool mt_flag, int trad, bool center_flag, PClip cclip_sptr, int thsad2,
+    IScriptEnvironment* env
+  )
+    : GenericVideoFilter(_child)
+    , params(KMVParam::GetParam(vectors->GetVideoInfo(), env))
+    , scBehavior(sc)
+    , super(_super)
+    , vectors(vectors)
+  {
+    // TODO: super と vectors が合致してることを確認
+
+    for (int i = 0; i < 2; ++i) {
+      superFrame[i] = std::unique_ptr<KMSuperFrame>(
+        new KMSuperFrame(KMVParam::GetParam(super->GetVideoInfo(), env)));
+    }
+    mvClip = std::unique_ptr<KMVClip>(
+      new KMVClip(KMVParam::GetParam(vectors->GetVideoInfo(), env), nSCD1, nSCD2));
+
+    if (_time100 < 0 || _time100 > 100) {
+      env->ThrowError("MCompensate: time must be 0.0 to 100.0");
+    }
+    int time256 = int(256 * _time100 / 100);
+    int _thsad = thsad  * mvClip->GetThSCD1() / nSCD1; // PF check todo bits_per_pixel
+
+    const int nOverlapX = params->nOverlapX;
+    const int nOverlapY = params->nOverlapY;
+    const int nBlkSizeX = params->nBlkSizeX;
+    const int nBlkSizeY = params->nBlkSizeY;
+    const int nLogxRatioUV = ilog2(params->xRatioUV);
+    const int nLogyRatioUV = ilog2(params->yRatioUV);
+
+    if (nOverlapX > 0 || nOverlapY > 0)
+    {
+      OverWins = std::unique_ptr<OverlapWindows>(
+        new OverlapWindows(nBlkSizeX, nBlkSizeY, nOverlapX, nOverlapY));
+      OverWinsUV = std::unique_ptr<OverlapWindows>(
+        new OverlapWindows(nBlkSizeX >> nLogxRatioUV, nBlkSizeY >> nLogyRatioUV, nOverlapX >> nLogxRatioUV, nOverlapY >> nLogyRatioUV));
+    }
+
+    core = std::unique_ptr<KMCompensateCoreBase>(CreateCore(false, time256, _thsad, env));
+    coreUV = std::unique_ptr<KMCompensateCoreBase>(CreateCore(true, time256, _thsad, env));
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    bool usable_flag;
+
+    PVideoFrame	ref0 = super->GetFrame(n, env);
+    SetSuperFrameTarget(superFrame[0].get(), ref0, params->nPixelShift);
+
+    PVideoFrame mv = vectors->GetFrame(n, env);
+    mvClip->SetData(reinterpret_cast<const MVDataGroup*>(mv->GetReadPtr()));
+    PVideoFrame	ref = mvClip->GetRefFrame(usable_flag, super, n, env);
+    SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);
+
+    if (!usable_flag) {
+      int nref = mvClip->GetRefFrameIndex(n);
+      if (!scBehavior && (nref < vi.num_frames) && (nref >= 0))
+      {
+        return child->GetFrame(nref, env);
+      }
+      else
+      {
+        return child->GetFrame(n, env);
+      }
+    }
+
+    if (params->nPixelSize == 1) {
+      return Proc<uint8_t>(n, env);
+    }
+    else {
+      return Proc<uint16_t>(n, env);
+    }
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KMCompensate(
+      args[0].AsClip(),       // source
+      args[1].AsClip(),       // super
+      args[2].AsClip(),       // vec
+      args[3].AsBool(true),   // sc
+      0,     // recursion
+      args[4].AsInt(10000),   // thSAD
+      false,  // fields
+      args[5].AsFloat(100), //time in percent
+      args[6].AsInt(400),
+      args[7].AsInt(130),
+      true,
+      false, // planar
+      true,  // mt
+      0,		// tr
+      true,	// center
+      nullptr, // cclip
+      10000,  // thSAD2  todo sad_t float
+      env
+    );
+  }
+};
+
 void AddFuncMV(IScriptEnvironment* env)
 {
   env->AddFunction("KMSuper", "c[debug]i", KMSuper::Create, 0);
+
   env->AddFunction("KMAnalyse",
     "c[blksize]i[overlap]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b",
     KMAnalyse::Create, 0);
+
   env->AddFunction("KMDegrain1",
     "cccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i",
     KMDegrainX::Create, (void *)1);
+
   env->AddFunction("KMDegrain2",
     "cccccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i",
     KMDegrainX::Create, (void *)2);
+
+  env->AddFunction("KMCompensate",
+    "ccc[scbehavior]b[recursion]f[thSAD]i[time]f[thSCD1]i[thSCD2]i",
+    KMCompensate::Create, 0);
 
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);
