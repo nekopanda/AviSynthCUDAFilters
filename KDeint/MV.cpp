@@ -9,39 +9,8 @@
 #undef min
 #undef max
 
-const long double	PI = 3.1415926535897932384626433832795L;
-
-/* returns the biggest integer x such as 2^x <= i */
-inline static int ilog2(int i)
-{
-  int result = 0;
-  while (i > 1) { i /= 2; result++; }
-  return result;
-}
-
-template<typename T>
-T min(T v1, T v2)
-{
-  return v1 < v2 ? v1 : v2;
-}
-
-template<typename T>
-T max(T v1, T v2)
-{
-  return v1 > v2 ? v1 : v2;
-}
-
-template<typename T>
-T clamp(T n, T min, T max)
-{
-  n = n > max ? max : n;
-  return n < min ? min : n;
-}
-
-inline static int nblock(int n, int block)
-{
-  return (n + block - 1) / block;
-}
+#include "CommonFunctions.h"
+#include "KDeintKernel.h"
 
 enum MVPlaneSet
 {
@@ -322,14 +291,13 @@ void PadFrame(pixel_t *refFrame, int refPitch, int hPad, int vPad, int width, in
 // nHeight is dst height which is reduced by 2 source height
 template<typename pixel_t>
 void RB2BilinearFilteredVertical(
-  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch,
-  int nWidth, int nHeight, int y_beg, int y_end, bool isse2)
+  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight)
 {
-  const int		y_loop_b = std::max(y_beg, 1);
-  const int		y_loop_e = std::min(y_end, nHeight - 1);
+  const int		y_loop_b = 1;
+  const int		y_loop_e = nHeight - 1;
   int				y = 0;
 
-  if (y_beg < y_loop_b)
+  if (0 < y_loop_b)
   {
     for (int x = 0; x < nWidth; x++)
     {
@@ -355,7 +323,7 @@ void RB2BilinearFilteredVertical(
 
   RB2_jump(std::max(y_loop_e, 1), y, pDst, pSrc, nDstPitch, nSrcPitch);
 
-  for (; y < y_end; ++y)
+  for (; y < nHeight; ++y)
   {
     for (int x = 0; x < nWidth; x++)
     {
@@ -370,14 +338,13 @@ void RB2BilinearFilteredVertical(
 // nWidth is dst height which is reduced by 2 source width
 template<typename pixel_t>
 void RB2BilinearFilteredHorizontalInplace(
-  pixel_t *pSrc, int nSrcPitch,
-  int nWidth, int nHeight, int y_beg, int y_end, bool isse2)
+  pixel_t *pSrc, int nSrcPitch, int nWidth, int nHeight)
 {
   int				y = 0;
 
-  RB2_jump_1(y_beg, y, pSrc, nSrcPitch);
+  RB2_jump_1(0, y, pSrc, nSrcPitch);
 
-  for (; y < y_end; ++y)
+  for (; y < nHeight; ++y)
   {
     int x = 0;
     int pSrc0 = (pSrc[x * 2] + pSrc[x * 2 + 1] + 1) / 2;
@@ -401,11 +368,10 @@ void RB2BilinearFilteredHorizontalInplace(
 // assume he have enough horizontal dimension for intermediate results (double as final)
 template<typename pixel_t>
 void RB2BilinearFiltered(
-  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch,
-  int nWidth, int nHeight, int y_beg, int y_end, bool isse2)
+  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight)
 {
-  RB2BilinearFilteredVertical(pDst, pSrc, nDstPitch, nSrcPitch, nWidth * 2, nHeight, y_beg, y_end, isse2); // intermediate half height
-  RB2BilinearFilteredHorizontalInplace(pDst, nDstPitch, nWidth, nHeight, y_beg, y_end, isse2); // inpace width reduction
+  RB2BilinearFilteredVertical(pDst, pSrc, nDstPitch, nSrcPitch, nWidth * 2, nHeight); // intermediate half height
+  RB2BilinearFilteredHorizontalInplace(pDst, nDstPitch, nWidth, nHeight); // inpace width reduction
 }
 
 // so called Wiener interpolation. (sharp, similar to Lanczos ?)
@@ -479,10 +445,10 @@ public:
   virtual ~KMPlaneBase() { }
   //virtual void SetInterp(int nRfilter, int nSharp) = 0;
   virtual void SetTarget(uint8_t* pSrc, int _nPitch) = 0;
-  virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch) = 0;
-  virtual void Pad() = 0;
-  virtual void Refine() = 0;
-  virtual void ReduceTo(KMPlaneBase* dstPlane) = 0;
+  virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch, KDeintKernel* kernel) = 0;
+  virtual void Pad(KDeintKernel* kernel) = 0;
+  virtual void Refine(KDeintKernel* kernel) = 0;
+  virtual void ReduceTo(KMPlaneBase* dstPlane, KDeintKernel* kernel) = 0;
 };
 
 template <typename pixel_t>
@@ -503,7 +469,7 @@ class KMPlane : public KMPlaneBase
   int nBitsPerPixel;
 public:
 
-  KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, bool isse, bool mt_flag)
+  KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel)
     : pPlane(new pixel_t*[nPel * nPel])
     , nPel(nPel)
     , nWidth(nWidth)
@@ -592,41 +558,73 @@ public:
     }
   }
 
-  void Fill(const uint8_t *_pNewPlane, int nNewPitch)
+  void Fill(const uint8_t *_pNewPlane, int nNewPitch, KDeintKernel* kernel)
   {
     const pixel_t* pNewPlane = (const pixel_t*)_pNewPlane;
 
-    Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
-  }
-
-  void Pad()
-  {
-    PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
-  }
-
-  void Refine()
-  {
-    switch (nPel)
-    {
-    case 2:
-      HorizontalWiener(pPlane[1], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
-      VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
-      HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
-      break;
-    //case 4: // ç°ÇÕñ¢ëŒâû
-    //  break;
+    if (kernel) {
+      kernel->Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
+    }
+    else {
+      Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
     }
   }
 
-  void ReduceTo(KMPlaneBase* dstPlane)
+  void Pad(KDeintKernel* kernel)
+  {
+    if (kernel) {
+      kernel->PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
+    }
+    else {
+      PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
+    }
+  }
+
+  void Refine(KDeintKernel* kernel)
+  {
+    if (kernel) {
+      switch (nPel)
+      {
+      case 2:
+        kernel->HorizontalWiener(pPlane[1], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        kernel->VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        kernel->HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        break;
+        //case 4: // ç°ÇÕñ¢ëŒâû
+        //  break;
+      }
+    }
+    else {
+      switch (nPel)
+      {
+      case 2:
+        HorizontalWiener(pPlane[1], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        break;
+        //case 4: // ç°ÇÕñ¢ëŒâû
+        //  break;
+      }
+    }
+  }
+
+  void ReduceTo(KMPlaneBase* dstPlane, KDeintKernel* kernel)
   {
     KMPlane<pixel_t>&		red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
-    RB2BilinearFiltered(
-      red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
-      red.nPitch, nPitch,
-      red.nWidth, red.nHeight, 0, red.nHeight,
-      true
-    );
+    if (kernel) {
+      kernel->RB2BilinearFiltered(
+        red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
+        red.nPitch, nPitch,
+        red.nWidth, red.nHeight
+      );
+    }
+    else {
+      RB2BilinearFiltered(
+        red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
+        red.nPitch, nPitch,
+        red.nWidth, red.nHeight
+      );
+    }
   }
 };
 
@@ -639,17 +637,17 @@ class KMFrame
   std::unique_ptr<KMPlaneBase> pVPlane;
 
   template <typename pixel_t>
-  void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, bool mt_flag)
+  void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad)
   {
     pYPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
-      nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, true, mt_flag));
+      nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel));
     if (param->chroma) {
       pUPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, true, mt_flag));
+        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel));
       pVPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, true, mt_flag));
+        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel));
     }
   }
 
@@ -658,10 +656,10 @@ public:
     : param(param)
   {
     if (param->nPixelSize == 1) {
-      CreatePlanes<uint8_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad, false);
+      CreatePlanes<uint8_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad);
     }
     else if (param->nPixelSize == 2) {
-      CreatePlanes<uint16_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad, false);
+      CreatePlanes<uint16_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad);
     }
   }
 
@@ -678,12 +676,12 @@ public:
     }
   }
 
-  void Fill(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
+  void Fill(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV, KDeintKernel* kernel)
   {
-    pYPlane->Fill(pSrcY, pitchY);
+    pYPlane->Fill(pSrcY, pitchY, kernel);
     if (param->chroma) {
-      pUPlane->Fill(pSrcU, pitchU);
-      pVPlane->Fill(pSrcV, pitchV);
+      pUPlane->Fill(pSrcU, pitchU, kernel);
+      pVPlane->Fill(pSrcV, pitchV, kernel);
     }
   }
 
@@ -696,30 +694,30 @@ public:
   //  }
   //}
 
-  void	Refine()
+  void	Refine(KDeintKernel* kernel)
   {
-    pYPlane->Refine();
+    pYPlane->Refine(kernel);
     if (param->chroma) {
-      pUPlane->Refine();
-      pVPlane->Refine();
+      pUPlane->Refine(kernel);
+      pVPlane->Refine(kernel);
     }
   }
 
-  void	Pad()
+  void	Pad(KDeintKernel* kernel)
   {
-    pYPlane->Pad();
+    pYPlane->Pad(kernel);
     if (param->chroma) {
-      pUPlane->Pad();
-      pVPlane->Pad();
+      pUPlane->Pad(kernel);
+      pVPlane->Pad(kernel);
     }
   }
 
-  void	ReduceTo(KMFrame *pFrame)
+  void	ReduceTo(KMFrame *pFrame, KDeintKernel* kernel)
   {
-    pYPlane->ReduceTo(pFrame->GetYPlane());
+    pYPlane->ReduceTo(pFrame->GetYPlane(), kernel);
     if (param->chroma) {
-      pUPlane->ReduceTo(pFrame->GetUPlane());
-      pVPlane->ReduceTo(pFrame->GetVPlane());
+      pUPlane->ReduceTo(pFrame->GetUPlane(), kernel);
+      pVPlane->ReduceTo(pFrame->GetVPlane(), kernel);
     }
   }
 };
@@ -759,16 +757,16 @@ public:
     }
   }
 
-  void Construct(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
+  void Construct(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV, KDeintKernel* kernel)
   {
-    pFrames[0]->Fill(pSrcY, pitchY, pSrcU, pitchU, pSrcV, pitchV);
-    pFrames[0]->Pad();
-    pFrames[0]->Refine();
+    pFrames[0]->Fill(pSrcY, pitchY, pSrcU, pitchU, pSrcV, pitchV, kernel);
+    pFrames[0]->Pad(kernel);
+    pFrames[0]->Refine(kernel);
 
     for (int i = 0; i < param->nLevels - 1; i++)
     {
-      pFrames[i]->ReduceTo(pFrames[i + 1].get());
-      pFrames[i + 1]->Pad();
+      pFrames[i]->ReduceTo(pFrames[i + 1].get(), kernel);
+      pFrames[i + 1]->Pad(kernel);
     }
   }
 
@@ -803,6 +801,8 @@ class KMSuper : public GenericVideoFilter
   int nSuperHeight;
 
   KMVParam params;
+
+  KDeintKernel kernel;
 
   std::unique_ptr<KMSuperFrame> pSrcGOF;
 
@@ -879,7 +879,14 @@ public:
     int nDstPitchUV = dst->GetPitch(PLANAR_U) >> params.nPixelShift;
 
     pSrcGOF->SetTarget(pDstY, nDstPitchY, pDstU, nDstPitchUV, pDstV, nDstPitchUV);
-    pSrcGOF->Construct(pSrcY, nSrcPitchY, pSrcU, nSrcPitchUV, pSrcV, nSrcPitchUV);
+
+    KDeintKernel* pKernel = nullptr;
+    if (src->IsCUDA()) {
+      kernel.SetEnv(nullptr, env);
+      pKernel = &kernel;
+    }
+
+    pSrcGOF->Construct(pSrcY, nSrcPitchY, pSrcU, nSrcPitchUV, pSrcV, nSrcPitchUV, pKernel);
 
     return dst;
   }
@@ -2250,7 +2257,7 @@ public:
     const int		out_frame_bytes = _vectorfields_aptr->GetArraySize();
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 2048;
-    vi.height = nblock(out_frame_bytes, vi.width * 4);
+    vi.height = nblocks(out_frame_bytes, vi.width * 4);
   }
 
   PVideoFrame __stdcall	GetFrame(int n, ::IScriptEnvironment* env)

@@ -164,9 +164,14 @@
     <ClCompile Include="MV.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="KDeintKernel.cu" />
     <CudaCompile Include="Kernel.cu">
       <FileType>Document</FileType>
     </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="CommonFunctions.h" />
+    <ClInclude Include="KDeintKernel.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

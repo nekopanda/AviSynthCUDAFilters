@@ -26,5 +26,16 @@
     <CudaCompile Include="Kernel.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
+    <CudaCompile Include="KDeintKernel.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="CommonFunctions.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="KDeintKernel.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
