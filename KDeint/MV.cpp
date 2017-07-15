@@ -19,11 +19,40 @@ inline static int ilog2(int i)
   return result;
 }
 
+template<typename T>
+T min(T v1, T v2)
+{
+  return v1 < v2 ? v1 : v2;
+}
+
+template<typename T>
+T max(T v1, T v2)
+{
+  return v1 > v2 ? v1 : v2;
+}
+
+template<typename T>
+T clamp(T n, T min, T max)
+{
+  n = n > max ? max : n;
+  return n < min ? min : n;
+}
+
 inline static int nblock(int n, int block)
 {
   return (n + block - 1) / block;
 }
 
+enum MVPlaneSet
+{
+  YPLANE = 1,
+  UPLANE = 2,
+  VPLANE = 4,
+  YUPLANES = 3,
+  YVPLANES = 5,
+  UVPLANES = 6,
+  YUVPLANES = 7
+};
 
 enum {
   N_PER_BLOCK = 3,
@@ -538,7 +567,7 @@ public:
 
   const pixel_t *GetPointer(int nX, int nY) const
   {
-    return GetAbsolutePointer(nX + nHPaddingPel, nY + nVPaddingPel);
+    return GetAbsolutePointer(nX + nHPadPel, nY + nVPadPel);
   }
 
   const pixel_t *GetAbsolutePelPointer(int nX, int nY) const
@@ -2683,56 +2712,56 @@ public:
   short *GetWindow(int i) const { return Overlap9Windows + size*i; }
 };
 
-template<int level>
+template<int delta>
 void	norm_weights(int &WSrc, int(&WRefB)[MAX_DEGRAIN], int(&WRefF)[MAX_DEGRAIN])
 {
   WSrc = 256;
   int WSum;
-  if (level == 6)
+  if (delta == 6)
     WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + WRefB[5] + WRefF[5] + 1;
-  else if (level == 5)
+  else if (delta == 5)
     WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + 1;
-  else if (level == 4)
+  else if (delta == 4)
     WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + 1;
-  else if (level == 3)
+  else if (delta == 3)
     WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + 1;
-  else if (level == 2)
+  else if (delta == 2)
     WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + 1;
-  else if (level == 1)
+  else if (delta == 1)
     WSum = WRefB[0] + WRefF[0] + WSrc + 1;
   WRefB[0] = WRefB[0] * 256 / WSum; // normalize weights to 256
   WRefF[0] = WRefF[0] * 256 / WSum;
-  if (level >= 2) {
+  if (delta >= 2) {
     WRefB[1] = WRefB[1] * 256 / WSum; // normalize weights to 256
     WRefF[1] = WRefF[1] * 256 / WSum;
   }
-  if (level >= 3) {
+  if (delta >= 3) {
     WRefB[2] = WRefB[2] * 256 / WSum; // normalize weights to 256
     WRefF[2] = WRefF[2] * 256 / WSum;
   }
-  if (level >= 4) {
+  if (delta >= 4) {
     WRefB[3] = WRefB[3] * 256 / WSum; // normalize weights to 256
     WRefF[3] = WRefF[3] * 256 / WSum;
   }
-  if (level >= 5) {
+  if (delta >= 5) {
     WRefB[4] = WRefB[4] * 256 / WSum; // normalize weights to 256
     WRefF[4] = WRefF[4] * 256 / WSum;
   }
-  if (level >= 6) {
+  if (delta >= 6) {
     WRefB[5] = WRefB[5] * 256 / WSum; // normalize weights to 256
     WRefF[5] = WRefF[5] * 256 / WSum;
   }
-  if (level == 6)
+  if (delta == 6)
     WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3] - WRefB[4] - WRefF[4] - WRefB[5] - WRefF[5];
-  else if (level == 5)
+  else if (delta == 5)
     WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3] - WRefB[4] - WRefF[4];
-  else if (level == 4)
+  else if (delta == 4)
     WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3];
-  else if (level == 3)
+  else if (delta == 3)
     WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2];
-  else if (level == 2)
+  else if (delta == 2)
     WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1];
-  else if (level == 1)
+  else if (delta == 1)
     WSrc = 256 - WRefB[0] - WRefF[0];
 }
 
@@ -2759,7 +2788,7 @@ void Overlaps_C(typename std::conditional <sizeof(pixel_t) == 1, short, int>::ty
   }
 }
 
-template<typename pixel_t, int level, int blockWidth, int blockHeight>
+template<typename pixel_t, int delta, int blockWidth, int blockHeight>
 void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch,
   const pixel_t *pRefB[MAX_DEGRAIN], const pixel_t *pRefF[MAX_DEGRAIN], int nRefPitch,
   int WSrc, int WRefB[MAX_DEGRAIN], int WRefF[MAX_DEGRAIN])
@@ -2775,25 +2804,25 @@ void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPi
   {
     for (int x = 0; x < blockWidth; x++)
     {
-      if (level == 1) {
+      if (delta == 1) {
         const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      else if (level == 2) {
+      else if (delta == 2) {
         const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      else if (level == 3) {
+      else if (delta == 3) {
         const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
           pRefF[2][x] * WRefF[2] + pRefB[2][x] * WRefB[2];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      else if (level == 4) {
+      else if (delta == 4) {
         const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
@@ -2801,7 +2830,7 @@ void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPi
           pRefF[3][x] * WRefF[3] + pRefB[3][x] * WRefB[3];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      else if (level == 5) {
+      else if (delta == 5) {
         const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
@@ -2810,7 +2839,7 @@ void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPi
           pRefF[4][x] * WRefF[4] + pRefB[4][x] * WRefB[4];
         pDst[x] = (val + (no_need_round ? 0 : 128)) >> 8;
       }
-      else if (level == 6) {
+      else if (delta == 6) {
         const int		val = pSrc[x] * WSrc +
           pRefF[0][x] * WRefF[0] + pRefB[0][x] * WRefB[0] +
           pRefF[1][x] * WRefF[1] + pRefB[1][x] * WRefB[1] +
@@ -2825,19 +2854,19 @@ void Degrain1to6_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPi
     pSrc += nSrcPitch;
     pRefB[0] += nRefPitch;
     pRefF[0] += nRefPitch;
-    if (level >= 2) {
+    if (delta >= 2) {
       pRefB[1] += nRefPitch;
       pRefF[1] += nRefPitch;
-      if (level >= 3) {
+      if (delta >= 3) {
         pRefB[2] += nRefPitch;
         pRefF[2] += nRefPitch;
-        if (level >= 4) {
+        if (delta >= 4) {
           pRefB[3] += nRefPitch;
           pRefF[3] += nRefPitch;
-          if (level >= 5) {
+          if (delta >= 5) {
             pRefB[4] += nRefPitch;
             pRefF[4] += nRefPitch;
-            if (level >= 6) {
+            if (delta >= 6) {
               pRefB[5] += nRefPitch;
               pRefF[5] += nRefPitch;
             }
@@ -2955,7 +2984,7 @@ public:
     nSCD1 = (uint64_t)nSCD1 * (params->nBlkSizeX * params->nBlkSizeY) / (8 * 8); // this is normalized to 8x8 block sizes
     if (params->chroma) {
       nSCD1 += ScaleSadChroma(nSCD1 * 2, params->chromaSADScale) / 4; // base: YV12
-                                                                      // nSCD1 += nSCD1 / (xRatioUV * yRatioUV) * 2; // Old method: *2: two additional planes: UV
+      // nSCD1 += nSCD1 / (xRatioUV * yRatioUV) * 2; // Old method: *2: two additional planes: UV
     }
 
     // Threshold which sets how many blocks have to change for the frame to be considered as a scene change. 
@@ -2963,7 +2992,7 @@ public:
     int nBlkCount = params->levelInfo[0].nBlkX * params->levelInfo[0].nBlkY;
     nSCD2 = _nSCD2 * nBlkCount / 256;
 
-    for (int i = 0; i < params->nLevels; ++i) {
+    for (int i = 0; i < (int)params->levelInfo.size(); ++i) {
       LevelInfo info = params->levelInfo[i];
       pFrames[i] = std::unique_ptr<KMVFrame>(new KMVFrame(
         info.nBlkX, info.nBlkY,
@@ -2975,7 +3004,7 @@ public:
   {
     isValid = pgroup->isValid != 0;
     const MVData* pdata = reinterpret_cast<const MVData*>(pgroup->data);
-    for (int i = 0; i < params->nLevels; ++i) {
+    for (int i = (int)params->levelInfo.size() - 1; i >= 0; --i) {
       pFrames[i]->SetData(pdata);
       pdata = reinterpret_cast<const MVData*>(&pdata->data[pdata->nCount]);
     }
@@ -2986,7 +3015,7 @@ public:
 
   BlockData GetBlock(int nLevel, int ix, int iy) const
   {
-    pFrames[nLevel]->GetBlock(ix, iy);
+    return pFrames[nLevel]->GetBlock(ix, iy);
   }
 
   // usable_flag is an input and output variable, it must be initialised
@@ -3074,6 +3103,7 @@ class KMDegrainCore : public KMDegrainCoreBase
     int WSrc, int WRefB[MAX_DEGRAIN], int WRefF[MAX_DEGRAIN]);
 
   const KMVParam* params;
+  const int delta;
   const bool isUV;
   const int thSAD;
   const int nLimit;
@@ -3090,8 +3120,8 @@ class KMDegrainCore : public KMDegrainCoreBase
   OverlapFunction OVERLAP;
   DegrainFunction DEGRAIN;
 
-  static NormWeightsFunction GetNormWeightsFunction(int level) {
-    switch (level) {
+  static NormWeightsFunction GetNormWeightsFunction(int delta) {
+    switch (delta) {
     case 1: return norm_weights<1>;
     case 2: return norm_weights<2>;
     //case 3: return norm_weights<3>;
@@ -3099,6 +3129,7 @@ class KMDegrainCore : public KMDegrainCoreBase
     //case 5: return norm_weights<5>;
     //case 6: return norm_weights<6>;
     }
+    return nullptr;
   }
 
   static OverlapFunction GetOverlapFunction(int blockWidth, int blockHeight)
@@ -3115,23 +3146,23 @@ class KMDegrainCore : public KMDegrainCoreBase
     return nullptr;
   }
 
-  template <int level>
+  template <int delta>
   static DegrainFunction GetDegrainFunction(int blockWidth, int blockHeight)
   {
     if (blockWidth == 8 && blockHeight == 8) {
-      return Degrain1to6_C<pixel_t, level, 8, 8>;
+      return Degrain1to6_C<pixel_t, delta, 8, 8>;
     }
     if (blockWidth == 16 && blockHeight == 16) {
-      return Degrain1to6_C<pixel_t, level, 16, 16>;
+      return Degrain1to6_C<pixel_t, delta, 16, 16>;
     }
     if (blockWidth == 32 && blockHeight == 32) {
-      return Degrain1to6_C<pixel_t, level, 32, 32>;
+      return Degrain1to6_C<pixel_t, delta, 32, 32>;
     }
     return nullptr;
   }
 
-  static DegrainFunction GetDegrainFunction(int level, int blockWidth, int blockHeight) {
-    switch (level) {
+  static DegrainFunction GetDegrainFunction(int delta, int blockWidth, int blockHeight) {
+    switch (delta) {
     case 1: return GetDegrainFunction<1>(blockWidth, blockHeight);
     case 2: return GetDegrainFunction<2>(blockWidth, blockHeight);
     //case 3: return GetDegrainFunction<3>(blockWidth, blockHeight);
@@ -3139,6 +3170,7 @@ class KMDegrainCore : public KMDegrainCoreBase
     //case 5: return GetDegrainFunction<5>(blockWidth, blockHeight);
     //case 6: return GetDegrainFunction<6>(blockWidth, blockHeight);
     }
+    return nullptr;
   }
 
   void	use_block(
@@ -3164,11 +3196,13 @@ class KMDegrainCore : public KMDegrainCoreBase
   }
 public:
   KMDegrainCore(const KMVParam* params,
+    int delta,
     bool isUV, int thSAD, int nLimit,
     KMVClip* mvClipB_[MAX_DEGRAIN],
     KMVClip* mvClipF_[MAX_DEGRAIN],
     const OverlapWindows* OverWins, IScriptEnvironment* env)
     : params(params)
+    , delta(delta)
     , isUV(isUV)
     , thSAD(thSAD)
     , nLimit(nLimit)
@@ -3178,30 +3212,29 @@ public:
     , tmpBlock(new pixel_t[MAX_BLOCK_SIZE * MAX_BLOCK_SIZE])
     , tmpDst(new tmp_t[params->nWidth * params->nHeight])
   {
-    const int level = params->nLevels;
     const int nBlkSizeX = params->nBlkSizeX;
     const int nBlkSizeY = params->nBlkSizeY;
-    const int nLogxRatio = isUV ? params->xRatioUV : 0;
-    const int nLogyRatio = isUV ? params->yRatioUV : 0;
+    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
 
     const int blockWidth = nBlkSizeX >> nLogxRatio;
     const int blockHeight = nBlkSizeY >> nLogyRatio;
 
-    for (int i = 0; i < level; ++i) {
+    for (int i = 0; i < delta; ++i) {
       mvClipB[i] = mvClipB_[i];
       mvClipF[i] = mvClipF_[i];
     }
 
-    NORMWEIGHTS = GetNormWeightsFunction(level);
+    NORMWEIGHTS = GetNormWeightsFunction(delta);
     OVERLAP = GetOverlapFunction(blockWidth, blockHeight);
-    DEGRAIN = GetDegrainFunction(level, blockWidth, blockHeight);
+    DEGRAIN = GetDegrainFunction(delta, blockWidth, blockHeight);
 
     if (!NORMWEIGHTS)
-      env->ThrowError("KMDegrain%d : no valid NORMWEIGHTS function for %dx%d, level=%d", level, blockWidth, blockHeight, level);
+      env->ThrowError("KMDegrain%d : no valid NORMWEIGHTS function for %dx%d, delta=%d", delta, blockWidth, blockHeight, delta);
     if (!OVERLAP)
-      env->ThrowError("KMDegrain%d : no valid OVERSCHROMA function for %dx%d, level=%d", level, blockWidth, blockHeight, level);
+      env->ThrowError("KMDegrain%d : no valid OVERSCHROMA function for %dx%d, delta=%d", delta, blockWidth, blockHeight, delta);
     if (!DEGRAIN)
-      env->ThrowError("KMDegrain%d : no valid DEGRAINLUMA function for %dx%d, level=%d", level, blockWidth, blockHeight, level);
+      env->ThrowError("KMDegrain%d : no valid DEGRAINLUMA function for %dx%d, delta=%d", delta, blockWidth, blockHeight, delta);
   }
 
   void Proc(
@@ -3214,7 +3247,6 @@ public:
     bool isUsableF[MAX_DEGRAIN]
   )
   {
-    const int level = params->nLevels;
     const int nWidth = params->nWidth;
     const int nHeight = params->nHeight;
     const int nOverlapX = params->nOverlapX;
@@ -3229,8 +3261,8 @@ public:
 
     const int nWidth_B = nBlkX*(nBlkSizeX - nOverlapX) + nOverlapX;
     const int nHeight_B = nBlkY*(nBlkSizeY - nOverlapY) + nOverlapY;
-    const int nLogxRatio = isUV ? params->xRatioUV : 0;
-    const int nLogyRatio = isUV ? params->yRatioUV : 0;
+    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
 
     const int nSuperPitch = pPlanesB[0]->GetPitch();
 
@@ -3253,7 +3285,7 @@ public:
           int WSrc;
           int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
 
-          for (int j = 0; j < level; j++) {
+          for (int j = 0; j < delta; j++) {
             use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
             use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
           }
@@ -3307,12 +3339,11 @@ public:
           int wbx = (bx + nBlkX - 3) / (nBlkX - 2);
           short *winOver = OverWins->GetWindow(wby + wbx);
 
-          const BYTE * pB[MAX_DEGRAIN], *pF[MAX_DEGRAIN];
-          int npB[MAX_DEGRAIN], npF[MAX_DEGRAIN];
+          const pixel_t * pB[MAX_DEGRAIN], *pF[MAX_DEGRAIN];
           int WSrc;
           int WRefB[MAX_DEGRAIN], WRefF[MAX_DEGRAIN];
 
-          for (int j = 0; j < level; j++) {
+          for (int j = 0; j < delta; j++) {
             use_block(pB[j], WRefB[j], isUsableB[j], *mvClipB[j], bx, by, pPlanesB[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
             use_block(pF[j], WRefF[j], isUsableF[j], *mvClipF[j], bx, by, pPlanesF[j], pSrcCur, thSAD, nLogxRatio, nLogyRatio, nPel, xx);
           }
@@ -3331,7 +3362,7 @@ public:
         pTmpDst += ((nBlkSizeY - nOverlapY) >> nLogyRatio) * tmpDstPitch;
       }	// for by
 
-      Short2Bytes(src, nDstPitch, pTmpDst, tmpDstPitch, nWidth_B >> nLogxRatio, nHeight_B >> nLogyRatio, nBitsPerPixel);
+      Short2Bytes(dst, nDstPitch, tmpDst.get(), tmpDstPitch, nWidth_B >> nLogxRatio, nHeight_B >> nLogyRatio, nBitsPerPixel);
 
       if (nWidth_B < nWidth)
       {
@@ -3358,7 +3389,8 @@ class KMDegrainX : public GenericVideoFilter
 {
   const KMVParam *params;
 
-  int level;
+  const int delta;
+  const int YUVplanes;
 
   PClip super;
   PClip rawClipB[MAX_DEGRAIN];
@@ -3376,6 +3408,9 @@ class KMDegrainX : public GenericVideoFilter
   std::unique_ptr<KMDegrainCoreBase> core;
   std::unique_ptr<KMDegrainCoreBase> coreUV;
 
+  std::unique_ptr<KMSuperFrame> superB[MAX_DEGRAIN];
+  std::unique_ptr<KMSuperFrame> superF[MAX_DEGRAIN];
+
   KMDegrainCoreBase* CreateCore(
     bool isUV, int nLimit,
     KMVClip* mvClipB[MAX_DEGRAIN],
@@ -3386,11 +3421,81 @@ class KMDegrainX : public GenericVideoFilter
     const OverlapWindows* wins = (isUV ? OverWinsUV : OverWins).get();
 
     if (params->nPixelSize == 1) {
-      new KMDegrainCore<uint8_t>(params, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
+      return new KMDegrainCore<uint8_t>(params, delta, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
     }
     else {
-      new KMDegrainCore<uint16_t>(params, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
+      return new KMDegrainCore<uint16_t>(params, delta, isUV, th, nLimit, mvClipB, mvClipF, wins, env);
     }
+  }
+
+  void SetSuperFrameTarget(KMSuperFrame* sf, PVideoFrame& frame)
+  {
+    if (!frame) return;
+    const BYTE* pY = frame->GetReadPtr(PLANAR_Y);
+    const BYTE* pU = frame->GetReadPtr(PLANAR_U);
+    const BYTE* pV = frame->GetReadPtr(PLANAR_V);
+    int nPitchY = frame->GetPitch(PLANAR_Y) >> params->nPixelShift;
+    int nPitchUV = frame->GetPitch(PLANAR_U) >> params->nPixelShift;
+    sf->SetTarget((BYTE*)pY, nPitchY, (BYTE*)pU, nPitchUV, (BYTE*)pV, nPitchUV);
+  }
+
+  template <typename pixel_t>
+  PVideoFrame Proc(
+    int n, IScriptEnvironment* env,
+    bool isUsableB[MAX_DEGRAIN],
+    bool isUsableF[MAX_DEGRAIN])
+  {
+    PVideoFrame	src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    KMDegrainCore<pixel_t>* pCore = static_cast<KMDegrainCore<pixel_t>*>(core.get());
+    KMDegrainCore<pixel_t>* pCoreUV = static_cast<KMDegrainCore<pixel_t>*>(coreUV.get());
+
+    const KMPlane<pixel_t> *refBY[MAX_DEGRAIN] = { 0 };
+    const KMPlane<pixel_t> *refBU[MAX_DEGRAIN] = { 0 };
+    const KMPlane<pixel_t> *refBV[MAX_DEGRAIN] = { 0 };
+    const KMPlane<pixel_t> *refFY[MAX_DEGRAIN] = { 0 };
+    const KMPlane<pixel_t> *refFU[MAX_DEGRAIN] = { 0 };
+    const KMPlane<pixel_t> *refFV[MAX_DEGRAIN] = { 0 };
+
+    for (int i = 0; i < delta; ++i) {
+      if (isUsableB[i]) {
+        refBY[i] = static_cast<const KMPlane<pixel_t>*>(superB[i]->GetFrame(0)->GetYPlane());
+        refBU[i] = static_cast<const KMPlane<pixel_t>*>(superB[i]->GetFrame(0)->GetUPlane());
+        refBV[i] = static_cast<const KMPlane<pixel_t>*>(superB[i]->GetFrame(0)->GetVPlane());
+      }
+      if (isUsableF[i]) {
+        refFY[i] = static_cast<const KMPlane<pixel_t>*>(superF[i]->GetFrame(0)->GetYPlane());
+        refFU[i] = static_cast<const KMPlane<pixel_t>*>(superF[i]->GetFrame(0)->GetUPlane());
+        refFV[i] = static_cast<const KMPlane<pixel_t>*>(superF[i]->GetFrame(0)->GetVPlane());
+      }
+    }
+
+    pCore->Proc(
+      (YUVplanes & YPLANE) != 0,
+      reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y)),
+      src->GetPitch(PLANAR_Y) >> params->nPixelShift,
+      reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y)),
+      dst->GetPitch(PLANAR_Y) >> params->nPixelShift,
+      refBY, refFY, isUsableB, isUsableF);
+
+    pCoreUV->Proc(
+      (YUVplanes & UPLANE) != 0,
+      reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U)),
+      src->GetPitch(PLANAR_U) >> params->nPixelShift,
+      reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U)),
+      dst->GetPitch(PLANAR_U) >> params->nPixelShift,
+      refBU, refFU, isUsableB, isUsableF);
+
+    pCoreUV->Proc(
+      (YUVplanes & VPLANE) != 0,
+      reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V)),
+      src->GetPitch(PLANAR_V) >> params->nPixelShift,
+      reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V)),
+      dst->GetPitch(PLANAR_V) >> params->nPixelShift,
+      refBV, refFV, isUsableB, isUsableF);
+
+    return dst;
   }
 
 public:
@@ -3398,10 +3503,11 @@ public:
     PClip mvbw, PClip mvfw, PClip mvbw2, PClip mvfw2,
     int _thSAD, int _thSADC, int _YUVplanes, int _nLimit, int _nLimitC,
     int _nSCD1, int _nSCD2, bool _isse2, bool _planar, bool _lsb_flag,
-    bool _mt_flag, int _level, IScriptEnvironment* env)
+    bool _mt_flag, int _delta, IScriptEnvironment* env)
     : GenericVideoFilter(child)
     , params(KMVParam::GetParam(mvbw->GetVideoInfo(), env))
-    , level(_level)
+    , delta(_delta)
+    , YUVplanes(_YUVplanes)
     , super(super)
     , OverWins()
     , OverWinsUV()
@@ -3414,11 +3520,16 @@ public:
     KMVClip *pmvClipB[MAX_DEGRAIN];
     KMVClip *pmvClipF[MAX_DEGRAIN];
 
-    for (int i = 0; i < level; ++i) {
+    const KMVParam* superParam = KMVParam::GetParam(super->GetVideoInfo(), env);
+
+    for (int i = 0; i < delta; ++i) {
       mvClipB[i] = std::unique_ptr<KMVClip>(pmvClipB[i] =
         new KMVClip(KMVParam::GetParam(rawClipB[i]->GetVideoInfo(), env), _nSCD1, _nSCD2));
       mvClipF[i] = std::unique_ptr<KMVClip>(pmvClipF[i] =
         new KMVClip(KMVParam::GetParam(rawClipF[i]->GetVideoInfo(), env), _nSCD1, _nSCD2));
+
+      superB[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam));
+      superF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam));
     }
 
     // e.g. 10000*999999 is too much
@@ -3430,8 +3541,8 @@ public:
     const int nOverlapY = params->nOverlapY;
     const int nBlkSizeX = params->nBlkSizeX;
     const int nBlkSizeY = params->nBlkSizeY;
-    const int nLogxRatioUV = params->xRatioUV;
-    const int nLogyRatioUV = params->yRatioUV;
+    const int nLogxRatioUV = ilog2(params->xRatioUV);
+    const int nLogyRatioUV = ilog2(params->yRatioUV);
 
     if (nOverlapX > 0 || nOverlapY > 0)
     {
@@ -3444,7 +3555,7 @@ public:
     core = std::unique_ptr<KMDegrainCoreBase>(
       CreateCore(false, _nLimit, pmvClipB, pmvClipF, env));
     coreUV = std::unique_ptr<KMDegrainCoreBase>(
-      CreateCore(false, _nLimitC, pmvClipB, pmvClipF, env));
+      CreateCore(true, _nLimitC, pmvClipB, pmvClipF, env));
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
@@ -3454,28 +3565,101 @@ public:
     PVideoFrame refF[MAX_DEGRAIN];
 
     // mv,refŽæ“¾
-    for (int j = level - 1; j >= 0; j--)
+    for (int j = delta - 1; j >= 0; j--)
     {
       mvF[j] = rawClipF[j]->GetFrame(n, env);
       mvClipF[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvF[j]->GetReadPtr()));
       refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
+      SetSuperFrameTarget(superF[j].get(), refF[j]);
     }
 
     bool isUsableB[MAX_DEGRAIN];
     PVideoFrame mvB[MAX_DEGRAIN];
     PVideoFrame refB[MAX_DEGRAIN];
 
-    for (int j = 0; j < level; j++)
+    for (int j = 0; j < delta; j++)
     {
       mvB[j] = rawClipB[j]->GetFrame(n, env);
       mvClipB[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvB[j]->GetReadPtr()));
       refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
+      SetSuperFrameTarget(superB[j].get(), refB[j]);
     }
 
-    PVideoFrame	src = child->GetFrame(n, env);
-    PVideoFrame dst = env->NewVideoFrame(vi);
+    if (params->nPixelSize == 1) {
+      return Proc<uint8_t>(n, env, isUsableB, isUsableF);
+    }
+    else {
+      return Proc<uint16_t>(n, env, isUsableB, isUsableF);
+    }
+  }
 
-    // TODO:
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    int delta = (int)(size_t)user_data;
+
+    int plane_param_index = 6; // base: MDegrain1
+    int thsad_param_index = 4;
+    int limit_param_index = 7;
+
+    int param_index_shift = 0;
+    switch (delta) {
+    case 6: param_index_shift = 10; break; // new PF 170105 MDegrain6
+    case 5: param_index_shift = 8; break; // new PF 160926 MDegrain5
+    case 4: param_index_shift = 6; break; // new PF 160926 MDegrain4
+    case 3: param_index_shift = 4; break;
+    case 2: param_index_shift = 2; break;
+    }
+
+    int plane = args[plane_param_index + param_index_shift].AsInt(4);
+    int YUVplanes;
+
+    switch (plane)
+    {
+    case 0:
+      YUVplanes = 1;
+      break;
+    case 1:
+      YUVplanes = 2;
+      break;
+    case 2:
+      YUVplanes = 4;
+      break;
+    case 3:
+      YUVplanes = 6;
+      break;
+    case 4:
+    default:
+      YUVplanes = 7;
+    }
+
+    int thSAD = args[thsad_param_index + param_index_shift].AsInt(400);  // thSAD
+
+    int bits_per_pixel = args[0].AsClip()->GetVideoInfo().BitsPerComponent();
+
+    // bit-depth adaptive limit
+    int limit = args[limit_param_index + param_index_shift].AsInt((1 << bits_per_pixel) - 1); // limit. was: 255 for 8 bit
+
+    return new KMDegrainX(
+      args[0].AsClip(),       // source
+      args[1].AsClip(),       // super
+      args[2].AsClip(),       // mvbw
+      args[3].AsClip(),       // mvfw
+      delta >= 2 ? args[4].AsClip() : nullptr,       // mvbw2
+      delta >= 2 ? args[5].AsClip() : nullptr,       // mvfw2
+      thSAD,                  // thSAD
+      args[5 + param_index_shift].AsInt(thSAD),   // thSAD
+      YUVplanes,              // YUV planes
+      limit,                  // limit
+      args[8 + param_index_shift].AsInt(limit),  // limitC
+      args[9 + param_index_shift].AsInt(400), // thSCD1
+      args[10 + param_index_shift].AsInt(130), // thSCD2
+      true,  // isse
+      false, // planar
+      false, // lsb
+      true,  // mt
+      delta,
+      env
+    );
   }
 };
 
@@ -3485,6 +3669,12 @@ void AddFuncMV(IScriptEnvironment* env)
   env->AddFunction("KMAnalyse",
     "c[blksize]i[overlap]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b",
     KMAnalyse::Create, 0);
+  env->AddFunction("KMDegrain1",
+    "cccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i",
+    KMDegrainX::Create, (void *)1);
+  env->AddFunction("KMDegrain2",
+    "cccccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i",
+    KMDegrainX::Create, (void *)2);
 
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);

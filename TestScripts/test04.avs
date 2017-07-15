@@ -3,16 +3,23 @@ LWLibavVideoSource(srcfile)
 
 ks = KMSuper().Time("Super1")
 ms = MSuper(pel=2).Time("Super2")
-kv = ks.KMAnalyse(isb=true,  delta=2, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
-mv = ms.MAnalyse(isb=true,  delta=2, blksize=16, overlap=8, search=4, searchparam=2, pelsearch=2, truemotion=false, lambda=400, lsad=400, pnew=25, plevel=0, global=true, DCT=0)
+kb1 = ks.KMAnalyse(isb=true,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
+mb1 = ms.MAnalyse(isb=true,  delta=1, blksize=16, overlap=8, search=4, searchparam=2, pelsearch=2, truemotion=false, lambda=400, lsad=400, pnew=25, plevel=0, global=true, DCT=0)
+kf1 = ks.KMAnalyse(isb=false,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
+mf1 = ms.MAnalyse(isb=false,  delta=1, blksize=16, overlap=8, search=4, searchparam=2, pelsearch=2, truemotion=false, lambda=400, lsad=400, pnew=25, plevel=0, global=true, DCT=0)
 
-#KMSuperCheck(ks, ms, last)
-KMAnalyzeCheck(kv, mv, last)
+#KMSuperCheck(ks, ms, last).Time("KMSuperCheck")
+#KMAnalyzeCheck(kb1, mb1, last).Time("KMAnalyzeCheckB")
+#KMAnalyzeCheck(kf1, mf1, last).Time("KMAnalyzeCheckF")
 
-#vec1 = super1.MAnalyse(isb=false, delta=1, blksize=16, overlap=8, pelsearch=2,truemotion=false,lambda=400,pnew=25,global=true,meander=true,sadx264=0).Time("MAnalyze1")
-#vec2 = super2.MAnalyse(isb=false, delta=1, blksize=16, overlap=8, pelsearch=2,truemotion=false,lambda=400,pnew=25,global=true,meander=true,sadx264=0).Time("MAnalyze2")
+kdeg = KMDegrain1(ks, kb1, kf1)
+mdeg = MDegrain1(ms, mb1, mf1)
 
-#show1 = super1.MShow(vec1, tol=10000,showsad=true)
-#show2 = super2.MShow(vec2, tol=10000,showsad=true)
+#diff = mt_makediff(my, ref)
+diff = mt_makediff(kdeg, mdeg, u=3, v=3)
+# (diff < 128) ? 20 : (diff > 128) ? 200 : 128
+diff.mt_lut("x 128 < 20 diff 128 > 200 128 ? ?", u=3, v=3)
+
+#return kdeg
 
 #Interleave(show1.Subtitle("ORIGINAL", y=500,size=48), show2.Subtitle("MOD",y=500,size=48))
