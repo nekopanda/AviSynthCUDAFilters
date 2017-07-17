@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <algorithm>
+#include <cassert>
 #include "avisynth.h"
 
 #undef min
@@ -76,6 +77,10 @@ struct KMVParam
   /*! \brief Height of the frame */
   int nHeight;
 
+  // スーパーフレームの縦横と実際の縦横が異なる場合のみ0以外の値が入る
+  int nActualWidth;
+  int nActualHeight;
+
   int yRatioUV; // ratio of luma plane height to chroma plane height
   int xRatioUV; // ratio of luma plane height to chroma plane width (fixed to 2 for YV12 and YUY2) PF used!
 
@@ -89,6 +94,7 @@ struct KMVParam
 
   /*! \brief number of level for the hierarchal search */
   int nLevels;
+  int nDropLevels;
 
   int nPixelSize; // PF
   int nBitsPerPixel;
@@ -787,19 +793,6 @@ public:
 
 class KMSuper : public GenericVideoFilter
 {
-  // 引数パラメータ
-  int nHPad;
-  int nVPad;
-  int nPel;
-  int nLevels;
-  bool chroma;
-  int nSharp;
-  int nRfilter;
-
-  // その他
-  int nSuperWidth;
-  int nSuperHeight;
-
   KMVParam params;
 
   KDeintKernel kernel;
@@ -812,16 +805,18 @@ public:
     , params(KMVParam::SUPER_FRAME)
   {
     // 今の所対応しているのコレだけ
-    nHPad = 8;
-    nVPad = 8;
-    nPel = 2;
-    nLevels = 0;
-    chroma = true;
-    nSharp = 2;
-    nRfilter = 2;
+    int nHPad = 8;
+    int nVPad = 8;
+    int nPel = 2;
+    int nLevels = 0;
+    bool chroma = true;
+    int nSharp = 2;
+    int nRfilter = 2;
     
     params.nWidth = vi.width;
     params.nHeight = vi.height;
+    params.nActualWidth = 0;
+    params.nActualHeight = 0;
     params.yRatioUV = 1 << vi.GetPlaneHeightSubsampling(PLANAR_U);
     params.xRatioUV = 1 << vi.GetPlaneWidthSubsampling(PLANAR_U);
 
@@ -839,8 +834,8 @@ public:
       nLevels = nLevelsMax;
     }
 
-    nSuperWidth = params.nWidth + 2 * nHPad;
-    nSuperHeight = PlaneSuperOffset(false, params.nHeight, nLevels, nPel, nVPad, nSuperWidth, params.yRatioUV) / nSuperWidth;
+    int nSuperWidth = params.nWidth + 2 * nHPad;
+    int nSuperHeight = PlaneSuperOffset(false, params.nHeight, nLevels, nPel, nVPad, nSuperWidth, params.yRatioUV) / nSuperWidth;
     if (params.yRatioUV == 2 && nSuperHeight & 1) {
       nSuperHeight++; // even
     }
@@ -852,6 +847,7 @@ public:
     params.nPel = nPel;
     params.chroma = chroma;
     params.nLevels = nLevels;
+    params.nDropLevels = 0;
     params.pixelType = vi.pixel_type;
 
     KMVParam::SetParam(vi, &params);
@@ -973,6 +969,7 @@ public:
   virtual ~PlaneOfBlocksBase() { }
   virtual void EstimateGlobalMVDoubled(VECTOR* globalMV) = 0;
   virtual void InterpolatePrediction(const PlaneOfBlocksBase* pob) = 0;
+  virtual void SetMVs(const MVData *src, MVData *out) = 0;
   virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, MVData *out) = 0;
   virtual int GetArraySize() = 0;
   virtual int WriteDefault(MVData *out) = 0;
@@ -1531,6 +1528,17 @@ public:
     }
   }
 
+  void SetMVs(const MVData *src, MVData *out)
+  {
+    assert(src->nCount == nBlkCount);
+    // write the plane's header
+    out->nCount = nBlkCount;
+    for (int i = 0; i < nBlkCount; ++i) {
+      vectors[i] = src->data[i];
+      out->data[i] = src->data[i];
+    }
+  }
+
   /* search the vectors for the whole plane */
   void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, MVData *out)
   {
@@ -1911,13 +1919,15 @@ public:
 class GroupOfPlanes
 {
   const int nLevelCount;
+  const int nPreAnalyzedCount;
   const bool global;
 
   std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> planes;
 
 public:
   GroupOfPlanes(
-    int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nPel, bool chroma,
+    int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nDropLevels, int nPreAnalyzedCount, 
+    int nPel, bool chroma,
     int nOverlapX, int nOverlapY, const LevelInfo* linfo, int xRatioUV, int yRatioUV,
     int divideExtra, int nPixelSize, int nBitsPerPixel,
     bool mt_flag, int chromaSADScale, 
@@ -1929,17 +1939,21 @@ public:
 
     IScriptEnvironment *env)
     : nLevelCount(nLevelCount)
+    , nPreAnalyzedCount(nPreAnalyzedCount)
     , global(global)
     , planes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
   {
+    assert(nDropLevels == 0 || nPel == 1);
+
     for (int i = 0; i < nLevelCount; i++) {
-      int nPelLevel = (i == 0) ? nPel : 1;
+      int nActualLevel = i + nDropLevels;
+      int nPelLevel = (nActualLevel == 0) ? nPel : 1;
       int nBlkX = linfo[i].nBlkX;
       int nBlkY = linfo[i].nBlkY;
 
       // full search for coarse planes
       SearchType searchTypeLevel =
-        (i == 0 || searchType == HSEARCH || searchType == VSEARCH)
+        (nActualLevel == 0 || searchType == HSEARCH || searchType == VSEARCH)
         ? searchType
         : EXHAUSTIVE;
 
@@ -1948,7 +1962,7 @@ public:
 
       if (nPixelSize == 1) {
         planes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-          new PlaneOfBlocks<uint8_t>(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, i,
+          new PlaneOfBlocks<uint8_t>(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
             i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
             nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale,
 
@@ -1960,7 +1974,7 @@ public:
       }
       else {
         planes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-          new PlaneOfBlocks<uint16_t>(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, i,
+          new PlaneOfBlocks<uint16_t>(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
             i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
             nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale,
 
@@ -1973,7 +1987,7 @@ public:
     }
   }
 
-  void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, MVDataGroup *out)
+  void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, const MVDataGroup* pre, MVDataGroup *out)
   {
     out->isValid = true;
 
@@ -1982,8 +1996,26 @@ public:
     // create and init global motion vector as zero
     VECTOR globalMV = { 0, 0, -1 };
 
+    int nLevelFrom = nLevelCount - 1;
+
+    // preがあればoutにコピーしてレベルを進めておく
+    if (pre) {
+      const BYTE* preptr = pre->data;
+      nLevelFrom -= nPreAnalyzedCount;
+      for (int i = nLevelCount - 1; i > nLevelFrom; i--)
+      {
+        planes[i]->SetMVs(
+          reinterpret_cast<const MVData*>(preptr),
+          reinterpret_cast<MVData*>(ptr));
+
+        int arraySize = planes[i]->GetArraySize();
+        ptr += arraySize;
+        preptr += arraySize;
+      }
+    }
+
     // Refining the search until we reach the highest detail interpolation.
-    for (int i = nLevelCount - 1; i >= 0; i--) 
+    for (int i = nLevelFrom; i >= 0; i--)
     {
       if (i != nLevelCount - 1) {
         if (global)
@@ -2039,6 +2071,9 @@ private:
   std::unique_ptr<GroupOfPlanes> _vectorfields_aptr;
   std::unique_ptr<KMSuperFrame> pSrcSF, pRefSF;
 
+  PClip partial;
+  const KMVParam* partialParams;
+
   void LoadSourceFrame(KMSuperFrame *sf, PVideoFrame &src)
   {
     const unsigned char *	pSrcY;
@@ -2062,7 +2097,7 @@ private:
 public:
 
   KMAnalyse(
-    PClip child, int blksizex, int blksizey, int lv, int st, int stp,
+    PClip child, PClip partial, int blksizex, int blksizey, int lv, int st, int stp,
     int pelSearch, bool isb, int lambda, bool chroma, int df, int lsad,
     int plevel, bool global, int pnew, int penaltyZero, int pglobal,
     int overlapx, int overlapy, const char* _outfilename, int dctmode,
@@ -2072,8 +2107,9 @@ public:
     : GenericVideoFilter(child)
     , params(KMVParam::MV_FRAME)
     , _vectorfields_aptr()
+    , partial(partial)
+    , partialParams(partial ? KMVParam::GetParam(partial->GetVideoInfo(), env) : nullptr)
   {
-
     int nPixelSize = vi.ComponentSize();
     int nBitsPerPixel = vi.BitsPerComponent();
 
@@ -2127,8 +2163,12 @@ public:
       chroma = false;
     }
 
-    const int nBlkX = (params.nWidth - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX);
-    const int nBlkY = (params.nHeight - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY);
+    // Partial Super の場合 nActual~ と異なる場合がある
+    const int nWidth = params.nActualWidth ? params.nActualWidth : params.nWidth;
+    const int nHeight = params.nActualHeight ? params.nActualHeight : params.nHeight;
+
+    const int nBlkX = (nWidth - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX);
+    const int nBlkY = (nHeight - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY);
     const int nWidth_B = (params.nBlkSizeX - params.nOverlapX) * nBlkX + params.nOverlapX; // covered by blocks
     const int nHeight_B = (params.nBlkSizeY - params.nOverlapY) * nBlkY + params.nOverlapY;
 
@@ -2223,6 +2263,8 @@ public:
       params.nBlkSizeX,
       params.nBlkSizeY,
       int(params.levelInfo.size()),
+      params.nDropLevels,
+      partialParams ? int(partialParams->levelInfo.size()) : 0,
       params.nPel,
       params.chroma,
       params.nOverlapX,
@@ -2290,7 +2332,14 @@ public:
       ::PVideoFrame	ref = child->GetFrame(nref, env); // v2.0
       LoadSourceFrame(pRefSF.get(), ref);
 
-      _vectorfields_aptr->SearchMVs(pSrcSF.get(), pRefSF.get(), pDst);
+      PVideoFrame pre;
+      const MVDataGroup* pPre = nullptr;
+      if (partialParams) {
+        pre = partial->GetFrame(n, env);
+        pPre = reinterpret_cast<const MVDataGroup*>(pre->GetReadPtr());
+      }
+
+      _vectorfields_aptr->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst);
     }
 
     return dst;
@@ -2313,24 +2362,25 @@ public:
     int overlap = args[2].AsInt(8);
 
     bool truemotion = false; // preset added in v0.9.13
-    lambda = args[6].AsInt(400);
-    lsad = args[7].AsInt(400);
+    lambda = args[7].AsInt(400);
+    lsad = args[8].AsInt(400);
     pnew = 25;
     plevel = 0;
-    global = args[8].AsBool(true);
+    global = args[9].AsBool(true);
 
     return new KMAnalyse(
       args[0].AsClip(),       // super
+      args[11].AsClip(),      // partial
       blksize,
       blksizeV,                // v.1.7
       0,       // levels skip
-      4,       // search type
+      args[3].AsInt(4),       // search type
       2,       // search parameter
       2,       // search parameter at finest level
-      args[3].AsBool(false),  // is backward
+      args[4].AsBool(false),  // is backward
       lambda,                  // lambda
-      args[4].AsBool(true),   // chroma = true since v1.0.1
-      args[5].AsInt(1),       // delta frame
+      args[5].AsBool(true),   // chroma = true since v1.0.1
+      args[6].AsInt(1),       // delta frame
       lsad,                    // lsad - SAD limit for lambda using - added by Fizick (was internal fixed to 400 since v0.9.7)
       plevel,                  // plevel - exponent for lambda scaling on level size  - added by Fizick
       global,                  // use global motion predictor - added by Fizick
@@ -2346,7 +2396,7 @@ public:
       10000,   // badSAD
       24,      // badrange
       true,   // isse
-      args[9].AsBool(true),   // meander blocks scan
+      args[10].AsBool(true),   // meander blocks scan
       false,  // temporal predictor
       false,  // try many
       false,  // multi
@@ -2354,6 +2404,99 @@ public:
       0,   // scaleCSAD
       env
     );
+  }
+};
+
+class KMPartialSuper : public GenericVideoFilter
+{
+  const KMVParam* superParams;
+  KMVParam params;
+  KDeintKernel kernel;
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment* env)
+  {
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame	dst = env->NewVideoFrame(vi);
+
+    int nDropLevels = superParams->nLevels - params.nLevels;
+
+    int nVPad = params.nVPad;
+    int nHPad = params.nHPad;
+    int yRatioUV = params.yRatioUV;
+    int xRatioUV = params.xRatioUV;
+    int nHeight = vi.height;
+    int nWidth = vi.width;
+
+    const pixel_t* pSrcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* pSrcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* pSrcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    int nSrcPitchY = src->GetPitch(PLANAR_Y) >> params.nPixelShift;
+    int nSrcPitchUV = src->GetPitch(PLANAR_U) >> params.nPixelShift;
+
+    pixel_t* pDstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* pDstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* pDstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    int nDstPitchY = dst->GetPitch(PLANAR_Y) >> params.nPixelShift;
+    int nDstPitchUV = dst->GetPitch(PLANAR_U) >> params.nPixelShift;
+
+    unsigned int offY = PlaneSuperOffset(
+      false, superParams->nHeight, nDropLevels, superParams->nPel, nVPad, nSrcPitchY, yRatioUV); // no need here xRatioUV and pixelsize
+    unsigned int offU = PlaneSuperOffset(
+      true, superParams->nHeight / yRatioUV, nDropLevels, superParams->nPel, nVPad / yRatioUV, nSrcPitchUV, yRatioUV);
+    unsigned int offV = PlaneSuperOffset(
+      true, superParams->nHeight / yRatioUV, nDropLevels, superParams->nPel, nVPad / yRatioUV, nSrcPitchUV, yRatioUV);
+
+    if (src->IsCUDA()) {
+      kernel.Copy(pDstY, nDstPitchY, pSrcY + offY, nSrcPitchY, nWidth, nHeight);
+      kernel.Copy(pDstU, nDstPitchUV, pSrcU + offU, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
+      kernel.Copy(pDstV, nDstPitchUV, pSrcV + offV, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
+    }
+    else {
+      Copy(pDstY, nDstPitchY, pSrcY + offY, nSrcPitchY, nWidth, nHeight);
+      Copy(pDstU, nDstPitchUV, pSrcU + offU, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
+      Copy(pDstV, nDstPitchUV, pSrcV + offV, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
+    }
+
+    return dst;
+  }
+public:
+  KMPartialSuper(PClip child, int nDropLevels, IScriptEnvironment* env)
+    : GenericVideoFilter(child)
+    , superParams(KMVParam::GetParam(vi, env))
+    , params(*superParams)
+  {
+    params.nWidth = PlaneWidthLuma(superParams->nWidth, nDropLevels, superParams->xRatioUV, superParams->nHPad);
+    params.nHeight = PlaneHeightLuma(superParams->nHeight, nDropLevels, superParams->yRatioUV, superParams->nVPad);
+    params.nActualWidth = superParams->nWidth >> nDropLevels;
+    params.nActualHeight = superParams->nHeight >> nDropLevels;
+    params.nLevels = superParams->nLevels - nDropLevels;
+    params.nDropLevels = nDropLevels;
+    params.nPel = 1;
+
+    int nSuperWidth = params.nWidth + 2 * params.nHPad;
+    int nSuperHeight = PlaneSuperOffset(false, params.nHeight, params.nLevels, 1, params.nVPad, nSuperWidth, params.yRatioUV) / nSuperWidth;
+    if (params.yRatioUV == 2 && nSuperHeight & 1) {
+      nSuperHeight++; // even
+    }
+    vi.width = nSuperWidth;
+    vi.height = nSuperHeight;
+
+    KMVParam::SetParam(vi, &params);
+  }
+
+  PVideoFrame __stdcall	GetFrame(int n, IScriptEnvironment* env)
+  {
+    if (params.nPixelSize == 1) {
+      return Proc<uint8_t>(n, env);
+    }
+    else {
+      return Proc<uint16_t>(n, env);
+    }
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KMPartialSuper(args[0].AsClip(), args[1].AsInt(3), env);
   }
 };
 
@@ -2555,6 +2698,62 @@ public:
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KMAnalyzeCheck(args[0].AsClip(), args[1].AsClip(), args[2].AsClip(), env);
+  }
+};
+
+class KMAnalyzeCheck2 : public GenericVideoFilter
+{
+  PClip kmv1;
+  PClip kmv2;
+
+  const KMVParam* params;
+
+public:
+  KMAnalyzeCheck2(PClip kmv1, PClip kmv2, PClip view, IScriptEnvironment* env)
+    : GenericVideoFilter(view)
+    , kmv1(kmv1)
+    , kmv2(kmv2)
+    , params(KMVParam::GetParam(kmv1->GetVideoInfo(), env))
+  {
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    PVideoFrame ret = child->GetFrame(n, env);
+    PVideoFrame kmvframe1 = kmv1->GetFrame(n, env);
+    PVideoFrame kmvframe2 = kmv2->GetFrame(n, env);
+
+    const MVDataGroup* kdata1 = reinterpret_cast<const MVDataGroup*>(kmvframe1->GetReadPtr());
+    const MVData* kptr1 = reinterpret_cast<const MVData*>(kdata1->data);
+    const MVDataGroup* kdata2 = reinterpret_cast<const MVDataGroup*>(kmvframe2->GetReadPtr());
+    const MVData* kptr2 = reinterpret_cast<const MVData*>(kdata2->data);
+
+    // validity
+    if (kdata1->isValid != kdata2->isValid) {
+      env->ThrowError("Validity missmatch");
+    }
+
+    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+      int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+
+      for (int v = 0; v < nBlkCount; ++v) {
+        VECTOR kmv1 = kptr1->data[v];
+        VECTOR kmv2 = kptr2->data[v];
+        if (kmv1.x != kmv2.x || kmv1.y != kmv2.y || kmv1.sad != kmv2.sad) {
+          env->ThrowError("Motion vector missmatch");
+        }
+      }
+
+      kptr1 = reinterpret_cast<const MVData*>(&kptr1->data[kptr1->nCount]);
+      kptr2 = reinterpret_cast<const MVData*>(&kptr2->data[kptr2->nCount]);
+    }
+
+    return ret;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KMAnalyzeCheck2(args[0].AsClip(), args[1].AsClip(), args[2].AsClip(), env);
   }
 };
 
@@ -4058,8 +4257,10 @@ void AddFuncMV(IScriptEnvironment* env)
 {
   env->AddFunction("KMSuper", "c[debug]i", KMSuper::Create, 0);
 
+  env->AddFunction("KMPartialSuper", "c[drop]i", KMPartialSuper::Create, 0);
+
   env->AddFunction("KMAnalyse",
-    "c[blksize]i[overlap]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b",
+    "c[blksize]i[overlap]i[search]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b[partial]c",
     KMAnalyse::Create, 0);
 
   env->AddFunction("KMDegrain1",
@@ -4076,4 +4277,5 @@ void AddFuncMV(IScriptEnvironment* env)
 
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);
+  env->AddFunction("KMAnalyzeCheck2", "[kmanalyze1]c[kmanalyze2]c[view]c", KMAnalyzeCheck2::Create, 0);
 }
