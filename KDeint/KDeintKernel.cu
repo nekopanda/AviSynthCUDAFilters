@@ -670,8 +670,20 @@ __device__ void dev_read_pixels(int tx, const pixel_t* src, int nPitch, int offx
 {
   int y = tx / BLK_SIZE;
   int x = tx % BLK_SIZE;
-  for (; y < BLK_SIZE; y += SRCH_DIMX / BLK_SIZE) {
+  if (BLK_SIZE == 8) {
+    if (y < 8) {
+      dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
+    }
+  }
+  else if (BLK_SIZE == 16) {
     dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
+    y += 8;
+    dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
+  }
+  else if (BLK_SIZE == 32) {
+    for (; y < BLK_SIZE; y += SRCH_DIMX / BLK_SIZE) {
+      dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
+    }
   }
 }
 
@@ -834,5 +846,419 @@ __global__ void kl_search(
   }
 }
 
+// threads=128,
+template <typename pixel_t, int BLK_SIZE, int NPEL>
+__global__ void kl_calc_all_sad(
+  int nBlkX, int nBlkY,
+  const short2* vectors, // [x,y]
+  int* dst_sad,
+  int nHPad, int nVPad,
+  const pixel_t* __restrict__ pSrcY, const pixel_t* __restrict__ pSrcU, const pixel_t* __restrict__ pSrcV,
+  const pixel_t* __restrict__ pRefY, const pixel_t* __restrict__ pRefU, const pixel_t* __restrict__ pRefV,
+  int nPitchY, int nPitchU, int nPitchV,
+  int nImgPitchY, int nImgPitchU, int nImgPitchV)
+{
+  enum {
+    BLK_SIZE_UV = BLK_SIZE / 2,
+    BLK_STEP = BLK_SIZE / 2,
+  };
+
+  int tid = threadIdx.x;
+  int x = blockIdx.x * blockDim.x;
+  int y = blockIdx.y * blockDim.y;
+
+  int offx = nHPad + blkx * BLK_STEP;
+  int offy = nVPad + blky * BLK_STEP;
+
+  // TODO:
+
+  int sad = 0;
+  if (BLK_SIZE == 16) {
+    // ブロックサイズがスレッド数と一致
+    int yx = wi;
+    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
+      sad = __sad(pSrcY[yx + yy * nPitchY], pRefY[yx + yy * nPitchY], sad);
+    }
+    // UVは8x8
+    int uvx = wi % 8;
+    int uvy = wi / 8;
+    for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
+      sad = __sad(pSrcU[uvx + uvy * nPitchU], pRefU[uvx + uvy * nPitchU], sad);
+      sad = __sad(pSrcV[uvx + uvy * nPitchV], pRefV[uvx + uvy * nPitchV], sad);
+    }
+  }
+  else if (BLK_SIZE == 32) {
+    // 32x32
+    int yx = wi;
+    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 32回ループ
+      sad = __sad(pSrcY[yx + yy * nPitchY], pRefY[yx + yy * nPitchY], sad);
+      sad = __sad(pSrcY[yx + 16 + yy * nPitchY], pRefY[yx + 16 + yy * nPitchY], sad);
+    }
+    // ブロックサイズがスレッド数と一致
+    int uvx = wi;
+    for (int uvy = 0; uvy < BLK_SIZE; ++uvy) { // 16回ループ
+      sad = __sad(pSrcU[uvx + uvy * nPitchU], pRefU[uvx + uvy * nPitchU], sad);
+      sad = __sad(pSrcV[uvx + uvy * nPitchV], pRefV[uvx + uvy * nPitchV], sad);
+    }
+  }
+  return dev_reduce_sad(sad, wi);
+}
+
+__global__ void kl_prepare_search()
+{
+  // TODO:
+}
+
+__global__ void kl_make_out_vectors()
+{
+  // TODO:
+}
+
+__global__ void kl_load_mv()
+{
+  // TODO:
+}
+
+// MAXは2べきのみ対応
+template <typename K, typename V, int MAX, typename REDUCER>
+__device__ void dev_reduce2(int tid, K& key, V& value, K* kbuf, V* vbuf)
+{
+  REDUCER red;
+  if (MAX >= 64) {
+    kbuf[tid] = key;
+    vbuf[tid] = value;
+    __syncthreads();
+    if (MAX >= 1024) {
+      if (tid < 512) {
+        red(kbuf[tid], vbuf[tid], kbuf[tid + 512], vbuf[tid + 512]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 512) {
+      if (tid < 256) {
+        red(kbuf[tid], vbuf[tid], kbuf[tid + 256], vbuf[tid + 256]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 256) {
+      if (tid < 128) {
+        red(kbuf[tid], vbuf[tid], kbuf[tid + 128], vbuf[tid + 128]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 128) {
+      if (tid < 64) {
+        red(kbuf[tid], vbuf[tid], kbuf[tid + 64], vbuf[tid + 64]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 64) {
+      if (tid < 32) {
+        red(kbuf[tid], vbuf[tid], kbuf[tid + 32], vbuf[tid + 32]);
+      }
+      __syncthreads();
+    }
+    key = kbuf[tid];
+    value = vbuf[tid];
+  }
+  if (tid < 32) {
+    K okey;
+    V ovalue;
+    if (MAX >= 32) {
+      okey = __shfl_down(key, 16);
+      ovalue = __shfl_down(value, 16);
+      red(key, value, okey, ovalue);
+    }
+    if (MAX >= 16) {
+      okey = __shfl_down(key, 8);
+      ovalue = __shfl_down(value, 8);
+      red(key, value, okey, ovalue);
+    }
+    if (MAX >= 8) {
+      okey = __shfl_down(key, 4);
+      ovalue = __shfl_down(value, 4);
+      red(key, value, okey, ovalue);
+    }
+    if (MAX >= 4) {
+      okey = __shfl_down(key, 2);
+      ovalue = __shfl_down(value, 2);
+      red(key, value, okey, ovalue);
+    }
+    if (MAX >= 2) {
+      okey = __shfl_down(key, 1);
+      ovalue = __shfl_down(value, 1);
+      red(key, value, okey, ovalue);
+    }
+  }
+}
+
+struct CountIndexReducer {
+  void operator()(int& cnt, int& idx, int ocnt, int oidx) {
+    if (ocnt > cnt) {
+      cnt = ocnt;
+      idx = oidx;
+    }
+  }
+};
+
+// threads=(1024), blocks=(2)
+__global__ void kl_most_freq_mv(short2* vectors, int nVec, short2* globalMVec)
+{
+  enum {
+    DIMX = 1024,
+    // level==1が最大なので、このサイズで8Kくらいまで対応
+    FREQ_SIZE = DIMX*8,
+    HALF_SIZE = FREQ_SIZE / 2
+  };
+
+  int tid = threadIdx.x;
+
+  union SharedBuffer {
+    int freq_arr[FREQ_SIZE]; //32KB
+    struct {
+      int red_cnt[DIMX];
+      int red_idx[DIMX];
+    };
+  };
+  __shared__ SharedBuffer b;
+
+  for (int i = 0; i < FREQ_SIZE/ DIMX; i += DIMX) {
+    b.freq_arr[tid + i * DIMX] = 0;
+  }
+  __syncthreads();
+
+  if (blockIdx.x == 0) {
+    // x
+    for (int i = tid; i < nVec; i += DIMX) {
+      atomicAdd(&b.freq_arr[vectors[i].x + HALF_SIZE], 1);
+    }
+  }
+  else {
+    // y
+    for (int i = tid; i < nVec; i += DIMX) {
+      atomicAdd(&b.freq_arr[vectors[i].y + HALF_SIZE], 1);
+    }
+  }
+  __syncthreads();
+
+  int maxcnt = 0;
+  int index = 0;
+  for (int i = 0; i < FREQ_SIZE / DIMX; i += DIMX) {
+    if (b.freq_arr[tid + i * DIMX] > maxcnt) {
+      maxcnt = b.freq_arr[tid + i * DIMX];
+      index = tid + i * DIMX;
+    }
+  }
+  __syncthreads();
+
+  dev_reduce2<int, int, DIMX, CountIndexReducer>(tid, maxcnt, index, b.red_cnt, b.red_idx);
+
+  if (tid == 0) {
+    if (blockIdx.x == 0) {
+      // x
+      globalMVec->x = index - HALF_SIZE;
+    }
+    else {
+      // y
+      globalMVec->y = index - HALF_SIZE;
+    }
+  }
+}
+
+__global__ void kl_mean_global_mv(short2* vectors, int nVec, short2* globalMVec)
+{
+  enum {
+    DIMX = 1024,
+  };
+
+  int tid = threadIdx.x;
+  int medianx = globalMVec->x;
+  int mediany = globalMVec->y;
+
+  int meanvx = 0;
+  int meanvy = 0;
+  int num = 0;
+
+  for (int i = tid; i < nVec; i += DIMX) {
+    if (__sad(vectors[i].x, medianx, 0) < 6
+      && __sad(vectors[i].y, mediany, 0) < 6)
+    {
+      meanvx += vectors[i].x;
+      meanvy += vectors[i].y;
+      num += 1;
+    }
+  }
+
+  __shared__ int red_vx[DIMX];
+  __shared__ int red_vy[DIMX];
+  __shared__ int red_num[DIMX];
+
+  red_vx[tid] = meanvx;
+  red_vy[tid] = meanvy;
+  red_num[tid] = num;
+
+  __syncthreads();
+  if (tid < 512) {
+    red_vx[tid] += red_vx[tid + 512];
+    red_vy[tid] += red_vy[tid + 512];
+    red_num[tid] += red_num[tid + 512];
+  }
+  __syncthreads();
+  if (tid < 256) {
+    red_vx[tid] += red_vx[tid + 256];
+    red_vy[tid] += red_vy[tid + 256];
+    red_num[tid] += red_num[tid + 256];
+  }
+  __syncthreads();
+  if (tid < 128) {
+    red_vx[tid] += red_vx[tid + 128];
+    red_vy[tid] += red_vy[tid + 128];
+    red_num[tid] += red_num[tid + 128];
+  }
+  __syncthreads();
+  if (tid < 64) {
+    red_vx[tid] += red_vx[tid + 64];
+    red_vy[tid] += red_vy[tid + 64];
+    red_num[tid] += red_num[tid + 64];
+  }
+  __syncthreads();
+  if (tid < 32) {
+    red_vx[tid] += red_vx[tid + 32];
+    red_vy[tid] += red_vy[tid + 32];
+    red_num[tid] += red_num[tid + 32];
+  }
+  __syncthreads();
+  meanvx = red_vx[tid];
+  meanvy = red_vy[tid];
+  num = red_num[tid];
+  if (tid < 32) {
+    meanvx += __shfl_down(meanvx, 16);
+    meanvy += __shfl_down(meanvy, 16);
+    num += __shfl_down(num, 16);
+    meanvx += __shfl_down(meanvx, 8);
+    meanvy += __shfl_down(meanvy, 8);
+    num += __shfl_down(num, 8);
+    meanvx += __shfl_down(meanvx, 4);
+    meanvy += __shfl_down(meanvy, 4);
+    num += __shfl_down(num, 4);
+    meanvx += __shfl_down(meanvx, 2);
+    meanvy += __shfl_down(meanvy, 2);
+    num += __shfl_down(num, 2);
+    meanvx += __shfl_down(meanvx, 1);
+    meanvy += __shfl_down(meanvy, 1);
+    num += __shfl_down(num, 1);
+
+    if (tid == 0) {
+      globalMVec->x = 2 * meanvx / num;
+      globalMVec->y = 2 * meanvy / num;
+    }
+  }
+}
+
+// normFactor = 3 - nLogPel + pob.nLogPel
+// normov = (nBlkSizeX - nOverlapX)*(nBlkSizeY - nOverlapY)
+// aoddx = (nBlkSizeX * 3 - nOverlapX * 2)
+// aevenx = (nBlkSizeX * 3 - nOverlapX * 4);
+// aoddy = (nBlkSizeY * 3 - nOverlapY * 2);
+// aeveny = (nBlkSizeY * 3 - nOverlapY * 4);
+// atotalx = (nBlkSizeX - nOverlapX) * 4
+// atotaly = (nBlkSizeY - nOverlapY) * 4
+__global__ void kl_interpolate_prediction(
+  const short2* src_vector, const int* src_sad,
+  short2* dst_vector, int* dst_sad,
+  int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
+  int normFactor, int normov, int atotal, int aodd, int aeven)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < nDstBlkX && y < nDstBlkY) {
+    short2 v1, v2, v3, v4;
+    int sad1, sad2, sad3, sad4;
+    int i = x;
+    int j = y;
+    if (i >= 2 * nSrcBlkX)
+    {
+      i = 2 * nSrcBlkX - 1;
+    }
+    if (j >= 2 * nSrcBlkY)
+    {
+      j = 2 * nSrcBlkY - 1;
+    }
+    int offy = -1 + 2 * (j % 2);
+    int offx = -1 + 2 * (i % 2);
+    int iper2 = i / 2;
+    int jper2 = j / 2;
+
+    if ((i == 0) || (i >= 2 * nSrcBlkX - 1))
+    {
+      if ((j == 0) || (j >= 2 * nSrcBlkY - 1))
+      {
+        v1 = v2 = v3 = v4 = src_vector[iper2 + (jper2)* nSrcBlkX];
+        sad1 = sad2 = sad3 = sad4 = src_sad[iper2 + (jper2)* nSrcBlkX];
+      }
+      else
+      {
+        v1 = v2 = src_vector[iper2 + (jper2)* nSrcBlkX];
+        sad1 = sad2 = src_sad[iper2 + (jper2)* nSrcBlkX];
+        v3 = v4 = src_vector[iper2 + (jper2 + offy) * nSrcBlkX];
+        sad3 = sad4 = src_sad[iper2 + (jper2 + offy) * nSrcBlkX];
+      }
+    }
+    else if ((j == 0) || (j >= 2 * nSrcBlkY - 1))
+    {
+      v1 = v2 = src_vector[iper2 + (jper2)* nSrcBlkX];
+      sad1 = sad2 = src_sad[iper2 + (jper2)* nSrcBlkX];
+      v3 = v4 = src_vector[iper2 + offx + (jper2)* nSrcBlkX];
+      sad3 = sad4 = src_sad[iper2 + offx + (jper2)* nSrcBlkX];
+    }
+    else
+    {
+      v1 = src_vector[iper2 + (jper2)* nSrcBlkX];
+      sad1 = src_sad[iper2 + (jper2)* nSrcBlkX];
+      v2 = src_vector[iper2 + offx + (jper2)* nSrcBlkX];
+      sad2 = src_sad[iper2 + offx + (jper2)* nSrcBlkX];
+      v3 = src_vector[iper2 + (jper2 + offy) * nSrcBlkX];
+      sad3 = src_sad[iper2 + (jper2 + offy) * nSrcBlkX];
+      v4 = src_vector[iper2 + offx + (jper2 + offy) * nSrcBlkX];
+      sad4 = src_sad[iper2 + offx + (jper2 + offy) * nSrcBlkX];
+    }
+
+    int	ax1 = (offx > 0) ? aodd : aeven;
+    int ax2 = atotal - ax1;
+    int ay1 = (offy > 0) ? aodd : aeven;
+    int ay2 = atotal - ay1;
+    int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
+    int vx = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
+    int vy = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
+    
+    sad_t tmp_sad = ((sad_t)a11*sad1 + (sad_t)a21*sad2 + (sad_t)a12*sad3 + (sad_t)a22*sad4) / normov;
+
+    if (normFactor > 0) {
+      vx >>= normFactor;
+      vy >>= normFactor;
+    }
+    else {
+      vx <<= -normFactor;
+      vy <<= -normFactor;
+    }
+
+    int index = x + y * nDstBlkX;
+    short2 v = { vx,vy };
+    dst_vector[index] = v;
+    dst_sad[index] = (int)(tmp_sad >> 4);
+  }
+}
+
+__global__ void kl_write_default_mv(MVData* data, int nBlkCount, int verybigSAD)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+  if (x < nBlkCount) {
+    data->data[x].x = 0;
+    data->data[x].y = 0;
+    data->data[x].x = verybigSAD;
+  }
+}
 
 

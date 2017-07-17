@@ -43,3 +43,23 @@ __host__ __device__ T clamp(T n, T min, T max)
 			env->ThrowError("[CUDA Error] %d: %s", err__, cudaGetErrorString(err__)); \
 				} \
 		} while (0)
+
+
+struct VECTOR
+{
+  int x;
+  int y;
+  int sad;
+};
+
+struct MVDataGroup
+{
+  int isValid;
+  BYTE data[1]; // MVData[]
+};
+
+struct MVData
+{
+  int nCount;
+  VECTOR data[1];
+};
