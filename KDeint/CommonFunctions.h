@@ -51,15 +51,3 @@ struct VECTOR
   int y;
   int sad;
 };
-
-struct MVDataGroup
-{
-  int isValid;
-  BYTE data[1]; // MVData[]
-};
-
-struct MVData
-{
-  int nCount;
-  VECTOR data[1];
-};

@@ -11,6 +11,8 @@
 #include "CommonFunctions.h"
 #include "KDeintKernel.h"
 
+#include "ReduceKernel.cuh"
+
 /////////////////////////////////////////////////////////////////////////////
 // COPY
 /////////////////////////////////////////////////////////////////////////////
@@ -383,16 +385,6 @@ __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int
   }
 }
 
-__device__ int dev_reduce_sad(int sad, int tid)
-{
-  // warp shuffleでreduce
-  sad += __shfl_down(sad, 8);
-  sad += __shfl_down(sad, 4);
-  sad += __shfl_down(sad, 2);
-  sad += __shfl_down(sad, 1);
-  return sad;
-}
-
 template <typename pixel_t, int BLK_SIZE>
 __device__ sad_t dev_calc_sad(
   int wi,
@@ -429,7 +421,7 @@ __device__ sad_t dev_calc_sad(
       sad = __sad(pSrcV[uvx + uvy * BLK_SIZE], pRefV[uvx + uvy * nPitchV], sad);
     }
   }
-  return dev_reduce_sad(sad, wi);
+  return dev_reduce_warp<int, 16, AddReducer>(sad, wi);
 }
 
 // MAX - (MAX/4) <= (結果の個数) <= MAX であること
@@ -691,11 +683,11 @@ template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
 __global__ void kl_search(
   int nBlkX, int nBlkY, const SearchBlock* __restrict__ blocks,
   short2* vectors, // [x,y]
-  int nHPad, int nVPad,
+  int nPad,
   const pixel_t* __restrict__ pSrcY, const pixel_t* __restrict__ pSrcU, const pixel_t* __restrict__ pSrcV,
   const pixel_t* __restrict__ pRefY, const pixel_t* __restrict__ pRefU, const pixel_t* __restrict__ pRefV,
-  int nPitchY, int nPitchU, int nPitchV,
-  int nImgPitchY, int nImgPitchU, int nImgPitchV
+  int nPitchY, int nPitchUV,
+  int nImgPitchY, int nImgPitchUV
 )
 {
   enum {
@@ -711,16 +703,16 @@ __global__ void kl_search(
     for (int blky = 0; blky < nBlkY; ++blky) {
 
       // srcをshared memoryに転送
-      int offx = nHPad + blkx * BLK_STEP;
-      int offy = nVPad + blky * BLK_STEP;
+      int offx = nPad + blkx * BLK_STEP;
+      int offy = nPad + blky * BLK_STEP;
 
       __shared__ pixel_t srcY[BLK_SIZE * BLK_SIZE];
       __shared__ pixel_t srcU[BLK_SIZE_UV * BLK_SIZE_UV];
       __shared__ pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
 
       dev_read_pixels<pixel_t, BLK_SIZE>(tx, pSrcY, nPitchY, offx, offy, srcY);
-      dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, pSrcU, nPitchU, offx / 2, offy / 2, srcU);
-      dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, pSrcV, nPitchV, offx / 2, offy / 2, srcV);
+      dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, pSrcU, nPitchUV, offx / 2, offy / 2, srcU);
+      dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, pSrcV, nPitchUV, offx / 2, offy / 2, srcV);
 
       __shared__ const pixel_t* pRefBY;
       __shared__ const pixel_t* pRefBU;
@@ -778,15 +770,15 @@ __global__ void kl_search(
         result[tx].cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
         pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
-        pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x / 2, y / 2);
-        pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x / 2, y / 2);
+        pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, x / 2, y / 2);
+        pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, x / 2, y / 2);
       }
 
       __syncthreads();
 
       // まずは7箇所を計算
       if (bx < 7) {
-        sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV);
+        sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
         if (wi == 0) {
           if (bx < 3) {
             // pzero, pglobal, 1
@@ -817,22 +809,22 @@ __global__ void kl_search(
         dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL>(
           tx, wi, bx, bmx, bmy, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
-          nPitchY, nPitchU, nPitchV, nImgPitchY, nImgPitchU, nImgPitchV);
+          nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
         dev_expanding_search_2<pixel_t, BLK_SIZE, NPEL>(
           tx, wi, bx, bmx, bmy, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
-          nPitchY, nPitchU, nPitchV, nImgPitchY, nImgPitchU, nImgPitchV);
+          nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
       }
       else if (SEARCH == 2) {
         // HEX2SEARCH
         dev_hex2_search_1<pixel_t, BLK_SIZE, NPEL>(
           tx, wi, bx, result[0].xy.x, result[0].xy.y, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
-          nPitchY, nPitchU, nPitchV, nImgPitchY, nImgPitchU, nImgPitchV);
+          nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
         dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL>(
           tx, wi, bx, result[0].xy.x, result[0].xy.y, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
-          nPitchY, nPitchU, nPitchV, nImgPitchY, nImgPitchU, nImgPitchV);
+          nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
       }
 
       // 結果書き込み
@@ -852,11 +844,11 @@ __global__ void kl_calc_all_sad(
   int nBlkX, int nBlkY,
   const short2* vectors, // [x,y]
   int* dst_sad,
-  int nHPad, int nVPad,
+  int nPad,
   const pixel_t* __restrict__ pSrcY, const pixel_t* __restrict__ pSrcU, const pixel_t* __restrict__ pSrcV,
   const pixel_t* __restrict__ pRefY, const pixel_t* __restrict__ pRefU, const pixel_t* __restrict__ pRefV,
-  int nPitchY, int nPitchU, int nPitchV,
-  int nImgPitchY, int nImgPitchU, int nImgPitchV)
+  int nPitchY, int nPitchUV,
+  int nImgPitchY, int nImgPitchUV)
 {
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
@@ -867,139 +859,179 @@ __global__ void kl_calc_all_sad(
   int x = blockIdx.x * blockDim.x;
   int y = blockIdx.y * blockDim.y;
 
-  int offx = nHPad + blkx * BLK_STEP;
-  int offy = nVPad + blky * BLK_STEP;
+  int offx = nPad + blkx * BLK_STEP;
+  int offy = nPad + blky * BLK_STEP;
 
-  // TODO:
+  __shared__ const pixel_t* pRefBY;
+  __shared__ const pixel_t* pRefBU;
+  __shared__ const pixel_t* pRefBV;
+  __shared__ const pixel_t* pSrcBY;
+  __shared__ const pixel_t* pSrcBU;
+  __shared__ const pixel_t* pSrcBV;
+
+  if (tid == 0) {
+    pRefBY = &pRefY[offx + offy * nPitchY];
+    pRefBU = &pRefU[offx / 2 + offy / 2 * nPitchU];
+    pRefBV = &pRefV[offx / 2 + offy / 2 * nPitchV];
+    pSrcBY = &pSrcY[offx + offy * nPitchY];
+    pSrcBU = &pSrcU[offx / 2 + offy / 2 * nPitchU];
+    pSrcBV = &pSrcV[offx / 2 + offy / 2 * nPitchV];
+
+    short2 xy = vectors[x + y * nBlkX];
+
+    pRefBY = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, xy.x, xy.y);
+    pRefBU = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, xy.x / 2, xy.y / 2);
+    pRefBV = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, xy.x / 2, xy.y / 2);
+  }
+
+  __syncthreads();
 
   int sad = 0;
   if (BLK_SIZE == 16) {
-    // ブロックサイズがスレッド数と一致
-    int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
-      sad = __sad(pSrcY[yx + yy * nPitchY], pRefY[yx + yy * nPitchY], sad);
+    // 16x16
+    int yx = tid % 16;
+    int yy = tid / 16;
+    for (int t = 0; t < 2; ++t, yy += 8) { // 2回ループ
+      sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
     }
     // UVは8x8
-    int uvx = wi % 8;
-    int uvy = wi / 8;
-    for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
-      sad = __sad(pSrcU[uvx + uvy * nPitchU], pRefU[uvx + uvy * nPitchU], sad);
-      sad = __sad(pSrcV[uvx + uvy * nPitchV], pRefV[uvx + uvy * nPitchV], sad);
+    int uvx = tid % 8;
+    int uvy = tid / 8;
+    if (uvy > 8) {
+      uvy -= 8;
+      sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
+    }
+    else {
+      sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
     }
   }
   else if (BLK_SIZE == 32) {
     // 32x32
-    int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 32回ループ
-      sad = __sad(pSrcY[yx + yy * nPitchY], pRefY[yx + yy * nPitchY], sad);
-      sad = __sad(pSrcY[yx + 16 + yy * nPitchY], pRefY[yx + 16 + yy * nPitchY], sad);
+    int yx = tid % 32;
+    int yy = tid / 32;
+    for (int t = 0; t < 8; ++t, yy += 4) { // 8回ループ
+      sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
     }
     // ブロックサイズがスレッド数と一致
-    int uvx = wi;
-    for (int uvy = 0; uvy < BLK_SIZE; ++uvy) { // 16回ループ
-      sad = __sad(pSrcU[uvx + uvy * nPitchU], pRefU[uvx + uvy * nPitchU], sad);
-      sad = __sad(pSrcV[uvx + uvy * nPitchV], pRefV[uvx + uvy * nPitchV], sad);
+    int uvx = tid % 16;
+    int uvy = tid / 16;
+    for (int t = 0; t < 2; ++t, uvy += 8) { // 2回ループ
+      sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
+      sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
     }
   }
-  return dev_reduce_sad(sad, wi);
-}
-
-__global__ void kl_prepare_search()
-{
-  // TODO:
-}
-
-__global__ void kl_make_out_vectors()
-{
-  // TODO:
-}
-
-__global__ void kl_load_mv()
-{
-  // TODO:
-}
-
-// MAXは2べきのみ対応
-template <typename K, typename V, int MAX, typename REDUCER>
-__device__ void dev_reduce2(int tid, K& key, V& value, K* kbuf, V* vbuf)
-{
-  REDUCER red;
-  if (MAX >= 64) {
-    kbuf[tid] = key;
-    vbuf[tid] = value;
-    __syncthreads();
-    if (MAX >= 1024) {
-      if (tid < 512) {
-        red(kbuf[tid], vbuf[tid], kbuf[tid + 512], vbuf[tid + 512]);
-      }
-      __syncthreads();
-    }
-    if (MAX >= 512) {
-      if (tid < 256) {
-        red(kbuf[tid], vbuf[tid], kbuf[tid + 256], vbuf[tid + 256]);
-      }
-      __syncthreads();
-    }
-    if (MAX >= 256) {
-      if (tid < 128) {
-        red(kbuf[tid], vbuf[tid], kbuf[tid + 128], vbuf[tid + 128]);
-      }
-      __syncthreads();
-    }
-    if (MAX >= 128) {
-      if (tid < 64) {
-        red(kbuf[tid], vbuf[tid], kbuf[tid + 64], vbuf[tid + 64]);
-      }
-      __syncthreads();
-    }
-    if (MAX >= 64) {
-      if (tid < 32) {
-        red(kbuf[tid], vbuf[tid], kbuf[tid + 32], vbuf[tid + 32]);
-      }
-      __syncthreads();
-    }
-    key = kbuf[tid];
-    value = vbuf[tid];
-  }
-  if (tid < 32) {
-    K okey;
-    V ovalue;
-    if (MAX >= 32) {
-      okey = __shfl_down(key, 16);
-      ovalue = __shfl_down(value, 16);
-      red(key, value, okey, ovalue);
-    }
-    if (MAX >= 16) {
-      okey = __shfl_down(key, 8);
-      ovalue = __shfl_down(value, 8);
-      red(key, value, okey, ovalue);
-    }
-    if (MAX >= 8) {
-      okey = __shfl_down(key, 4);
-      ovalue = __shfl_down(value, 4);
-      red(key, value, okey, ovalue);
-    }
-    if (MAX >= 4) {
-      okey = __shfl_down(key, 2);
-      ovalue = __shfl_down(value, 2);
-      red(key, value, okey, ovalue);
-    }
-    if (MAX >= 2) {
-      okey = __shfl_down(key, 1);
-      ovalue = __shfl_down(value, 1);
-      red(key, value, okey, ovalue);
-    }
+  sad = dev_reduce<128>(sad, tid);
+  
+  if (tx == 0) {
+    dst_sad[x + y * nBlkX] = sad;
   }
 }
 
-struct CountIndexReducer {
-  void operator()(int& cnt, int& idx, int ocnt, int oidx) {
-    if (ocnt > cnt) {
-      cnt = ocnt;
-      idx = oidx;
+__global__ void kl_prepare_search(
+  int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+  sad_t nCurrentLambda, sad_t lsad,
+  sad_t penaltyZero, sad_t penaltyGlobal, sad_t penaltyNew,
+  int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
+  const int* sads, SearchBlock* dst_blocks)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < nBlkX && y < nBlkY) {
+    //
+    int blkIdx = x + y*nBlkX;
+    int sad = sads[blkIdx];
+    SearchBlock *data = &dst_blocks[blkIdx];
+
+    int x = nPad + nBlkSizeOvr * x;
+    int y = nPad + nBlkSizeOvr * y;
+    //
+    int nPaddingScaled = nPad >> nLogScale;
+
+    int nDxMax = nPel * (nExtendedWidth - x - nBlkSize - nPad + nPaddingScaled) - 1;
+    int nDyMax = nPel * (nExptendedHeight - y - nBlkSize - nPad + nPaddingScaled) - 1;
+    int nDxMin = -nPel * (x - nPad + nPaddingScaled);
+    int nDyMin = -nPel * (y - nPad + nPaddingScaled);
+
+    data->data[0] = nDxMax;
+    data->data[1] = nDyMax;
+    data->data[2] = nDxMin;
+    data->data[3] = nDyMin;
+
+    int p1 = -2; // -2はzeroベクタ
+    // Left (or right) predictor
+    if (x >= 2)
+    {
+      p1 = blkIdx - (1 + (x & 1));
     }
+
+    int p2 = -2;
+    // Up predictor
+    if (y > 0)
+    {
+      p2 = blkIdx - nBlkX;
+    }
+    else {
+      // medianでleftを選ばせるため
+      p2 = p1;
+    }
+
+    int p3 = -2;
+    // bottom-right pridictor (from coarse level)
+    if ((y < nBlkY - 1) && (x < nBlkX - 1))
+    {
+      p3 = blkIdx + nBlkX + 1;
+    }
+
+    data->data[4] = -2;    // zero
+    data->data[5] = -1;    // global
+    data->data[6] = blkIdx;// predictor
+    data->data[7] = p1;    //  predictors[1]
+    data->data[8] = p2;    //  predictors[2]
+    data->data[9] = p3;    //  predictors[3]
+
+    data->dataf[0] = penaltyZero;
+    data->dataf[1] = penaltyGlobal;
+    data->dataf[2] = 1;
+    data->dataf[3] = penaltyNew;
+
+    sad_t lambda = nCurrentLambda * lsad / (lsad + (sad >> 1)) * lsad / (lsad + (sad >> 1));
+    data->dataf[4] = lambda;
   }
-};
+}
+
+__global__ void kl_load_mv(
+  const VECTOR* in,
+  short2* vectors, // [x,y]
+  int* sads,
+  int nBlk)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+  if (x < nBlk) {
+    VECTOR vin = in[x];
+    short2 v = { vin.x, vin,y };
+    vectors[x] = v;
+    sads[x] = vin.sad;
+  }
+}
+
+__global__ void kl_store_mv(
+  const VECTOR* dst,
+  short2* vectors, // [x,y]
+  int* sads,
+  int nBlk)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+  if (x < nBlk) {
+    short2 v = vectors[x];
+    VECTOR vout = { v.x, v.y, sads[x] };
+    vectors[x] = vout;
+    sads[x] = vin.sad;
+    dst[x] = vout;
+  }
+}
 
 // threads=(1024), blocks=(2)
 __global__ void kl_most_freq_mv(short2* vectors, int nVec, short2* globalMVec)

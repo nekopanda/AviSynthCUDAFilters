@@ -30,13 +30,6 @@ enum {
   MAX_BLOCK_SIZE = 32,
 };
 
-struct VECTOR
-{
-  int x;
-  int y;
-  int sad;
-};
-
 struct MVDataGroup
 {
   int isValid;
