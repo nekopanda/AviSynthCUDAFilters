@@ -1000,39 +1000,6 @@ __global__ void kl_prepare_search(
   }
 }
 
-__global__ void kl_load_mv(
-  const VECTOR* in,
-  short2* vectors, // [x,y]
-  int* sads,
-  int nBlk)
-{
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-
-  if (x < nBlk) {
-    VECTOR vin = in[x];
-    short2 v = { vin.x, vin,y };
-    vectors[x] = v;
-    sads[x] = vin.sad;
-  }
-}
-
-__global__ void kl_store_mv(
-  const VECTOR* dst,
-  short2* vectors, // [x,y]
-  int* sads,
-  int nBlk)
-{
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-
-  if (x < nBlk) {
-    short2 v = vectors[x];
-    VECTOR vout = { v.x, v.y, sads[x] };
-    vectors[x] = vout;
-    sads[x] = vin.sad;
-    dst[x] = vout;
-  }
-}
-
 // threads=(1024), blocks=(2)
 __global__ void kl_most_freq_mv(short2* vectors, int nVec, short2* globalMVec)
 {
@@ -1282,14 +1249,45 @@ __global__ void kl_interpolate_prediction(
   }
 }
 
-__global__ void kl_write_default_mv(MVData* data, int nBlkCount, int verybigSAD)
+__global__ void kl_load_mv(
+	const VECTOR* in,
+	short2* vectors, // [x,y]
+	int* sads,
+	int nBlk)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+	if (x < nBlk) {
+		VECTOR vin = in[x];
+		short2 v = { vin.x, vin, y };
+		vectors[x] = v;
+		sads[x] = vin.sad;
+	}
+}
+
+__global__ void kl_store_mv(
+	VECTOR* dst,
+	short2* vectors, // [x,y]
+	int* sads,
+	int nBlk)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+	if (x < nBlk) {
+		short2 v = vectors[x];
+		VECTOR vout = { v.x, v.y, sads[x] };
+		vectors[x] = vout;
+	}
+}
+
+__global__ void kl_write_default_mv(VECTOR* dst, int nBlkCount, int verybigSAD)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (x < nBlkCount) {
-    data->data[x].x = 0;
-    data->data[x].y = 0;
-    data->data[x].x = verybigSAD;
+		dst[x].x = 0;
+		dst[x].y = 0;
+		dst[x].x = verybigSAD;
   }
 }
 
