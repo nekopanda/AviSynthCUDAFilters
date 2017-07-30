@@ -31,9 +31,6 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="CommonFunctions.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="KDeintKernel.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>

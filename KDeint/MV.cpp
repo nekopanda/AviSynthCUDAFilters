@@ -1476,7 +1476,7 @@ public:
     , nBlkSizeY(_nBlkSizeY)
     , nBlkCount(_nBlkX * _nBlkY)
     , nPel(nPel)
-    , nLogPel(ilog2(nPel))	// nLogPel=0 for nPel=1, 1 for nPel=2, 2 for nPel=4, i.e. (x*nPel) = (x<<nLogPel)
+    , nLogPel(nlog2(nPel))	// nLogPel=0 for nPel=1, 1 for nPel=2, 2 for nPel=4, i.e. (x*nPel) = (x<<nLogPel)
     , nLogScale(_nLevel)
     , nScale(1 << _nLevel)
     , smallestPlane(smallestPlane)
@@ -1484,11 +1484,11 @@ public:
     , nOverlapX(_nOverlapX)
     , nOverlapY(_nOverlapY)
     , xRatioUV(_xRatioUV) // PF
-    , nLogxRatioUV(ilog2(_xRatioUV))
+    , nLogxRatioUV(nlog2(_xRatioUV))
     , yRatioUV(_yRatioUV)
-    , nLogyRatioUV(ilog2(_yRatioUV))
+    , nLogyRatioUV(nlog2(_yRatioUV))
     , nPixelSize(nPixelSize) // PF
-    , nPixelShift(ilog2(nPixelSize)) // 161201
+    , nPixelShift(nlog2(nPixelSize)) // 161201
     , nBitsPerPixel(nBitsPerPixel) // PF
     , _mt_flag(mt_flag)
     , chromaSADscale(chromaSADscale)
@@ -2949,10 +2949,9 @@ void Overlaps_C(typename std::conditional <sizeof(pixel_t) == 1, short, int>::ty
     for (int i = 0; i<blockWidth; i++)
     {
       if (sizeof(pixel_t) == 1)
-        pDst[i] = (pDst[i] + ((pSrc[i] * pWin[i] + 256) >> 6)); // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+        pDst[i] += (pSrc[i] * pWin[i] + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
       else
-        pDst[i] = (pDst[i] + (pSrc[i] * pWin[i])); // shift (5+6); in Short2Bytes16
-                                                                                        // no shift 6
+        pDst[i] += pSrc[i] * pWin[i]; // shift (5+6); in Short2Bytes16
     }
     pDst += nDstPitch;
     pSrc += nSrcPitch;
@@ -3413,8 +3412,8 @@ public:
   {
     const int nBlkSizeX = params->nBlkSizeX;
     const int nBlkSizeY = params->nBlkSizeY;
-    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
-    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
+    const int nLogxRatio = isUV ? nlog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? nlog2(params->yRatioUV) : 0;
 
     const int blockWidth = nBlkSizeX >> nLogxRatio;
     const int blockHeight = nBlkSizeY >> nLogyRatio;
@@ -3460,8 +3459,8 @@ public:
 
     const int nWidth_B = nBlkX*(nBlkSizeX - nOverlapX) + nOverlapX;
     const int nHeight_B = nBlkY*(nBlkSizeY - nOverlapY) + nOverlapY;
-    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
-    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
+    const int nLogxRatio = isUV ? nlog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? nlog2(params->yRatioUV) : 0;
 
     int nSuperPitch;
     const pixel_t* pDummyPlane;
@@ -3732,8 +3731,8 @@ public:
     const int nOverlapY = params->nOverlapY;
     const int nBlkSizeX = params->nBlkSizeX;
     const int nBlkSizeY = params->nBlkSizeY;
-    const int nLogxRatioUV = ilog2(params->xRatioUV);
-    const int nLogyRatioUV = ilog2(params->yRatioUV);
+    const int nLogxRatioUV = nlog2(params->xRatioUV);
+    const int nLogyRatioUV = nlog2(params->yRatioUV);
 
     if (nOverlapX > 0 || nOverlapY > 0)
     {
@@ -3943,8 +3942,8 @@ public:
   {
     const int nBlkSizeX = params->nBlkSizeX;
     const int nBlkSizeY = params->nBlkSizeY;
-    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
-    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
+    const int nLogxRatio = isUV ? nlog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? nlog2(params->yRatioUV) : 0;
 
     const int blockWidth = nBlkSizeX >> nLogxRatio;
     const int blockHeight = nBlkSizeY >> nLogyRatio;
@@ -3978,8 +3977,8 @@ public:
 
     const int nWidth_B = nBlkX*(nBlkSizeX - nOverlapX) + nOverlapX;
     const int nHeight_B = nBlkY*(nBlkSizeY - nOverlapY) + nOverlapY;
-    const int nLogxRatio = isUV ? ilog2(params->xRatioUV) : 0;
-    const int nLogyRatio = isUV ? ilog2(params->yRatioUV) : 0;
+    const int nLogxRatio = isUV ? nlog2(params->xRatioUV) : 0;
+    const int nLogyRatio = isUV ? nlog2(params->yRatioUV) : 0;
 
     const int nSuperPitch = ref0->GetPitch();
 
@@ -4174,8 +4173,8 @@ public:
     const int nOverlapY = params->nOverlapY;
     const int nBlkSizeX = params->nBlkSizeX;
     const int nBlkSizeY = params->nBlkSizeY;
-    const int nLogxRatioUV = ilog2(params->xRatioUV);
-    const int nLogyRatioUV = ilog2(params->yRatioUV);
+    const int nLogxRatioUV = nlog2(params->xRatioUV);
+    const int nLogyRatioUV = nlog2(params->yRatioUV);
 
     if (nOverlapX > 0 || nOverlapY > 0)
     {

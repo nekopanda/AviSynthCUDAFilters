@@ -1,6 +1,13 @@
 #pragma once
 
+#include <cassert>
+
+#ifdef ENABLE_CUDA
 #include <cuda_runtime_api.h>
+#else
+#define __host__
+#define __device__
+#endif
 
 #define PI 3.1415926535897932384626433832795
 
@@ -10,11 +17,18 @@ inline static int nblocks(int n, int block)
 }
 
 /* returns the biggest integer x such as 2^x <= i */
-inline static int ilog2(int i)
+inline static int nlog2(int i)
 {
+#if 0
   int result = 0;
   while (i > 1) { i /= 2; result++; }
   return result;
+#else
+  assert(i > 0);
+  unsigned long result;
+  _BitScanReverse(&result, i);
+  return result;
+#endif
 }
 
 template<typename T>
@@ -36,6 +50,7 @@ __host__ __device__ T clamp(T n, T min, T max)
   return n < min ? min : n;
 }
 
+#ifdef ENABLE_CUDA
 #define CUDA_CHECK(call) \
 	do { \
 		cudaError_t err__ = call; \
@@ -43,6 +58,7 @@ __host__ __device__ T clamp(T n, T min, T max)
 			env->ThrowError("[CUDA Error] %d: %s", err__, cudaGetErrorString(err__)); \
 				} \
 		} while (0)
+#endif
 
 
 struct VECTOR
