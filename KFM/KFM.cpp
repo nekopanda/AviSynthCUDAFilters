@@ -211,22 +211,23 @@ public:
 				float sumY = 0;
 
 				for (int y = yStart + (isTop ? 0 : 1); y < yEnd; y += 2) {
-					int y1 = (y == 0) ? 1 : (y - 1);
-					int y2 = (y == prm->height - 1) ? (prm->height - 2) : (y + 1);
+          int ypp = max(y - 2, 0);
+          int yp = max(y - 1, 0);
+          int yn = min(y + 1, prm->height - 1);
+          int ynn = min(y + 2, prm->height - 1);
 
 					for (int x = xStart; x < xEnd; ++x) {
-						pixel_t b = baseY[x + y * pitchY];
-						pixel_t r1 = refY[x + y1 * pitchY];
-						pixel_t r2 = refY[x + y2 * pitchY];
-#if 1
-						float t = (r1 - b) * (r2 - b);
+            pixel_t a = baseY[x + ypp * pitchY];
+            pixel_t b = refY[x + yp * pitchY];
+            pixel_t c = baseY[x + y * pitchY];
+            pixel_t d = refY[x + yn * pitchY];
+						pixel_t e = baseY[x + ynn * pitchY];
+            float t= (a + 4 * c + e - 3 * (b + d)) * 0.1667f;
+            t *= t;
 						if(t > 15*15) {
 							t = t * 16 - 15*15*15;
 						}
 						sumY += t;
-#else
-            sumY += (r1 - b) * (r2 - b);
-#endif
 					}
 				}
 
@@ -238,38 +239,37 @@ public:
 				float sumUV = 0;
 
 				for (int y = yStartUV + (isTop ? 0 : 1); y < yEndUV; y += 2) {
-					int y1 = (y == 0) ? 1 : (y - 1);
-					int y2 = (y == heightUV - 1) ? (heightUV - 2) : (y + 1);
+          int ypp = max(y - 2, 0);
+          int yp = max(y - 1, 0);
+          int yn = min(y + 1, heightUV - 1);
+          int ynn = min(y + 2, heightUV - 1);
 
 					for (int x = xStartUV; x < xEndUV; ++x) {
 						{
-							pixel_t b = baseU[x + y * pitchUV];
-							pixel_t r1 = refU[x + y1 * pitchUV];
-							pixel_t r2 = refU[x + y2 * pitchUV];
-#if 1
-							float t = (r1 - b) * (r2 - b);
-							if (t > 15 * 15) {
-								t = t * 16 - 15 * 15 * 15;
-							}
+              pixel_t a = baseU[x + ypp * pitchUV];
+              pixel_t b = refU[x + yp * pitchUV];
+              pixel_t c = baseU[x + y * pitchUV];
+              pixel_t d = refU[x + yn * pitchUV];
+              pixel_t e = baseU[x + ynn * pitchUV];
+              float t = (a + 4 * c + e - 3 * (b + d)) * 0.1667f;
+              t *= t;
+              if (t > 15 * 15) {
+                t = t * 16 - 15 * 15 * 15;
+              }
 							sumUV += t;
-#else
-              sumUV += (r1 - b) * (r2 - b);
-#endif
 						}
 						{
-							pixel_t b = baseV[x + y * pitchUV];
-							pixel_t r1 = refV[x + y1 * pitchUV];
-							pixel_t r2 = refV[x + y2 * pitchUV];
-#if 1
-							float t = (r1 - b) * (r2 - b);
-							if (t > 15 * 15) {
-								t = t * 16 - 15 * 15 * 15;
-							}
+              pixel_t a = baseV[x + ypp * pitchUV];
+              pixel_t b = refV[x + yp * pitchUV];
+              pixel_t c = baseV[x + y * pitchUV];
+              pixel_t d = refV[x + yn * pitchUV];
+              pixel_t e = baseV[x + ynn * pitchUV];
+              float t = (a + 4 * c + e - 3 * (b + d)) * 0.1667f;
+              t *= t;
+              if (t > 15 * 15) {
+                t = t * 16 - 15 * 15 * 15;
+              }
 							sumUV += t;
-							
-#else
-              sumUV += (r1 - b) * (r2 - b);
-#endif
 						}
 					}
 				}
@@ -281,8 +281,11 @@ public:
 
 				// 上限制限
 				if (sum >= 10 * 10) {
-					sum = 20 * 20;
+          sum = 5 * 5 * 100;
 				}
+        else if (sum >= 3 * 3) {
+          sum *= 25;
+        }
 
 				fms[bx + by * prm->numBlkX].n1 = sum;
 			}
@@ -316,11 +319,7 @@ public:
 					for (int x = xStart; x < xEnd; ++x) {
 						pixel_t b = baseY[x + y * pitchY];
 						pixel_t r = refY[x + y * pitchY];
-#if 0
-						sumY = max<float>(sumY, (r - b) * (r - b));
-#else
 						sumY += (r - b) * (r - b);
-#endif
 					}
 				}
 
@@ -336,20 +335,12 @@ public:
 						{
 							pixel_t b = baseU[x + y * pitchUV];
 							pixel_t r = refU[x + y * pitchUV];
-#if 0
-              sumUV = max<float>(sumUV, (r - b) * (r - b));
-#else
 							sumUV += (r - b) * (r - b);
-#endif
 						}
 						{
 							pixel_t b = baseV[x + y * pitchUV];
 							pixel_t r = refV[x + y * pitchUV];
-#if 0
-              sumUV = max<float>(sumUV, (r - b) * (r - b));
-#else
 							sumUV += (r - b) * (r - b);
-#endif
 						}
 					}
 				}
@@ -361,8 +352,11 @@ public:
 
 				// 上限制限
 				if (sum >= 5 * 5) {
-					sum = 20 * 20;
+          sum = 5 * 5 * 100;
 				}
+        else if (sum >= 3 * 3) {
+          sum *= 25;
+        }
 
 				fms[bx + by * prm->numBlkX].n2 = sum;
 			}
@@ -388,17 +382,7 @@ PSCORE MatchingScore(const FieldMathingScore* pBlk, bool is3)
   else {
     ret = pBlk[0].n1;
   }
-#if 1
   return ret;
-#elif 0
-  if (ret < 0) return -std::sqrtf(-ret);
-  else return std::sqrtf(ret);
-#else
-  float a = std::fabsf(ret);
-  if (a <= 1) return 0;
-  a = std::log2f(a);
-  return (a < 0) ? -a : a;
-#endif
 }
 
 class KFM : public GenericVideoFilter
@@ -595,6 +579,10 @@ public:
 				}
 			}
 		}
+    // 見やすくするために値を小さくする
+    for (int i = 0; i < 15; ++i) {
+      pms[i] /= fmsPitch;
+    }
 
 		// 最良パターン
 		int pattern = 0;
