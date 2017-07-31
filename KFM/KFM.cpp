@@ -833,11 +833,15 @@ class KTCMergeCore : public KTCMergeCoreBase
   void ProcPlane(const bool* match, bool isUV,
     const pixel_t* src24, const pixel_t* src60, pixel_t* dst, int pitch, tmp_t* work)
   {
+    OverlapWindows* pwin = isUV ? winsUV.get() : wins.get();
+
     int logx = isUV ? prm->logUVx : 0;
     int logy = isUV ? prm->logUVy : 0;
 
     int winSizeX = (prm->blkSize * 2) >> logx;
     int winSizeY = (prm->blkSize * 2) >> logy;
+    int stepSizeX = (prm->blkSize) >> logx;
+    int stepSizeY = (prm->blkSize) >> logy;
     int halfOvrX = (prm->blkSize / 2) >> logx;
     int halfOvrY = (prm->blkSize / 2) >> logy;
     int width = prm->width >> logx;
@@ -853,15 +857,15 @@ class KTCMergeCore : public KTCMergeCoreBase
     // workに足し合わせる
     for (int by = 0; by < prm->numBlkY; ++by) {
       for (int bx = 0; bx < prm->numBlkX; ++bx) {
-        int xwstart = bx * prm->blkSize - halfOvrX;
+        int xwstart = bx * stepSizeX - halfOvrX;
         int xwend = xwstart + winSizeX;
-        int ywstart = by * prm->blkSize - halfOvrY;
+        int ywstart = by * stepSizeY - halfOvrY;
         int ywend = ywstart + winSizeY;
 
         const pixel_t* src = match[bx + by * prm->numBlkX] ? src24 : src60;
         const pixel_t* srcblk = src + xwstart + ywstart * pitch;
         tmp_t* dstblk = work + xwstart + ywstart * width;
-        const short* win = wins->GetWindow(bx, by, prm->numBlkX, prm->numBlkY);
+        const short* win = pwin->GetWindow(bx, by, prm->numBlkX, prm->numBlkY);
 
         int xstart = (xwstart < 0) ? halfOvrX : 0;
         int xend = (xwend >= width) ? winSizeX - (xwend - width) : winSizeX;
@@ -965,10 +969,11 @@ class KTCMerge : public GenericVideoFilter
   Frame24Info GetFrame24Info(int pattern, int frameIndex60)
   {
     if (pattern < 5) {
-      int offsets[] = { 0, 2, 5, 7, 10, 12, 15, 17, 20 };
+      int offsets_[] = { -3, 0, 2, 5, 7, 10, 12, 15, 17, 20 };
+      int *offsets = &offsets_[1];
       int start24 = tbl2323[pattern][1];
       int offset = frameIndex60 - tbl2323[pattern][0];
-      int idx = 0;
+      int idx = -1;
       while (offsets[start24 + idx + 1] <= offsets[start24] + offset) idx++;
       int start60 = tbl2323[pattern][0] + offsets[start24 + idx] - offsets[start24];
       int numFields = offsets[start24 + idx + 1] - offsets[start24 + idx];
@@ -976,12 +981,13 @@ class KTCMerge : public GenericVideoFilter
       return ret;
     }
     else {
-      int offsets[] = { 0, 2, 4, 7, 10, 12, 14, 17, 20 };
+      int offsets_[] = { -3, 0, 2, 4, 7, 10, 12, 14, 17, 20 };
+      int *offsets = &offsets_[1];
       int start24 = tbl2233[pattern - 5][1];
       int offset = frameIndex60 - tbl2233[pattern - 5][0];
-      int idx = 0;
+      int idx = -1;
       while (offsets[start24 + idx + 1] <= offsets[start24] + offset) idx++;
-      int start60 = tbl2233[pattern][0] + offsets[start24 + idx] - offsets[start24];
+      int start60 = tbl2233[pattern - 5][0] + offsets[start24 + idx] - offsets[start24];
       int numFields = offsets[start24 + idx + 1] - offsets[start24 + idx];
       Frame24Info ret = { idx, start60, numFields == 3 };
       return ret;
@@ -1000,10 +1006,19 @@ class KTCMerge : public GenericVideoFilter
 
     // ブロックごとのマッチング度合いを取得
     int fmsPitch = prm->numBlkX * prm->numBlkY;
+    const FieldMathingScore* pfms = &fmframe->fms[(frame24info.start60 + 2) * fmsPitch];
     for (int by = 0; by < prm->numBlkY; ++by) {
       for (int bx = 0; bx < prm->numBlkX; ++bx) {
         int blkidx = bx + by * prm->numBlkX;
-        out[blkidx] = MatchingScore(&fmframe->fms[frame24info.start60 * fmsPitch], frame24info.is3);
+        if (frame24info.is3) {
+          FieldMathingScore blks[2];
+          blks[0] = pfms[blkidx];
+          blks[1] = pfms[blkidx + fmsPitch];
+          out[blkidx] = MatchingScore(blks, frame24info.is3);
+        }
+        else {
+          out[blkidx] = MatchingScore(&pfms[blkidx], frame24info.is3);
+        }
       }
     }
   }
@@ -1014,11 +1029,12 @@ public:
     , fmclip(fmclip)
     , clip24(clip24)
     , prm(KFMParam::GetParam(fmclip->GetVideoInfo(), env))
+    , tmpvi()
   {
 
     core = std::unique_ptr<KTCMergeCoreBase>(CreateCore(env));
 
-    int numBlks = prm->numBlkX + prm->numBlkY;
+    int numBlks = prm->numBlkX * prm->numBlkY;
 
     // メモリを確保するデバイスとかマルチスレッドとかメモリ再利用とか考えたくないので、
     // ワークメモリの確保も全部都度NewVideoFrameで行う
@@ -1030,7 +1046,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
   {
-    int numBlks = prm->numBlkX + prm->numBlkY;
+    int numBlks = prm->numBlkX * prm->numBlkY;
 
     int cycleIndex = n / 10;
     int frameIndex60 = n % 10;
