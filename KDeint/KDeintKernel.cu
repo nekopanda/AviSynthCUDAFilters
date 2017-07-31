@@ -421,7 +421,8 @@ __device__ sad_t dev_calc_sad(
       sad = __sad(pSrcV[uvx + uvy * BLK_SIZE], pRefV[uvx + uvy * nPitchV], sad);
     }
   }
-  return dev_reduce_warp<int, 16, AddReducer>(sad, wi);
+	dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
+	return sad;
 }
 
 // MAX - (MAX/4) <= (結果の個数) <= MAX であること
@@ -720,8 +721,8 @@ __global__ void kl_search(
 
       if (tx == 0) {
         pRefBY = &pRefY[offx + offy * nPitchY];
-        pRefBU = &pRefU[offx / 2 + offy / 2 * nPitchU];
-        pRefBV = &pRefV[offx / 2 + offy / 2 * nPitchV];
+				pRefBU = &pRefU[offx / 2 + offy / 2 * nPitchUV];
+				pRefBV = &pRefV[offx / 2 + offy / 2 * nPitchUV];
       }
 
       // パラメータなどのデータをshared memoryに格納
@@ -856,11 +857,11 @@ __global__ void kl_calc_all_sad(
   };
 
   int tid = threadIdx.x;
-  int x = blockIdx.x * blockDim.x;
-  int y = blockIdx.y * blockDim.y;
+  int bx = blockIdx.x * blockDim.x;
+  int by = blockIdx.y * blockDim.y;
 
-  int offx = nPad + blkx * BLK_STEP;
-  int offy = nPad + blky * BLK_STEP;
+  int offx = nPad + bx * BLK_STEP;
+  int offy = nPad + by * BLK_STEP;
 
   __shared__ const pixel_t* pRefBY;
   __shared__ const pixel_t* pRefBU;
@@ -871,13 +872,13 @@ __global__ void kl_calc_all_sad(
 
   if (tid == 0) {
     pRefBY = &pRefY[offx + offy * nPitchY];
-    pRefBU = &pRefU[offx / 2 + offy / 2 * nPitchU];
-    pRefBV = &pRefV[offx / 2 + offy / 2 * nPitchV];
+    pRefBU = &pRefU[offx / 2 + offy / 2 * nPitchUV];
+		pRefBV = &pRefV[offx / 2 + offy / 2 * nPitchUV];
     pSrcBY = &pSrcY[offx + offy * nPitchY];
-    pSrcBU = &pSrcU[offx / 2 + offy / 2 * nPitchU];
-    pSrcBV = &pSrcV[offx / 2 + offy / 2 * nPitchV];
+		pSrcBU = &pSrcU[offx / 2 + offy / 2 * nPitchUV];
+		pSrcBV = &pSrcV[offx / 2 + offy / 2 * nPitchUV];
 
-    short2 xy = vectors[x + y * nBlkX];
+    short2 xy = vectors[bx + by * nBlkX];
 
     pRefBY = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, xy.x, xy.y);
     pRefBU = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, xy.x / 2, xy.y / 2);
@@ -920,10 +921,12 @@ __global__ void kl_calc_all_sad(
       sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
     }
   }
-  sad = dev_reduce<128>(sad, tid);
+
+	__shared__ int buf[128];
+	dev_reduce<int, 128, AddReducer<int>>(tid, sad, buf);
   
-  if (tx == 0) {
-    dst_sad[x + y * nBlkX] = sad;
+	if (tid == 0) {
+    dst_sad[bx + by * nBlkX] = sad;
   }
 }
 
@@ -934,17 +937,17 @@ __global__ void kl_prepare_search(
   int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
   const int* sads, SearchBlock* dst_blocks)
 {
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  int bx = threadIdx.x + blockIdx.x * blockDim.x;
+  int by = threadIdx.y + blockIdx.y * blockDim.y;
 
-  if (x < nBlkX && y < nBlkY) {
+  if (bx < nBlkX && by < nBlkY) {
     //
-    int blkIdx = x + y*nBlkX;
+    int blkIdx = bx + by*nBlkX;
     int sad = sads[blkIdx];
     SearchBlock *data = &dst_blocks[blkIdx];
 
-    int x = nPad + nBlkSizeOvr * x;
-    int y = nPad + nBlkSizeOvr * y;
+    int x = nPad + nBlkSizeOvr * bx;
+    int y = nPad + nBlkSizeOvr * by;
     //
     int nPaddingScaled = nPad >> nLogScale;
 
@@ -1050,7 +1053,7 @@ __global__ void kl_most_freq_mv(short2* vectors, int nVec, short2* globalMVec)
   }
   __syncthreads();
 
-  dev_reduce2<int, int, DIMX, CountIndexReducer>(tid, maxcnt, index, b.red_cnt, b.red_idx);
+	dev_reduce2<int, int, DIMX, MaxIndexReducer<int>>(tid, maxcnt, index, b.red_cnt, b.red_idx);
 
   if (tid == 0) {
     if (blockIdx.x == 0) {
@@ -1243,7 +1246,7 @@ __global__ void kl_interpolate_prediction(
     }
 
     int index = x + y * nDstBlkX;
-    short2 v = { vx,vy };
+    short2 v = { (short)vx, (short)vy };
     dst_vector[index] = v;
     dst_sad[index] = (int)(tmp_sad >> 4);
   }
@@ -1259,7 +1262,7 @@ __global__ void kl_load_mv(
 
 	if (x < nBlk) {
 		VECTOR vin = in[x];
-		short2 v = { vin.x, vin, y };
+		short2 v = { (short)vin.x, (short)vin.y };
 		vectors[x] = v;
 		sads[x] = vin.sad;
 	}
@@ -1276,7 +1279,7 @@ __global__ void kl_store_mv(
 	if (x < nBlk) {
 		short2 v = vectors[x];
 		VECTOR vout = { v.x, v.y, sads[x] };
-		vectors[x] = vout;
+		dst[x] = vout;
 	}
 }
 

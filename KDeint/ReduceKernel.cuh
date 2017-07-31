@@ -4,12 +4,12 @@
 
 template <typename T>
 struct AddReducer {
-  void operator()(T& v, T o) { v += o; }
+	__device__ void operator()(T& v, T o) { v += o; }
 };
 
 template <typename T>
 struct MaxIndexReducer {
-  void operator()(T& cnt, int& idx, T ocnt, int oidx) {
+	__device__ void operator()(T& cnt, int& idx, T ocnt, int oidx) {
     if (ocnt > cnt) {
       cnt = ocnt;
       idx = oidx;
@@ -151,6 +151,6 @@ __device__ void dev_reduce2(int tid, K& key, V& value, K* kbuf, V* vbuf)
     value = vbuf[tid];
   }
   if (tid < 32) {
-    dev_reduce2_warp<T, MAX, REDUCER>(tid, key, value);
+    dev_reduce2_warp<K, V, MAX, REDUCER>(tid, key, value);
   }
 }
