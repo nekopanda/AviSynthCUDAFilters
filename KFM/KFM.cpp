@@ -219,7 +219,11 @@ public:
 						pixel_t r1 = refY[x + y1 * pitchY];
 						pixel_t r2 = refY[x + y2 * pitchY];
 #if 1
-            sumY = max<float>(sumY, (r1 - b) * (r2 - b));
+						float t = (r1 - b) * (r2 - b);
+						if(t > 15*15) {
+							t = t * 16 - 15*15*15;
+						}
+						sumY += t;
 #else
             sumY += (r1 - b) * (r2 - b);
 #endif
@@ -243,7 +247,11 @@ public:
 							pixel_t r1 = refU[x + y1 * pitchUV];
 							pixel_t r2 = refU[x + y2 * pitchUV];
 #if 1
-              sumUV = max<float>(sumUV, (r1 - b) * (r2 - b));
+							float t = (r1 - b) * (r2 - b);
+							if (t > 15 * 15) {
+								t = t * 16 - 15 * 15 * 15;
+							}
+							sumUV += t;
 #else
               sumUV += (r1 - b) * (r2 - b);
 #endif
@@ -253,7 +261,12 @@ public:
 							pixel_t r1 = refV[x + y1 * pitchUV];
 							pixel_t r2 = refV[x + y2 * pitchUV];
 #if 1
-              sumUV = max<float>(sumUV, (r1 - b) * (r2 - b));
+							float t = (r1 - b) * (r2 - b);
+							if (t > 15 * 15) {
+								t = t * 16 - 15 * 15 * 15;
+							}
+							sumUV += t;
+							
 #else
               sumUV += (r1 - b) * (r2 - b);
 #endif
@@ -261,13 +274,15 @@ public:
 					}
 				}
 
-        sumY = max<float>(0, sumY - 23 * 23);
-        sumUV = max<float>(0, sumUV - 23 * 23);
+				float sum = (sumY + sumUV * prm->chromaScale) * (1.0f/16.0f);
 
-				float sum = sumY + sumUV * prm->chromaScale;
-				
-				// 半端分のスケールを合わせる
-				//sum *= (float)(prm->blkSize * prm->blkSize) / ((xEnd - xStart) * (yEnd - yStart));
+				// 1ピクセル単位にする
+				sum *= 1.0f / ((xEnd - xStart) * (yEnd - yStart));
+
+				// 上限制限
+				if (sum >= 10 * 10) {
+					sum = 20 * 20;
+				}
 
 				fms[bx + by * prm->numBlkX].n1 = sum;
 			}
@@ -301,8 +316,8 @@ public:
 					for (int x = xStart; x < xEnd; ++x) {
 						pixel_t b = baseY[x + y * pitchY];
 						pixel_t r = refY[x + y * pitchY];
-#if 1
-            sumY = max<float>(sumY, (r - b) * (r - b));
+#if 0
+						sumY = max<float>(sumY, (r - b) * (r - b));
 #else
 						sumY += (r - b) * (r - b);
 #endif
@@ -321,7 +336,7 @@ public:
 						{
 							pixel_t b = baseU[x + y * pitchUV];
 							pixel_t r = refU[x + y * pitchUV];
-#if 1
+#if 0
               sumUV = max<float>(sumUV, (r - b) * (r - b));
 #else
 							sumUV += (r - b) * (r - b);
@@ -330,7 +345,7 @@ public:
 						{
 							pixel_t b = baseV[x + y * pitchUV];
 							pixel_t r = refV[x + y * pitchUV];
-#if 1
+#if 0
               sumUV = max<float>(sumUV, (r - b) * (r - b));
 #else
 							sumUV += (r - b) * (r - b);
@@ -339,13 +354,15 @@ public:
 					}
 				}
 
-        sumY = max<float>(0, sumY);
-        sumUV = max<float>(0, sumUV);
-
 				float sum = sumY + sumUV * prm->chromaScale;
 
-				// 半端分のスケールを合わせる
-				//sum *= (float)(prm->blkSize * prm->blkSize) / ((xEnd - xStart) * (yEnd - yStart));
+				// 1ピクセル単位にする
+				sum *= 1.0f / ((xEnd - xStart) * (yEnd - yStart));
+
+				// 上限制限
+				if (sum >= 5 * 5) {
+					sum = 20 * 20;
+				}
 
 				fms[bx + by * prm->numBlkX].n2 = sum;
 			}
@@ -366,7 +383,7 @@ PSCORE MatchingScore(const FieldMathingScore* pBlk, bool is3)
 {
   PSCORE ret;
   if (is3) {
-    ret = (pBlk[0].n1 + pBlk[0].n2 + pBlk[1].n1) / 3;
+    ret = (pBlk[0].n1 + pBlk[0].n2 * 2 + pBlk[1].n1) / 4;
   }
   else {
     ret = pBlk[0].n1;
