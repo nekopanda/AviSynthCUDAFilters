@@ -14,6 +14,25 @@
 #include "ReduceKernel.cuh"
 
 /////////////////////////////////////////////////////////////////////////////
+// MEMCPY
+/////////////////////////////////////////////////////////////////////////////
+
+__global__ void memcpy_kernel(uint8_t* dst, const uint8_t* src, int nbytes) {
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	if (x < nbytes) {
+		dst[x] = src[x];
+	}
+}
+
+void KDeintKernel::MemCpy(void* dst, const void* src, int nbytes)
+{
+	dim3 threads(256);
+	dim3 blocks(nblocks(nbytes, threads.x));
+	memcpy_kernel << <blocks, threads, 0, stream >> > ((uint8_t*)dst, (uint8_t*)src, nbytes);
+	DebugSync();
+}
+
+/////////////////////////////////////////////////////////////////////////////
 // COPY
 /////////////////////////////////////////////////////////////////////////////
 
@@ -430,7 +449,11 @@ __device__ sad_t dev_calc_sad(
 template <int MAX>
 __device__ void dev_reduce_result(CostResult* tmp_, int tid)
 {
-  volatile CostResult* tmp = (volatile CostResult*)tmp_;
+	struct VResult {
+		volatile sad_t cost;
+		volatile short2 xy;
+	};
+	VResult* tmp = (VResult*)tmp_;
   if(MAX >= 16) tmp[tid] = (tmp[tid].cost < tmp[tid + 8].cost) ? tmp[tid] : tmp[tid + 8];
   tmp[tid] = (tmp[tid].cost < tmp[tid + 4].cost) ? tmp[tid] : tmp[tid + 4];
   tmp[tid] = (tmp[tid].cost < tmp[tid + 2].cost) ? tmp[tid] : tmp[tid + 2];
@@ -691,6 +714,8 @@ __global__ void kl_search(
   int nImgPitchY, int nImgPitchUV
 )
 {
+	// threads=128
+
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
     BLK_STEP = BLK_SIZE / 2,
@@ -736,6 +761,8 @@ __global__ void kl_search(
           dataf[tx] = blocks[blkIdx].dataf[tx];
         }
       }
+
+			// TODO: 依存ブロックの計算が終わるのを待つ
 
       __syncthreads();
 
@@ -932,7 +959,7 @@ __global__ void kl_calc_all_sad(
 
 __global__ void kl_prepare_search(
   int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
-  sad_t nCurrentLambda, sad_t lsad,
+	sad_t nLambdaLevel, sad_t lsad,
   sad_t penaltyZero, sad_t penaltyGlobal, sad_t penaltyNew,
   int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
   const int* sads, SearchBlock* dst_blocks)
@@ -998,13 +1025,14 @@ __global__ void kl_prepare_search(
     data->dataf[2] = 1;
     data->dataf[3] = penaltyNew;
 
-    sad_t lambda = nCurrentLambda * lsad / (lsad + (sad >> 1)) * lsad / (lsad + (sad >> 1));
+		sad_t lambda = nLambdaLevel * lsad / (lsad + (sad >> 1)) * lsad / (lsad + (sad >> 1));
+		if (by == 0) lambda = 0;
     data->dataf[4] = lambda;
   }
 }
 
 // threads=(1024), blocks=(2)
-__global__ void kl_most_freq_mv(short2* vectors, int nVec, short2* globalMVec)
+__global__ void kl_most_freq_mv(const short2* vectors, int nVec, short2* globalMVec)
 {
   enum {
     DIMX = 1024,
@@ -1067,7 +1095,7 @@ __global__ void kl_most_freq_mv(short2* vectors, int nVec, short2* globalMVec)
   }
 }
 
-__global__ void kl_mean_global_mv(short2* vectors, int nVec, short2* globalMVec)
+__global__ void kl_mean_global_mv(const short2* vectors, int nVec, short2* globalMVec)
 {
   enum {
     DIMX = 1024,
@@ -1294,4 +1322,185 @@ __global__ void kl_write_default_mv(VECTOR* dst, int nBlkCount, int verybigSAD)
   }
 }
 
+__global__ void kl_init_const_vec(short2* vectors, const short2* globalMV)
+{
+	if (blockIdx.x == 0) {
+		vectors[-2] = short2();
+	}
+	else {
+		vectors[-1] = *globalMV;
+	}
+}
 
+template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
+void launch_search(
+	int nBlkX, int nBlkY, const SearchBlock* searchblocks,
+	short2* vectors, // [x,y]
+	int nPad,
+	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+	int nPitchY, int nPitchUV,
+	int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
+{
+	dim3 threads(128);
+	dim3 blocks(nblocks(nBlkX, 2) * 2);
+	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL> << <blocks, threads, 0, stream >> >(
+		nBlkX, nBlkY, searchblocks, vectors, nPad,
+		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
+}
+
+template <typename pixel_t, int BLK_SIZE, int NPEL>
+void launch_calc_all_sad(
+	int nBlkX, int nBlkY,
+	const short2* vectors, // [x,y]
+	int* dst_sad, int nPad,
+	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+	int nPitchY, int nPitchUV,
+	int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
+{
+	dim3 threads(128);
+	dim3 blocks(nBlkX, nBlkY);
+	kl_calc_all_sad <pixel_t, BLK_SIZE, NPEL> << <blocks, threads, 0, stream >> >(
+		nBlkX, nBlkY, vectors, dst_sad, nPad,
+		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
+}
+
+int KDeintKernel::GetSearchBlockSize()
+{
+	return sizeof(SearchBlock);
+}
+
+template <typename pixel_t>
+void KDeintKernel::Search(
+	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
+	int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
+	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
+	const short2* globalMV, short2* vectors, int* sads, void* _searchblocks)
+{
+	SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
+
+	{
+		// set zeroMV and globalMV
+		kl_init_const_vec << <2, 1, 0, stream >> >(vectors, globalMV);
+		DebugSync();
+	}
+
+	{ // prepare
+		dim3 threads(32, 8);
+		dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
+		kl_prepare_search << <blocks, threads, 0, stream >> >(
+			nBlkX, nBlkY, nBlkSize, nLogScale, nLambdaLevel, lsad,
+			penaltyZero, penaltyGlobal, penaltyNew,
+			nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
+			sads, searchblocks);
+		DebugSync();
+	}
+
+	{ // search
+		void(*table[])(
+			int nBlkX, int nBlkY, const SearchBlock* searchblocks,
+			short2* vectors, // [x,y]
+			int nPad,
+			const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+			const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+			int nPitchY, int nPitchUV,
+			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
+		{
+			launch_search<pixel_t, 16, 1, 1>,
+			launch_search<pixel_t, 16, 2, 2>,
+			launch_search<pixel_t, 32, 1, 1>,
+			launch_search<pixel_t, 32, 2, 2>,
+		};
+
+		int fidx = ((nBlkSize == 16) ? 0 : 2) + ((nPel == 1) ? 0 : 1);
+		table[fidx](nBlkX, nBlkY, searchblocks, vectors, nPad,
+			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
+		DebugSync();
+	}
+
+	{ // calc sad
+		void (*table[])(
+			int nBlkX, int nBlkY,
+			const short2* vectors, // [x,y]
+			int* dst_sad, int nPad,
+			const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+			const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+			int nPitchY, int nPitchUV,
+			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
+		{
+			launch_calc_all_sad<pixel_t, 16, 1>,
+			launch_calc_all_sad<pixel_t, 16, 2>,
+			launch_calc_all_sad<pixel_t, 32, 1>,
+			launch_calc_all_sad<pixel_t, 32, 2>,
+		};
+
+		int fidx = ((nBlkSize == 16) ? 0 : 2) + ((nPel == 1) ? 0 : 1);
+		table[fidx](nBlkX, nBlkY, vectors, sads, nPad,
+			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
+		DebugSync();
+	}
+}
+
+template void KDeintKernel::Search<uint8_t>(
+	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
+	int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
+	const uint8_t* pSrcY, const uint8_t* pSrcU, const uint8_t* pSrcV,
+	const uint8_t* pRefY, const uint8_t* pRefU, const uint8_t* pRefV,
+	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
+	const short2* globalMV, short2* vectors, int* sads, void* searchblocks);
+template void KDeintKernel::Search<uint16_t>(
+	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
+	int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
+	const uint16_t* pSrcY, const uint16_t* pSrcU, const uint16_t* pSrcV,
+	const uint16_t* pRefY, const uint16_t* pRefU, const uint16_t* pRefV,
+	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
+	const short2* globalMV, short2* vectors, int* sads, void* searchblocks);
+
+void KDeintKernel::EstimateGlobalMV(const short2* vectors, int nBlkCount, short2* globalMV)
+{
+	kl_most_freq_mv << <1, 1024, 0, stream >> >(vectors, nBlkCount, globalMV);
+	DebugSync();
+	kl_mean_global_mv << <1, 1024, 0, stream >> >(vectors, nBlkCount, globalMV);
+	DebugSync();
+}
+
+void KDeintKernel::InterpolatePrediction(
+	const short2* src_vector, const int* src_sad,
+	short2* dst_vector, int* dst_sad,
+	int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
+	int normFactor, int normov, int atotal, int aodd, int aeven)
+{
+	dim3 threads(32, 8);
+	dim3 blocks(nblocks(nDstBlkX, threads.x), nblocks(nDstBlkY, threads.y));
+	kl_interpolate_prediction << <blocks, threads, 0, stream >> >(
+		src_vector, src_sad, dst_vector, dst_sad,
+		nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
+		normFactor, normov, atotal, aodd, aeven);
+	DebugSync();
+}
+
+void KDeintKernel::LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount)
+{
+	dim3 threads(256);
+	dim3 blocks(nblocks(nBlkCount, threads.x));
+	kl_load_mv << <blocks, threads, 0, stream >> >(in, vectors, sads, nBlkCount);
+	DebugSync();
+}
+
+void KDeintKernel::WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD)
+{
+	dim3 threads(256);
+	dim3 blocks(nblocks(nBlkCount, threads.x));
+	kl_write_default_mv << <blocks, threads, 0, stream >> >(dst, nBlkCount, verybigSAD);
+	DebugSync();
+}

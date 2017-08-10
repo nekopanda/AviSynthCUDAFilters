@@ -432,15 +432,16 @@ public:
   virtual ~KMPlaneBase() { }
   //virtual void SetInterp(int nRfilter, int nSharp) = 0;
   virtual void SetTarget(uint8_t* pSrc, int _nPitch) = 0;
-  virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch, KDeintKernel* kernel) = 0;
-  virtual void Pad(KDeintKernel* kernel) = 0;
-  virtual void Refine(KDeintKernel* kernel) = 0;
-  virtual void ReduceTo(KMPlaneBase* dstPlane, KDeintKernel* kernel) = 0;
+  virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch) = 0;
+  virtual void Pad() = 0;
+  virtual void Refine() = 0;
+  virtual void ReduceTo(KMPlaneBase* dstPlane) = 0;
 };
 
 template <typename pixel_t>
 class KMPlane : public KMPlaneBase
 {
+	KDeintKernel* kernel;
   std::unique_ptr<pixel_t*[]> pPlane;
   int nPel;
   int nWidth;
@@ -453,11 +454,12 @@ class KMPlane : public KMPlaneBase
   int nVPadPel;
   int nExtendedWidth;
   int nExtendedHeight;
-  int nBitsPerPixel;
+	int nBitsPerPixel;
 public:
 
-  KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel)
-    : pPlane(new pixel_t*[nPel * nPel])
+	KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, KDeintKernel* kernel)
+		: kernel(kernel)
+		, pPlane(new pixel_t*[nPel * nPel])
     , nPel(nPel)
     , nWidth(nWidth)
     , nHeight(nHeight)
@@ -545,31 +547,31 @@ public:
     }
   }
 
-  void Fill(const uint8_t *_pNewPlane, int nNewPitch, KDeintKernel* kernel)
+  void Fill(const uint8_t *_pNewPlane, int nNewPitch)
   {
     const pixel_t* pNewPlane = (const pixel_t*)_pNewPlane;
 
-    if (kernel) {
-      kernel->Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
+    if (kernel->IsEnabled()) {
+			kernel->Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
     }
     else {
       Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
     }
   }
 
-  void Pad(KDeintKernel* kernel)
-  {
-    if (kernel) {
-      kernel->PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
+  void Pad()
+	{
+		if (kernel->IsEnabled()) {
+			kernel->PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
     }
     else {
       PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
     }
   }
 
-  void Refine(KDeintKernel* kernel)
-  {
-    if (kernel) {
+  void Refine()
+	{
+		if (kernel->IsEnabled()) {
       switch (nPel)
       {
       case 2:
@@ -595,10 +597,10 @@ public:
     }
   }
 
-  void ReduceTo(KMPlaneBase* dstPlane, KDeintKernel* kernel)
+  void ReduceTo(KMPlaneBase* dstPlane)
   {
-    KMPlane<pixel_t>&		red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
-    if (kernel) {
+		KMPlane<pixel_t>&		red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
+		if (kernel->IsEnabled()) {
       kernel->RB2BilinearFiltered(
         red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
         red.nPitch, nPitch,
@@ -617,7 +619,8 @@ public:
 
 class KMFrame
 {
-  const KMVParam* param;
+	const KMVParam* param;
+	KDeintKernel* kernel;
 
   std::unique_ptr<KMPlaneBase> pYPlane;
   std::unique_ptr<KMPlaneBase> pUPlane;
@@ -627,20 +630,21 @@ class KMFrame
   void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad)
   {
     pYPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
-      nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel));
+			nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, kernel));
     if (param->chroma) {
       pUPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel));
+				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, kernel));
       pVPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel));
+				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, kernel));
     }
   }
 
 public:
-  KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param)
+	KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, KDeintKernel* kernel)
     : param(param)
+		, kernel(kernel)
   {
     if (param->nPixelSize == 1) {
       CreatePlanes<uint8_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad);
@@ -663,12 +667,12 @@ public:
     }
   }
 
-  void Fill(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV, KDeintKernel* kernel)
+  void Fill(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
   {
-    pYPlane->Fill(pSrcY, pitchY, kernel);
+    pYPlane->Fill(pSrcY, pitchY);
     if (param->chroma) {
-      pUPlane->Fill(pSrcU, pitchU, kernel);
-      pVPlane->Fill(pSrcV, pitchV, kernel);
+      pUPlane->Fill(pSrcU, pitchU);
+      pVPlane->Fill(pSrcV, pitchV);
     }
   }
 
@@ -681,30 +685,30 @@ public:
   //  }
   //}
 
-  void	Refine(KDeintKernel* kernel)
+  void	Refine()
   {
-    pYPlane->Refine(kernel);
+    pYPlane->Refine();
     if (param->chroma) {
-      pUPlane->Refine(kernel);
-      pVPlane->Refine(kernel);
+      pUPlane->Refine();
+      pVPlane->Refine();
     }
   }
 
-  void	Pad(KDeintKernel* kernel)
+  void	Pad()
   {
-    pYPlane->Pad(kernel);
+    pYPlane->Pad();
     if (param->chroma) {
-      pUPlane->Pad(kernel);
-      pVPlane->Pad(kernel);
+      pUPlane->Pad();
+      pVPlane->Pad();
     }
   }
 
-  void	ReduceTo(KMFrame *pFrame, KDeintKernel* kernel)
+  void	ReduceTo(KMFrame *pFrame)
   {
-    pYPlane->ReduceTo(pFrame->GetYPlane(), kernel);
+    pYPlane->ReduceTo(pFrame->GetYPlane());
     if (param->chroma) {
-      pUPlane->ReduceTo(pFrame->GetUPlane(), kernel);
-      pVPlane->ReduceTo(pFrame->GetVPlane(), kernel);
+      pUPlane->ReduceTo(pFrame->GetUPlane());
+      pVPlane->ReduceTo(pFrame->GetVPlane());
     }
   }
 };
@@ -713,19 +717,21 @@ class KMSuperFrame
 {
   const KMVParam* param;
   std::unique_ptr<std::unique_ptr<KMFrame>[]> pFrames;
+	KDeintKernel* kernel;
 
 public:
   // xRatioUV PF 160729
-  KMSuperFrame(const KMVParam* param)
+	KMSuperFrame(const KMVParam* param, KDeintKernel* kernel)
     : param(param)
     , pFrames(new std::unique_ptr<KMFrame>[param->nLevels])
+		, kernel(kernel)
   {
-    pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param));
+		pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param, kernel));
     for (int i = 1; i < param->nLevels; i++)
     {
       int nWidthi = PlaneWidthLuma(param->nWidth, i, param->xRatioUV, param->nHPad);
       int nHeighti = PlaneHeightLuma(param->nHeight, i, param->yRatioUV, param->nVPad);
-      pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param));
+			pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param, kernel));
     }
   }
 
@@ -744,16 +750,16 @@ public:
     }
   }
 
-  void Construct(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV, KDeintKernel* kernel)
+  void Construct(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
   {
-    pFrames[0]->Fill(pSrcY, pitchY, pSrcU, pitchU, pSrcV, pitchV, kernel);
-    pFrames[0]->Pad(kernel);
-    pFrames[0]->Refine(kernel);
+    pFrames[0]->Fill(pSrcY, pitchY, pSrcU, pitchU, pSrcV, pitchV);
+    pFrames[0]->Pad();
+    pFrames[0]->Refine();
 
     for (int i = 0; i < param->nLevels - 1; i++)
     {
-      pFrames[i]->ReduceTo(pFrames[i + 1].get(), kernel);
-      pFrames[i + 1]->Pad(kernel);
+      pFrames[i]->ReduceTo(pFrames[i + 1].get());
+      pFrames[i + 1]->Pad();
     }
   }
 
@@ -833,7 +839,7 @@ public:
 
     KMVParam::SetParam(vi, &params);
 
-    pSrcGOF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
+    pSrcGOF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
 
     //pSrcGOF->SetInterp(nRfilter, nSharp);
   }
@@ -842,6 +848,8 @@ public:
   {
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame	dst = env->NewVideoFrame(vi);
+
+		kernel.SetEnv(src->IsCUDA(), nullptr, env);
 
     const BYTE* pSrcY = src->GetReadPtr(PLANAR_Y);
     const BYTE* pSrcU = src->GetReadPtr(PLANAR_U);
@@ -856,14 +864,7 @@ public:
     int nDstPitchUV = dst->GetPitch(PLANAR_U) >> params.nPixelShift;
 
     pSrcGOF->SetTarget(pDstY, nDstPitchY, pDstU, nDstPitchUV, pDstV, nDstPitchUV);
-
-    KDeintKernel* pKernel = nullptr;
-    if (src->IsCUDA()) {
-      kernel.SetEnv(nullptr, env);
-      pKernel = &kernel;
-    }
-
-    pSrcGOF->Construct(pSrcY, nSrcPitchY, pSrcU, nSrcPitchUV, pSrcV, nSrcPitchUV, pKernel);
+    pSrcGOF->Construct(pSrcY, nSrcPitchY, pSrcU, nSrcPitchUV, pSrcV, nSrcPitchUV);
 
     return dst;
   }
@@ -945,9 +946,113 @@ unsigned int(*get_sad_function(int nBlkWidth, int nBlkHeight, IScriptEnvironment
   return nullptr;
 }
 
+struct MVPlaneParam {
+	int nBlkX;            /* width in number of blocks */
+	int nBlkY;            /* height in number of blocks */
+	int nBlkSizeX;        /* size of a block */
+	int nBlkSizeY;        /* size of a block */
+	int nBlkCount;        /* number of blocks in the plane */
+	int nPel;             /* pel refinement accuracy */
+	int nLogPel;          /* logarithm of the pel refinement accuracy */
+	int nScale;           /* scaling factor of the plane */
+	int nLogScale;        /* logarithm of the scaling factor */
+	bool smallestPlane;
+	bool chroma;            /* do we do chroma me */
+	int nOverlapX;        // overlap size
+	int nOverlapY;        // overlap size
+	int xRatioUV;        // PF
+	int nLogxRatioUV;     // log of xRatioUV (0 for 1 and 1 for 2)
+	int yRatioUV;
+	int nLogyRatioUV;     // log of yRatioUV (0 for 1 and 1 for 2)
+	int nPixelSize; // PF
+	int nPixelShift; // log of pixelsize (0,1,2) for shift instead of mul or div
+	int nBitsPerPixel;
+	bool _mt_flag;         // Allows multithreading
+	int chromaSADscale;   // PF experimental 2.7.18.22 allow e.g. YV24 chroma to have the same magnitude as for YV12
+
+	SearchType searchType;
+	int nSearchParam;
+	int PelSearch;
+	int nLambda;
+	int lsad;
+	int penaltyNew;
+	int plevel;
+	bool global;
+	int penaltyZero;
+	int pglobal;
+	int badSAD;
+	int badrange;
+	bool meander;
+	bool tryMany;
+
+	int verybigSAD;
+	int nLambdaLevel;
+
+	MVPlaneParam(int _nBlkX, int _nBlkY, int _nBlkSizeX, int _nBlkSizeY, int nPel, int _nLevel,
+		bool smallestPlane, bool chroma,
+		int _nOverlapX, int _nOverlapY, int _xRatioUV, int _yRatioUV,
+		int nPixelSize, int nBitsPerPixel, bool mt_flag, int chromaSADscale,
+
+		SearchType searchType, int nSearchParam, int PelSearch, int nLambda,
+		int lsad, int penaltyNew, int plevel, bool global,
+		int penaltyZero, int pglobal, int badSAD,
+		int badrange, bool meander, bool tryMany)
+		: nBlkX(_nBlkX)
+		, nBlkY(_nBlkY)
+		, nBlkSizeX(_nBlkSizeX)
+		, nBlkSizeY(_nBlkSizeY)
+		, nBlkCount(_nBlkX * _nBlkY)
+		, nPel(nPel)
+		, nLogPel(nlog2(nPel))	// nLogPel=0 for nPel=1, 1 for nPel=2, 2 for nPel=4, i.e. (x*nPel) = (x<<nLogPel)
+		, nLogScale(_nLevel)
+		, nScale(1 << _nLevel)
+		, smallestPlane(smallestPlane)
+		, chroma(chroma)
+		, nOverlapX(_nOverlapX)
+		, nOverlapY(_nOverlapY)
+		, xRatioUV(_xRatioUV) // PF
+		, nLogxRatioUV(nlog2(_xRatioUV))
+		, yRatioUV(_yRatioUV)
+		, nLogyRatioUV(nlog2(_yRatioUV))
+		, nPixelSize(nPixelSize) // PF
+		, nPixelShift(nlog2(nPixelSize)) // 161201
+		, nBitsPerPixel(nBitsPerPixel) // PF
+		, _mt_flag(mt_flag)
+		, chromaSADscale(chromaSADscale)
+		, searchType(searchType)
+		, nSearchParam(nSearchParam)
+		, PelSearch(PelSearch)
+		, nLambda(nLambda)
+		, lsad(lsad)
+		, penaltyNew(penaltyNew)
+		, plevel(plevel)
+		, global(global)
+		, penaltyZero(penaltyZero)
+		, pglobal(pglobal)
+		, badSAD(badSAD)
+		, badrange(badrange)
+		, meander(meander)
+		, tryMany(tryMany)
+		, verybigSAD(3 * _nBlkSizeX * _nBlkSizeY * (nPixelSize == 4 ? 1 : (1 << nBitsPerPixel))) // * 256, pixelsize==2 -> 65536. Float:1
+	{
+		nLambdaLevel = nLambda / (nPel * nPel);
+		if (plevel == 1)
+		{
+			nLambdaLevel *= nScale;	// scale lambda - Fizick
+		}
+		else if (plevel == 2)
+		{
+			nLambdaLevel *= nScale*nScale;
+		}
+	}
+};
+
 class PlaneOfBlocksBase {
 public:
-  virtual ~PlaneOfBlocksBase() { }
+	virtual ~PlaneOfBlocksBase() { }
+	virtual int GetWorkSize() = 0;
+	virtual void SetWorkMemory(uint8_t* work) = 0;
+	virtual void InitializeGlobalMV(VECTOR* globalMV) = 0;
   virtual void EstimateGlobalMVDoubled(VECTOR* globalMV) = 0;
   virtual void InterpolatePrediction(const PlaneOfBlocksBase* pob) = 0;
 	virtual void SetMVs(const VECTOR *src, VECTOR *out, int nCount) = 0;
@@ -959,46 +1064,7 @@ template <typename pixel_t>
 class PlaneOfBlocks : public PlaneOfBlocksBase
 {
   /* fields set at initialization */
-
-  const int      nBlkX;            /* width in number of blocks */
-  const int      nBlkY;            /* height in number of blocks */
-  const int      nBlkSizeX;        /* size of a block */
-  const int      nBlkSizeY;        /* size of a block */
-  const int      nBlkCount;        /* number of blocks in the plane */
-  const int      nPel;             /* pel refinement accuracy */
-  const int      nLogPel;          /* logarithm of the pel refinement accuracy */
-  const int      nScale;           /* scaling factor of the plane */
-  const int      nLogScale;        /* logarithm of the scaling factor */
-  const bool     smallestPlane;
-  const bool     chroma;            /* do we do chroma me */
-  const int      nOverlapX;        // overlap size
-  const int      nOverlapY;        // overlap size
-  const int      xRatioUV;        // PF
-  const int      nLogxRatioUV;     // log of xRatioUV (0 for 1 and 1 for 2)
-  const int      yRatioUV;
-  const int      nLogyRatioUV;     // log of yRatioUV (0 for 1 and 1 for 2)
-  const int      nPixelSize; // PF
-  const int      nPixelShift; // log of pixelsize (0,1,2) for shift instead of mul or div
-  const int      nBitsPerPixel;
-  const bool     _mt_flag;         // Allows multithreading
-  const int      chromaSADscale;   // PF experimental 2.7.18.22 allow e.g. YV24 chroma to have the same magnitude as for YV12
-
-  const SearchType searchType;
-  const int nSearchParam;
-  const int PelSearch;
-  const int lsad;
-  const int penaltyNew;
-  const int plevel;
-  const bool global;
-  const int penaltyZero;
-  const int pglobal;
-  const int badSAD;
-  const int badrange;
-  const bool meander;
-  const bool tryMany;
-
-  const int verybigSAD;
-  int nLambdaLevel;
+	const MVPlaneParam p;
 
   unsigned int (* const SAD)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
   unsigned int (* const SADCHROMA)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
@@ -1061,29 +1127,29 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     if (sizeof(pixel_t) == 1)
       return (nCurrentLambda * dist) >> 8; // 8 bit: faster
     else
-      return (nCurrentLambda * dist) >> (16 - nBitsPerPixel) /*8*/; // PF scaling because it appears as a sad addition 
+      return (nCurrentLambda * dist) >> (16 - p.nBitsPerPixel) /*8*/; // PF scaling because it appears as a sad addition 
   }
 
   /* fetch the block in the reference frame, which is pointed by the vector (vx, vy) */
   const pixel_t *	GetRefBlock(int nVx, int nVy)
   {
-    return (nPel == 2) ? pRefYPlane->GetAbsolutePointerPel <1>((x[0] << 1) + nVx, (y[0] << 1) + nVy) :
-      (nPel == 1) ? pRefYPlane->GetAbsolutePointerPel <0>((x[0]) + nVx, (y[0]) + nVy) :
+		return (p.nPel == 2) ? pRefYPlane->GetAbsolutePointerPel <1>((x[0] << 1) + nVx, (y[0] << 1) + nVy) :
+			(p.nPel == 1) ? pRefYPlane->GetAbsolutePointerPel <0>((x[0]) + nVx, (y[0]) + nVy) :
       pRefYPlane->GetAbsolutePointerPel <2>((x[0] << 2) + nVx, (y[0] << 2) + nVy);
   }
 
   const pixel_t *	GetRefBlockU(int nVx, int nVy)
   {
-    return (nPel == 2) ? pRefUPlane->GetAbsolutePointerPel <1>((x[1] << 1) + (nVx >> nLogxRatioUV), (y[1] << 1) + (nVy >> nLogyRatioUV)) :
-      (nPel == 1) ? pRefUPlane->GetAbsolutePointerPel <0>((x[1]) + (nVx >> nLogxRatioUV), (y[1]) + (nVy >> nLogyRatioUV)) :
-      pRefUPlane->GetAbsolutePointerPel <2>((x[1] << 2) + (nVx >> nLogxRatioUV), (y[1] << 2) + (nVy >> nLogyRatioUV));
+		return (p.nPel == 2) ? pRefUPlane->GetAbsolutePointerPel <1>((x[1] << 1) + (nVx >> p.nLogxRatioUV), (y[1] << 1) + (nVy >> p.nLogyRatioUV)) :
+			(p.nPel == 1) ? pRefUPlane->GetAbsolutePointerPel <0>((x[1]) + (nVx >> p.nLogxRatioUV), (y[1]) + (nVy >> p.nLogyRatioUV)) :
+			pRefUPlane->GetAbsolutePointerPel <2>((x[1] << 2) + (nVx >> p.nLogxRatioUV), (y[1] << 2) + (nVy >> p.nLogyRatioUV));
   }
 
   const pixel_t *	GetRefBlockV(int nVx, int nVy)
   {
-    return (nPel == 2) ? pRefVPlane->GetAbsolutePointerPel <1>((x[2] << 1) + (nVx >> nLogxRatioUV), (y[2] << 1) + (nVy >> nLogyRatioUV)) :
-      (nPel == 1) ? pRefVPlane->GetAbsolutePointerPel <0>((x[2]) + (nVx >> nLogxRatioUV), (y[2]) + (nVy >> nLogyRatioUV)) :
-      pRefVPlane->GetAbsolutePointerPel <2>((x[2] << 2) + (nVx >> nLogxRatioUV), (y[2] << 2) + (nVy >> nLogyRatioUV));
+		return (p.nPel == 2) ? pRefVPlane->GetAbsolutePointerPel <1>((x[2] << 1) + (nVx >> p.nLogxRatioUV), (y[2] << 1) + (nVy >> p.nLogyRatioUV)) :
+			(p.nPel == 1) ? pRefVPlane->GetAbsolutePointerPel <0>((x[2]) + (nVx >> p.nLogxRatioUV), (y[2]) + (nVy >> p.nLogyRatioUV)) :
+			pRefVPlane->GetAbsolutePointerPel <2>((x[2] << 2) + (nVx >> p.nLogxRatioUV), (y[2] << 2) + (nVy >> p.nLogyRatioUV));
   }
 
   /* clip a vector to the horizontal boundaries */
@@ -1137,7 +1203,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 
     // Left (or right) predictor
     if (false) {
-      if ((blkScanDir == 1 && blkx >= 2) || (blkScanDir == -1 && blkx < nBlkX - 2))
+			if ((blkScanDir == 1 && blkx >= 2) || (blkScanDir == -1 && blkx < p.nBlkX - 2))
       {
         int diff = -1;
         if (blkScanDir == 1) {
@@ -1150,7 +1216,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         predictors[1] = ClipMV(zero); // v1.11.1 - values instead of pointer
       }
     }
-    else if ((blkScanDir == 1 && blkx > 0) || (blkScanDir == -1 && blkx < nBlkX - 1))
+		else if ((blkScanDir == 1 && blkx > 0) || (blkScanDir == -1 && blkx < p.nBlkX - 1))
     {
       predictors[1] = ClipMV(vectors[blkIdx - blkScanDir]);
     }
@@ -1162,7 +1228,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     // Up predictor
     if (blky > 0)
     {
-      predictors[2] = ClipMV(vectors[blkIdx - nBlkX]);
+			predictors[2] = ClipMV(vectors[blkIdx - p.nBlkX]);
     }
     else
     {
@@ -1170,14 +1236,14 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     }
 
     // bottom-right pridictor (from coarse level)
-    if ((blky < nBlkY - 1) && ((blkScanDir == 1 && blkx < nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
+		if ((blky < p.nBlkY - 1) && ((blkScanDir == 1 && blkx < p.nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
     {
-      predictors[3] = ClipMV(vectors[blkIdx + nBlkX + blkScanDir]);
+			predictors[3] = ClipMV(vectors[blkIdx + p.nBlkX + blkScanDir]);
     }
     // Up-right predictor
-    else if ((blky > 0) && ((blkScanDir == 1 && blkx < nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
+		else if ((blky > 0) && ((blkScanDir == 1 && blkx < p.nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
     {
-      predictors[3] = ClipMV(vectors[blkIdx - nBlkX + blkScanDir]);
+			predictors[3] = ClipMV(vectors[blkIdx - p.nBlkX + blkScanDir]);
     }
     else
     {
@@ -1203,13 +1269,13 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     }
 
     // if there are no other planes, predictor is the median
-    if (smallestPlane)
+		if (p.smallestPlane)
     {
       predictor = predictors[0];
     }
 
     typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
-    nCurrentLambda = nCurrentLambda*(safe_sad_t)lsad / ((safe_sad_t)lsad + (predictor.sad >> 1))*lsad / ((safe_sad_t)lsad + (predictor.sad >> 1));
+		nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
     // replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
     //	int a = LSAD/(LSAD + (predictor.sad>>1));
     //	nCurrentLambda = nCurrentLambda*a*a;
@@ -1297,19 +1363,19 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   void Refine()
   {
     // then, we refine, according to the search type
-    switch (searchType) {
+		switch (p.searchType) {
     case EXHAUSTIVE: {
       //		ExhaustiveSearch(nSearchParam);
       int mvx = bestMV.x;
       int mvy = bestMV.y;
-      for (int i = 1; i <= nSearchParam; i++)// region is same as exhaustive, but ordered by radius (from near to far)
+			for (int i = 1; i <= p.nSearchParam; i++)// region is same as exhaustive, but ordered by radius (from near to far)
       {
         ExpandingSearch(i, 1, mvx, mvy);
       }
     }
     break;
     case HEX2SEARCH:
-      Hex2Search(nSearchParam);
+			Hex2Search(p.nSearchParam);
       break;
     default:
       // Not implemented
@@ -1335,12 +1401,12 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
       int sad = LumaSAD(GetRefBlock(vx, vy));
-      cost += sad + (isFirst ? 0 : ((penaltyNew*(safe_sad_t)sad) >> 8));
+      cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
       if (cost >= nMinCost) return;
 
       int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
-      cost += saduv + (isFirst ? 0 : ((penaltyNew*(safe_sad_t)saduv) >> 8));
+			cost += saduv + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)saduv) >> 8));
       if (cost >= nMinCost) return;
 
       bestMV.x = vx;
@@ -1362,12 +1428,12 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
       int sad = LumaSAD(GetRefBlock(vx, vy));
-      cost += sad + ((penaltyNew*(safe_sad_t)sad) >> 8);
+			cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
       if (cost >= nMinCost) return;
 
       int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
-      cost += saduv + ((penaltyNew*(safe_sad_t)saduv) >> 8);
+			cost += saduv + ((p.penaltyNew*(safe_sad_t)saduv) >> 8);
       if (cost >= nMinCost) return;
 
       nMinCost = cost;
@@ -1390,7 +1456,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     int sad = LumaSAD(GetRefBlock(0, 0));
     sad += saduv;
     bestMV.sad = sad;
-    nMinCost = sad + ((penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
+		nMinCost = sad + ((p.penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
 
                                                                     // Global MV predictor  - added by Fizick
     globalMVPredictor = ClipMV(globalMVPredictor);
@@ -1400,7 +1466,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[2]);
       sad = LumaSAD(GetRefBlock(globalMVPredictor.x, globalMVPredictor.y));
       sad += saduv;
-      int cost = sad + ((pglobal*(safe_sad_t)sad) >> 8);
+			int cost = sad + ((p.pglobal*(safe_sad_t)sad) >> 8);
 
       if (cost < nMinCost)
       {
@@ -1445,73 +1511,30 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   }
 
 public:
-  PlaneOfBlocks(
-    int _nBlkX, int _nBlkY, int _nBlkSizeX, int _nBlkSizeY, int nPel, int _nLevel,
-    bool smallestPlane, bool chroma,
-    int _nOverlapX, int _nOverlapY, int _xRatioUV, int _yRatioUV,
-    int nPixelSize, int nBitsPerPixel, bool mt_flag, int chromaSADscale, 
+	PlaneOfBlocks(MVPlaneParam p, IScriptEnvironment* env)
+		: p(p)
+		, vectors(p.nBlkCount) // TODO: 実際に呼ばれるまで確保しないようにする
+		, SAD(get_sad_function<pixel_t>(p.nBlkSizeX, p.nBlkSizeY, env))
+		, SADCHROMA(get_sad_function<pixel_t>(p.nBlkSizeX / p.xRatioUV, p.nBlkSizeY / p.yRatioUV, env))
+	{ }
 
-    SearchType searchType, int nSearchParam, int PelSearch, int nLambda,
-    int lsad, int penaltyNew, int plevel, bool global,
-    int penaltyZero, int pglobal, int badSAD,
-    int badrange, bool meander, bool tryMany,
+	int GetWorkSize()
+	{
+		return 0;
+	}
 
-    IScriptEnvironment* env)
-    : nBlkX(_nBlkX)
-    , nBlkY(_nBlkY)
-    , nBlkSizeX(_nBlkSizeX)
-    , nBlkSizeY(_nBlkSizeY)
-    , nBlkCount(_nBlkX * _nBlkY)
-    , nPel(nPel)
-    , nLogPel(nlog2(nPel))	// nLogPel=0 for nPel=1, 1 for nPel=2, 2 for nPel=4, i.e. (x*nPel) = (x<<nLogPel)
-    , nLogScale(_nLevel)
-    , nScale(1 << _nLevel)
-    , smallestPlane(smallestPlane)
-    , chroma(chroma)
-    , nOverlapX(_nOverlapX)
-    , nOverlapY(_nOverlapY)
-    , xRatioUV(_xRatioUV) // PF
-    , nLogxRatioUV(nlog2(_xRatioUV))
-    , yRatioUV(_yRatioUV)
-    , nLogyRatioUV(nlog2(_yRatioUV))
-    , nPixelSize(nPixelSize) // PF
-    , nPixelShift(nlog2(nPixelSize)) // 161201
-    , nBitsPerPixel(nBitsPerPixel) // PF
-    , _mt_flag(mt_flag)
-    , chromaSADscale(chromaSADscale)
-    , searchType(searchType)
-    , nSearchParam(nSearchParam)
-    , vectors(nBlkCount)
-    , PelSearch(PelSearch)
-    , lsad(lsad)
-    , penaltyNew(penaltyNew)
-    , plevel(plevel)
-    , global(global)
-    , penaltyZero(penaltyZero)
-    , pglobal(pglobal)
-    , badSAD(badSAD)
-    , badrange(badrange)
-    , meander(meander)
-    , tryMany(tryMany)
-    , verybigSAD(3 * _nBlkSizeX * _nBlkSizeY * (nPixelSize == 4 ? 1 : (1 << nBitsPerPixel))) // * 256, pixelsize==2 -> 65536. Float:1
-    , SAD(get_sad_function<pixel_t>(nBlkSizeX, nBlkSizeY, env))
-    , SADCHROMA(get_sad_function<pixel_t>(nBlkSizeX / xRatioUV, nBlkSizeY / yRatioUV, env))
-  {
-    nLambdaLevel = nLambda / (nPel * nPel);
-    if (plevel == 1)
-    {
-      nLambdaLevel *= nScale;	// scale lambda - Fizick
-    }
-    else if (plevel == 2)
-    {
-      nLambdaLevel *= nScale*nScale;
-    }
-  }
+	void SetWorkMemory(uint8_t* work) { }
+
+	void InitializeGlobalMV(VECTOR* globalMV)
+	{
+		globalMV->x = globalMV->y = 0;
+		globalMV->sad = -1;
+	}
 
 	void SetMVs(const VECTOR *src, VECTOR *out, int nCount)
   {
-		assert(nCount == nBlkCount);
-    for (int i = 0; i < nBlkCount; ++i) {
+		assert(nCount == p.nBlkCount);
+		for (int i = 0; i < p.nBlkCount; ++i) {
 			out[i] = vectors[i] = src[i];
     }
   }
@@ -1519,13 +1542,13 @@ public:
   /* search the vectors for the whole plane */
 	void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount)
 	{
-		assert(nCount == nBlkCount);
+		assert(nCount == p.nBlkCount);
     // -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
     // Frame- and plane-related data preparation
 
     VECTOR globalMV = *_globalMV;
-    globalMV.x *= nPel;
-    globalMV.y *= nPel;
+		globalMV.x *= p.nPel;
+		globalMV.y *= p.nPel;
 
     pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetYPlane());
     pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetUPlane());
@@ -1535,13 +1558,13 @@ public:
     pRefVPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetVPlane());
 
     nSrcPitch[0] = pSrcYPlane->GetPitch();
-    if (chroma)
+		if (p.chroma)
     {
       nSrcPitch[1] = pSrcUPlane->GetPitch();
       nSrcPitch[2] = pSrcVPlane->GetPitch();
     }
     nRefPitch[0] = pRefYPlane->GetPitch();
-    if (chroma)
+		if (p.chroma)
     {
       nRefPitch[1] = pRefUPlane->GetPitch();
       nRefPitch[2] = pRefVPlane->GetPitch();
@@ -1553,7 +1576,7 @@ public:
 
     y[0] = pSrcYPlane->GetVPadding();
 
-    if (chroma)
+		if (p.chroma)
     {
       y[1] = pSrcUPlane->GetVPadding();
       y[2] = pSrcVPlane->GetVPadding();
@@ -1561,18 +1584,18 @@ public:
 
     // Functions using float must not be used here
 
-    int nBlkSizeX_Ovr[3] = { (nBlkSizeX - nOverlapX), (nBlkSizeX - nOverlapX) >> nLogxRatioUV, (nBlkSizeX - nOverlapX) >> nLogxRatioUV };
-    int nBlkSizeY_Ovr[3] = { (nBlkSizeY - nOverlapY), (nBlkSizeY - nOverlapY) >> nLogyRatioUV, (nBlkSizeY - nOverlapY) >> nLogyRatioUV };
+		int nBlkSizeX_Ovr[3] = { (p.nBlkSizeX - p.nOverlapX), (p.nBlkSizeX - p.nOverlapX) >> p.nLogxRatioUV, (p.nBlkSizeX - p.nOverlapX) >> p.nLogxRatioUV };
+		int nBlkSizeY_Ovr[3] = { (p.nBlkSizeY - p.nOverlapY), (p.nBlkSizeY - p.nOverlapY) >> p.nLogyRatioUV, (p.nBlkSizeY - p.nOverlapY) >> p.nLogyRatioUV };
 
-    for (blky = 0; blky < nBlkY; blky++)
+		for (blky = 0; blky < p.nBlkY; blky++)
     {
-      blkScanDir = (blky % 2 == 0 || !meander) ? 1 : -1;
+			blkScanDir = (blky % 2 == 0 || !p.meander) ? 1 : -1;
       // meander (alternate) scan blocks (even row left to right, odd row right to left)
-      int blkxStart = (blky % 2 == 0 || !meander) ? 0 : nBlkX - 1;
+			int blkxStart = (blky % 2 == 0 || !p.meander) ? 0 : p.nBlkX - 1;
       if (blkScanDir == 1) // start with leftmost block
       {
         x[0] = pSrcYPlane->GetHPadding();
-        if (chroma)
+				if (p.chroma)
         {
           x[1] = pSrcUPlane->GetHPadding();
           x[2] = pSrcVPlane->GetHPadding();
@@ -1580,18 +1603,18 @@ public:
       }
       else // start with rightmost block, but it is already set at prev row
       {
-        x[0] = pSrcYPlane->GetHPadding() + nBlkSizeX_Ovr[0] * (nBlkX - 1);
-        if (chroma)
+				x[0] = pSrcYPlane->GetHPadding() + nBlkSizeX_Ovr[0] * (p.nBlkX - 1);
+				if (p.chroma)
         {
-          x[1] = pSrcUPlane->GetHPadding() + nBlkSizeX_Ovr[1] * (nBlkX - 1);
-          x[2] = pSrcVPlane->GetHPadding() + nBlkSizeX_Ovr[2] * (nBlkX - 1);
+					x[1] = pSrcUPlane->GetHPadding() + nBlkSizeX_Ovr[1] * (p.nBlkX - 1);
+					x[2] = pSrcVPlane->GetHPadding() + nBlkSizeX_Ovr[2] * (p.nBlkX - 1);
         }
       }
 
-      for (int iblkx = 0; iblkx < nBlkX; iblkx++)
+			for (int iblkx = 0; iblkx < p.nBlkX; iblkx++)
       {
         blkx = blkxStart + iblkx*blkScanDir;
-        blkIdx = blky*nBlkX + blkx;
+        blkIdx = blky*p.nBlkX + blkx;
         iter = 0;
         //			DebugPrintf("BlkIdx = %d \n", blkIdx);
 
@@ -1600,7 +1623,7 @@ public:
         globalMVPredictor = globalMV;
 
         pSrc[0] = pSrcYPlane->GetAbsolutePelPointer(x[0], y[0]);
-        if (chroma)
+				if (p.chroma)
         {
           pSrc[1] = pSrcUPlane->GetAbsolutePelPointer(x[1], y[1]);
           pSrc[2] = pSrcVPlane->GetAbsolutePelPointer(x[2], y[2]);
@@ -1612,17 +1635,17 @@ public:
         }
         else
         {
-          nCurrentLambda = nLambdaLevel;
+          nCurrentLambda = p.nLambdaLevel;
         }
 
         // decreased padding of coarse levels
-        int nHPaddingScaled = pSrcYPlane->GetHPadding() >> nLogScale;
-        int nVPaddingScaled = pSrcYPlane->GetVPadding() >> nLogScale;
+				int nHPaddingScaled = pSrcYPlane->GetHPadding() >> p.nLogScale;
+				int nVPaddingScaled = pSrcYPlane->GetVPadding() >> p.nLogScale;
         /* computes search boundaries */
-        nDxMax = nPel * (pSrcYPlane->GetExtendedWidth() - x[0] - nBlkSizeX - pSrcYPlane->GetHPadding() + nHPaddingScaled);
-        nDyMax = nPel * (pSrcYPlane->GetExtendedHeight() - y[0] - nBlkSizeY - pSrcYPlane->GetVPadding() + nVPaddingScaled);
-        nDxMin = -nPel * (x[0] - pSrcYPlane->GetHPadding() + nHPaddingScaled);
-        nDyMin = -nPel * (y[0] - pSrcYPlane->GetVPadding() + nVPaddingScaled);
+				nDxMax = p.nPel * (pSrcYPlane->GetExtendedWidth() - x[0] - p.nBlkSizeX - pSrcYPlane->GetHPadding() + nHPaddingScaled);
+				nDyMax = p.nPel * (pSrcYPlane->GetExtendedHeight() - y[0] - p.nBlkSizeY - pSrcYPlane->GetVPadding() + nVPaddingScaled);
+				nDxMin = -p.nPel * (x[0] - pSrcYPlane->GetHPadding() + nHPaddingScaled);
+				nDyMin = -p.nPel * (y[0] - pSrcYPlane->GetVPadding() + nVPaddingScaled);
 
         /* search the mv */
         predictor = ClipMV(vectors[blkIdx]);
@@ -1638,7 +1661,7 @@ public:
         pBlkData[blkx] = bestMV;
 
         /* increment indexes & pointers */
-        if (iblkx < nBlkX - 1)
+				if (iblkx < p.nBlkX - 1)
         {
           x[0] += nBlkSizeX_Ovr[0] * blkScanDir;
           x[1] += nBlkSizeX_Ovr[1] * blkScanDir;
@@ -1646,7 +1669,7 @@ public:
         }
       }	// for iblkx
 
-      pBlkData += nBlkX;
+			pBlkData += p.nBlkX;
 
       y[0] += nBlkSizeY_Ovr[0];
       y[1] += nBlkSizeY_Ovr[1];
@@ -1658,7 +1681,7 @@ public:
 
   void EstimateGlobalMVDoubled(VECTOR *globalMVec)
   {
-    std::vector<int> freq_arr(8192 * nPel * 2);
+		std::vector<int> freq_arr(8192 * p.nPel * 2);
 
     for (int y = 0; y < 2; ++y)
     {
@@ -1671,7 +1694,7 @@ public:
       // find most frequent x
       if (y == 0)
       {
-        for (int i = 0; i < nBlkCount; i++)
+				for (int i = 0; i < p.nBlkCount; i++)
         {
           int ind = (freqSize >> 1) + vectors[i].x;
           if (ind >= 0 && ind < freqSize)
@@ -1692,7 +1715,7 @@ public:
       // find most frequent y
       else
       {
-        for (int i = 0; i < nBlkCount; i++)
+				for (int i = 0; i < p.nBlkCount; i++)
         {
           int ind = (freqSize >> 1) + vectors[i].y;
           if (ind >= 0 && ind < freqSize)
@@ -1736,7 +1759,7 @@ public:
     int meanvx = 0;
     int meanvy = 0;
     int num = 0;
-    for (int i = 0; i < nBlkCount; i++)
+		for (int i = 0; i < p.nBlkCount; i++)
     {
       if (abs(vectors[i].x - medianx) < 6
         && abs(vectors[i].y - mediany) < 6)
@@ -1764,65 +1787,65 @@ public:
   {
     const PlaneOfBlocks<pixel_t>& pob = *static_cast<const PlaneOfBlocks<pixel_t>*>(_pob);
 
-    int normFactor = 3 - nLogPel + pob.nLogPel;
+		int normFactor = 3 - p.nLogPel + pob.p.nLogPel;
     int mulFactor = (normFactor < 0) ? -normFactor : 0;
     normFactor = (normFactor < 0) ? 0 : normFactor;
-    int normov = (nBlkSizeX - nOverlapX)*(nBlkSizeY - nOverlapY);
-    int aoddx = (nBlkSizeX * 3 - nOverlapX * 2);
-    int aevenx = (nBlkSizeX * 3 - nOverlapX * 4);
-    int aoddy = (nBlkSizeY * 3 - nOverlapY * 2);
-    int aeveny = (nBlkSizeY * 3 - nOverlapY * 4);
+		int normov = (p.nBlkSizeX - p.nOverlapX)*(p.nBlkSizeY - p.nOverlapY);
+		int aoddx = (p.nBlkSizeX * 3 - p.nOverlapX * 2);
+		int aevenx = (p.nBlkSizeX * 3 - p.nOverlapX * 4);
+		int aoddy = (p.nBlkSizeY * 3 - p.nOverlapY * 2);
+		int aeveny = (p.nBlkSizeY * 3 - p.nOverlapY * 4);
     // note: overlapping is still (v2.5.7) not processed properly
     // PF todo make faster
 
     // 2.7.19.22 max safe: BlkX*BlkY: sqrt(2147483647 / 3 / 255) = 1675 ,(2147483647 = 0x7FFFFFFF)
-    bool bNoOverlap = (nOverlapX == 0 && nOverlapY == 0);
-    bool isSafeBlkSizeFor8bits = (nBlkSizeX*nBlkSizeY) < 1675;
-    bool bSmallOverlap = nOverlapX <= (nBlkSizeX >> 1) && nOverlapY <= (nBlkSizeY >> 1);
+		bool bNoOverlap = (p.nOverlapX == 0 && p.nOverlapY == 0);
+		bool isSafeBlkSizeFor8bits = (p.nBlkSizeX*p.nBlkSizeY) < 1675;
+		bool bSmallOverlap = p.nOverlapX <= (p.nBlkSizeX >> 1) && p.nOverlapY <= (p.nBlkSizeY >> 1);
 
-    for (int l = 0, index = 0; l < nBlkY; l++)
+		for (int l = 0, index = 0; l < p.nBlkY; l++)
     {
-      for (int k = 0; k < nBlkX; k++, index++)
+			for (int k = 0; k < p.nBlkX; k++, index++)
       {
         VECTOR v1, v2, v3, v4;
         int i = k;
         int j = l;
-        if (i >= 2 * pob.nBlkX)
+				if (i >= 2 * pob.p.nBlkX)
         {
-          i = 2 * pob.nBlkX - 1;
+					i = 2 * pob.p.nBlkX - 1;
         }
-        if (j >= 2 * pob.nBlkY)
+				if (j >= 2 * pob.p.nBlkY)
         {
-          j = 2 * pob.nBlkY - 1;
+					j = 2 * pob.p.nBlkY - 1;
         }
         int offy = -1 + 2 * (j % 2);
         int offx = -1 + 2 * (i % 2);
         int iper2 = i / 2;
         int jper2 = j / 2;
 
-        if ((i == 0) || (i >= 2 * pob.nBlkX - 1))
+				if ((i == 0) || (i >= 2 * pob.p.nBlkX - 1))
         {
-          if ((j == 0) || (j >= 2 * pob.nBlkY - 1))
+					if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
           {
-            v1 = v2 = v3 = v4 = pob.vectors[iper2 + (jper2)* pob.nBlkX];
+						v1 = v2 = v3 = v4 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
           }
           else
           {
-            v1 = v2 = pob.vectors[iper2 + (jper2)* pob.nBlkX];
-            v3 = v4 = pob.vectors[iper2 + (jper2 + offy) * pob.nBlkX];
+						v1 = v2 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
+						v3 = v4 = pob.vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
           }
         }
-        else if ((j == 0) || (j >= 2 * pob.nBlkY - 1))
+        else if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
         {
-          v1 = v2 = pob.vectors[iper2 + (jper2)* pob.nBlkX];
-          v3 = v4 = pob.vectors[iper2 + offx + (jper2)* pob.nBlkX];
+					v1 = v2 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
+					v3 = v4 = pob.vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
         }
         else
         {
-          v1 = pob.vectors[iper2 + (jper2)* pob.nBlkX];
-          v2 = pob.vectors[iper2 + offx + (jper2)* pob.nBlkX];
-          v3 = pob.vectors[iper2 + (jper2 + offy) * pob.nBlkX];
-          v4 = pob.vectors[iper2 + offx + (jper2 + offy) * pob.nBlkX];
+					v1 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
+					v2 = pob.vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
+					v3 = pob.vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
+					v4 = pob.vectors[iper2 + offx + (jper2 + offy) * pob.p.nBlkX];
         }
         typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
         safe_sad_t tmp_sad; // 16 bit worst case: 16 * sad_max: 16 * 3x32x32x65536 = 4+5+5+16 > 2^31 over limit
@@ -1838,9 +1861,9 @@ public:
         else if (bSmallOverlap) // corrected in v1.4.11
         {
           int	ax1 = (offx > 0) ? aoddx : aevenx;
-          int ax2 = (nBlkSizeX - nOverlapX) * 4 - ax1;
+					int ax2 = (p.nBlkSizeX - p.nOverlapX) * 4 - ax1;
           int ay1 = (offy > 0) ? aoddy : aeveny;
-          int ay2 = (nBlkSizeY - nOverlapY) * 4 - ay1;
+					int ay2 = (p.nBlkSizeY - p.nOverlapY) * 4 - ay1;
           int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
           vectors[index].x = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
           vectors[index].y = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
@@ -1874,23 +1897,147 @@ public:
 
 	void WriteDefault(VECTOR *out, int nCount)
   {
-    for (int i = 0; i < nBlkCount; ++i)
+		for (int i = 0; i < p.nBlkCount; ++i)
     {
 			out[i].x = 0;
 			out[i].y = 0;
-			out[i].sad = verybigSAD; // float or int!!
+			out[i].sad = p.verybigSAD; // float or int!!
     }
   }
 };
 
+class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
+{
+	typedef uint8_t pixel_t;
+
+	const MVPlaneParam p;
+	KDeintKernel* kernel;
+
+	short2* vectors;
+	int* sads;
+	void* blocks;
+
+	enum { N_CONST_VEC = 4 };
+
+public:
+	PlaneOfBlocksCUDA(MVPlaneParam p, KDeintKernel* kernel, IScriptEnvironment* env)
+		: p(p)
+		, kernel(kernel)
+	{ }
+
+	~PlaneOfBlocksCUDA() { }
+
+	int GetWorkSize()
+	{
+		return (N_CONST_VEC + p.nBlkCount) * sizeof(short2) +
+			(N_CONST_VEC + p.nBlkCount) * sizeof(int) +
+			p.nBlkCount * kernel->GetSearchBlockSize();
+	}
+
+	void SetWorkMemory(uint8_t* work)
+	{
+		vectors = (short2*)work + N_CONST_VEC;
+		sads = (int*)&vectors[p.nBlkCount] + N_CONST_VEC;
+		blocks = (void*)&sads[p.nBlkCount];
+	}
+
+	void InitializeGlobalMV(VECTOR* globalMV)
+	{
+		// do nothing
+	}
+
+	void EstimateGlobalMVDoubled(VECTOR* globalMV)
+	{
+		kernel->EstimateGlobalMV(vectors, p.nBlkCount, (short2*)globalMV);
+	}
+
+	void InterpolatePrediction(const PlaneOfBlocksBase* _pob)
+	{
+		const PlaneOfBlocksCUDA& pob = *static_cast<const PlaneOfBlocksCUDA*>(_pob);
+
+		// normFactor = 3 - nLogPel + pob.nLogPel
+		// normov = (nBlkSizeX - nOverlapX)*(nBlkSizeY - nOverlapY)
+		// aoddx = (nBlkSizeX * 3 - nOverlapX * 2)
+		// aevenx = (nBlkSizeX * 3 - nOverlapX * 4);
+		// aoddy = (nBlkSizeY * 3 - nOverlapY * 2);
+		// aeveny = (nBlkSizeY * 3 - nOverlapY * 4);
+		// atotalx = (nBlkSizeX - nOverlapX) * 4
+		// atotaly = (nBlkSizeY - nOverlapY) * 4
+
+		int normFactor = 3 - p.nLogPel + pob.p.nLogPel;
+		int normov = (p.nBlkSizeX - p.nOverlapX)*(p.nBlkSizeY - p.nOverlapY);
+		int aoddx = (p.nBlkSizeX * 3 - p.nOverlapX * 2);
+		int aevenx = (p.nBlkSizeX * 3 - p.nOverlapX * 4);
+		//int aoddy = (p.nBlkSizeY * 3 - p.nOverlapY * 2);
+		//int aeveny = (p.nBlkSizeY * 3 - p.nOverlapY * 4);
+		int atotalx = (p.nBlkSizeX - p.nOverlapX) * 4;
+		//int atotaly = (p.nBlkSizeY - p.nOverlapY) * 4;
+
+		kernel->InterpolatePrediction(
+			pob.vectors, pob.sads, vectors, sads,
+			pob.p.nBlkX, pob.p.nBlkY, p.nBlkX, p.nBlkY,
+			normFactor, normov, atotalx, aoddx, aevenx);
+	}
+
+	void SetMVs(const VECTOR *src, VECTOR *out, int nCount)
+	{
+		assert(nCount == p.nBlkCount);
+		kernel->MemCpy(out, src, nCount * sizeof(VECTOR));
+		kernel->LoadMV(src, vectors, sads, nCount);
+	}
+
+	void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *globalMV, VECTOR *out, int nCount)
+	{
+		KMPlane<pixel_t> *pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetYPlane());
+		KMPlane<pixel_t> *pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetUPlane());
+		KMPlane<pixel_t> *pSrcVPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetVPlane());
+		KMPlane<pixel_t> *pRefYPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetYPlane());
+		KMPlane<pixel_t> *pRefUPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetUPlane());
+		KMPlane<pixel_t> *pRefVPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetVPlane());
+
+		int nBlkSizeX = (p.nBlkSizeX - p.nOverlapX);
+		int nExtendedWidth = pSrcYPlane->GetExtendedWidth();
+		int nExtendedHeight = pSrcYPlane->GetExtendedHeight();
+
+		const pixel_t* pSrcY = pSrcYPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pSrcU = pSrcUPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pSrcV = pSrcVPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pRefY = pRefYPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pRefU = pRefUPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pRefV = pRefVPlane->GetAbsolutePelPointer(0, 0);
+
+		int nSrcPitchY = pSrcYPlane->GetPitch();
+		int nSrcPitchUV = pSrcUPlane->GetPitch();
+		int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedWidth();
+		int nImgPitchUV = nSrcPitchUV * pSrcUPlane->GetExtendedWidth();
+
+		kernel->Search(p.nBlkX, p.nBlkY, p.nBlkSizeX, 
+			p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
+			p.pglobal, p.penaltyNew, p.nPel,
+			pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
+			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV, 
+			nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV, 
+			(const short2*)globalMV, vectors, sads, blocks);
+	}
+
+	void WriteDefault(VECTOR *out, int nCount)
+	{
+		assert(nCount == p.nBlkCount);
+		kernel->WriteDefaultMV(out, nCount, p.verybigSAD);
+	}
+};
+
 class GroupOfPlanes
 {
+	KDeintKernel* kernel;
+
 	const std::vector<LevelInfo> linfo;
   const int nLevelCount;
   const int nPreAnalyzedCount;
   const bool global;
 
-  std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> planes;
+	std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cpuplanes;
+	std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cudaplanes;
 
 public:
 	GroupOfPlanes(
@@ -1905,12 +2052,15 @@ public:
     int penaltyZero, int pglobal, int badSAD,
     int badrange, bool meander, bool tryMany,
 
+		KDeintKernel* kernel,
     IScriptEnvironment *env)
-		: linfo(linfo)
+		: kernel(kernel)
+		, linfo(linfo)
 		, nLevelCount(nLevelCount)
     , nPreAnalyzedCount(nPreAnalyzedCount)
     , global(global)
-    , planes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
+		, cpuplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
+		, cudaplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
   {
     assert(nDropLevels == 0 || nPel == 1);
 
@@ -1929,43 +2079,55 @@ public:
       // special case for finest level
       int nSearchParamLevel = (i == 0) ? nPelSearch : nSearchParam;
 
+			MVPlaneParam p(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
+				i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
+				nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale,
+
+				searchTypeLevel, nSearchParam, nSearchParamLevel, nLambda, lsad, pnew,
+				plevel, global, penaltyZero, pglobal, badSAD, badrange, meander,
+				tryMany);
+
       if (nPixelSize == 1) {
-        planes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-          new PlaneOfBlocks<uint8_t>(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
-            i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
-            nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale,
-
-            searchTypeLevel, nSearchParam, nSearchParamLevel, nLambda, lsad, pnew,
-            plevel, global, penaltyZero, pglobal, badSAD, badrange, meander,
-            tryMany,
-
-            env));
+				cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+					new PlaneOfBlocks<uint8_t>(p, env));
+				cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+					new PlaneOfBlocksCUDA(p, kernel, env));
       }
       else {
-        planes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-          new PlaneOfBlocks<uint16_t>(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
-            i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
-            nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale,
-
-            searchTypeLevel, nSearchParam, nSearchParamLevel, nLambda, lsad, pnew,
-            plevel, global, penaltyZero, pglobal, badSAD, badrange, meander,
-            tryMany,
-
-            env));
+				cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+					new PlaneOfBlocks<uint16_t>(p, env));
+				cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+					new PlaneOfBlocksCUDA(p, kernel, env));
       }
     }
   }
 
-	void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, const VECTOR* pre, VECTOR *out)
+	int GetWorkSize() const {
+		int size = sizeof(VECTOR); // globalMV
+		int nLevelFrom = nLevelCount - 1;
+		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
+		for (int i = nLevelFrom; i >= 0; i--) {
+			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+			// TODO:
+			size += planes[i]->GetWorkSize();
+		}
+		return size;
+	}
+
+	void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, const VECTOR* pre, VECTOR *out, uint8_t* work)
   {
     //out->isValid = true;
 
+		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
+
 		VECTOR* outptr = out;
 
-    // create and init global motion vector as zero
-    VECTOR globalMV = { 0, 0, -1 };
+		VECTOR* globalMV = (VECTOR*)work;
+		uint8_t* planework = (uint8_t*)&globalMV[1];
 
     int nLevelFrom = nLevelCount - 1;
+
+		planes[0]->InitializeGlobalMV(globalMV);
 
     // preがあればoutにコピーしてレベルを進めておく
     if (pre) {
@@ -1988,17 +2150,17 @@ public:
         if (global)
         {
           // get updated global MV (doubled)
-          planes[i + 1]->EstimateGlobalMVDoubled(&globalMV);
+					planes[i]->EstimateGlobalMVDoubled(globalMV);
         }
 
-        planes[i]->InterpolatePrediction(planes[i + 1].get());
+				planes[i]->InterpolatePrediction(planes[i + 1].get());
       }
 
       //		DebugPrintf("SearchMV level %i", i);
-      planes[i]->SearchMVs(
+			planes[i]->SearchMVs(
         pSrcGOF->GetFrame(i),
         pRefGOF->GetFrame(i),
-        &globalMV, outptr, nBlks);
+        globalMV, outptr, nBlks);
 
 			outptr += nBlks;
     }
@@ -2011,6 +2173,7 @@ public:
 		VECTOR* ptr = out;
 
     // write planes
+		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
     for (int i = nLevelCount - 1; i >= 0; i--)
 		{
 			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
@@ -2035,6 +2198,7 @@ class KMAnalyse : public GenericVideoFilter
 {
 private:
   KMVParam params;
+	KDeintKernel kernel;
   std::unique_ptr<GroupOfPlanes> pAnalyzer;
   std::unique_ptr<KMSuperFrame> pSrcSF, pRefSF;
 
@@ -2223,8 +2387,8 @@ public:
       nSearchParam = (stp < 1) ? 1 : stp;
     }
 
-    pSrcSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
-    pRefSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
+    pSrcSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
+    pRefSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
 
 		pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
@@ -2259,7 +2423,8 @@ public:
       meander,
       tryMany,
 
-      env
+			&kernel,
+			env
     ));
 
     // Defines the format of the output vector clip
@@ -2281,6 +2446,8 @@ public:
     PVideoFrame dst = env->NewVideoFrame(vi);
 		VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
 		bool isValid = false;
+
+		kernel.SetEnv(dst->IsCUDA(), nullptr, env);
 
     // 0: 2_size_validity+(foreachblock(1_validity+blockCount*3))
 
@@ -2307,7 +2474,14 @@ public:
 				pPre = reinterpret_cast<const VECTOR*>(pre->GetReadPtr());
       }
 
-			pAnalyzer->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst);
+			int work_bytes = pAnalyzer->GetWorkSize();
+			VideoInfo workvi = VideoInfo();
+			workvi.pixel_type = VideoInfo::CS_BGR32;
+			workvi.width = 2048;
+			workvi.height = nblocks(work_bytes, vi.width * 4);
+			PVideoFrame work = env->NewVideoFrame(workvi);
+
+			pAnalyzer->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst, work->GetWritePtr());
 
 			isValid = true;
     }
@@ -2549,8 +2723,8 @@ public:
     , kmsuper(kmsuper)
     , mvsuper(mvsuper)
     , params(KMVParam::GetParam(kmsuper->GetVideoInfo(), env))
-    , pKSF(new KMSuperFrame(params))
-    , pMSF(new KMSuperFrame(params))
+    , pKSF(new KMSuperFrame(params, nullptr))
+		, pMSF(new KMSuperFrame(params, nullptr))
   {
   }
 
@@ -3700,8 +3874,8 @@ public:
       mvClipF[i] = std::unique_ptr<KMVClip>(pmvClipF[i] =
         new KMVClip(KMVParam::GetParam(rawClipF[i]->GetVideoInfo(), env), _nSCD1, _nSCD2));
 
-      superB[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam));
-      superF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam));
+      superB[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam, nullptr));
+			superF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam, nullptr));
     }
 
     // e.g. 10000*999999 is too much
@@ -4142,7 +4316,7 @@ public:
 
     for (int i = 0; i < 2; ++i) {
       superFrame[i] = std::unique_ptr<KMSuperFrame>(
-        new KMSuperFrame(KMVParam::GetParam(super->GetVideoInfo(), env)));
+        new KMSuperFrame(KMVParam::GetParam(super->GetVideoInfo(), env), nullptr));
     }
     mvClip = std::unique_ptr<KMVClip>(
       new KMVClip(KMVParam::GetParam(vectors->GetVideoInfo(), env), nSCD1, nSCD2));
