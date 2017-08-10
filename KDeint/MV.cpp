@@ -1915,6 +1915,7 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
 
 	short2* vectors;
 	int* sads;
+	int* prog;
 	void* blocks;
 
 	enum { N_CONST_VEC = 4 };
@@ -1929,16 +1930,17 @@ public:
 
 	int GetWorkSize()
 	{
-		return (N_CONST_VEC + p.nBlkCount) * sizeof(short2) +
-			(N_CONST_VEC + p.nBlkCount) * sizeof(int) +
+		return (N_CONST_VEC + p.nBlkCount * 2) * sizeof(short2) +
+			(N_CONST_VEC + p.nBlkCount + p.nBlkX) * sizeof(int) +
 			p.nBlkCount * kernel->GetSearchBlockSize();
 	}
 
 	void SetWorkMemory(uint8_t* work)
 	{
 		vectors = (short2*)work + N_CONST_VEC;
-		sads = (int*)&vectors[p.nBlkCount] + N_CONST_VEC;
-		blocks = (void*)&sads[p.nBlkCount];
+		sads = (int*)&vectors[p.nBlkCount * 2] + N_CONST_VEC;
+		prog = &sads[p.nBlkCount];
+		blocks = (void*)&prog[p.nBlkX];
 	}
 
 	void InitializeGlobalMV(VECTOR* globalMV)
@@ -2017,7 +2019,7 @@ public:
 			pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
 			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV, 
 			nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV, 
-			(const short2*)globalMV, vectors, sads, blocks);
+			(const short2*)globalMV, vectors, sads, blocks, prog);
 	}
 
 	void WriteDefault(VECTOR *out, int nCount)

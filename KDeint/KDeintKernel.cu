@@ -460,6 +460,17 @@ __device__ void dev_reduce_result(CostResult* tmp_, int tid)
   tmp[tid] = (tmp[tid].cost < tmp[tid + 1].cost) ? tmp[tid] : tmp[tid + 1];
 }
 
+__constant__ int2 c_expanding_search_1_area[] = {
+	{ -1, -1 },
+	{ 0, -1 },
+	{ 1, -1 },
+	{ -1, 0 },
+	{ 1, 0 },
+	{ -1, 1 },
+	{ 0, 1 },
+	{ 1, 1 }
+};
+
 // __syncthreads()を呼び出しているので全員で呼ぶ
 template <typename pixel_t, int BLK_SIZE, int NPEL>
 __device__ void dev_expanding_search_1(
@@ -471,17 +482,6 @@ __device__ void dev_expanding_search_1(
   int nPitchY, int nPitchU, int nPitchV,
   int nImgPitchY, int nImgPitchU, int nImgPitchV)
 {
-  int2 area[] = {
-    { -1, -1 },
-    { 0, -1 },
-    { 1, -1 },
-    { -1, 0 },
-    { 1, 0 },
-    { -1, 1 },
-    { 0, 1 },
-    { 1, 1 }
-  };
-
   __shared__ bool isVectorOK[8];
   __shared__ CostResult result[8];
   __shared__ const pixel_t* pRefY[8];
@@ -489,8 +489,8 @@ __device__ void dev_expanding_search_1(
   __shared__ const pixel_t* pRefV[8];
 
   if (tx < 8) {
-    int x = result[tx].xy.x = cx + area[tx].x;
-    int y = result[tx].xy.y = cy + area[tx].y;
+		int x = result[tx].xy.x = cx + c_expanding_search_1_area[tx].x;
+		int y = result[tx].xy.y = cy + c_expanding_search_1_area[tx].y;
     bool ok = dev_check_mv(x, y, CLIP_RECT);
     int cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
@@ -530,6 +530,27 @@ __device__ void dev_expanding_search_1(
   }
 }
 
+__constant__ int2 c_expanding_search_2_area[] = {
+	{ -2, -2 },
+	{ -1, -2 },
+	{ 0, -2 },
+	{ 1, -2 },
+	{ 2, -2 },
+
+	{ -2, -1 },
+	{ 2, -1 },
+	{ -2, 0 },
+	{ 2, 0 },
+	{ -2, 1 },
+	{ 2, 1 },
+
+	{ -2, 2 },
+	{ -1, 2 },
+	{ 0, 2 },
+	{ 1, 2 },
+	{ 2, 2 }
+};
+
 // __syncthreads()を呼び出しているので全員で呼ぶ
 template <typename pixel_t, int BLK_SIZE, int NPEL>
 __device__ void dev_expanding_search_2(
@@ -541,27 +562,6 @@ __device__ void dev_expanding_search_2(
   int nPitchY, int nPitchU, int nPitchV,
   int nImgPitchY, int nImgPitchU, int nImgPitchV)
 {
-  int2 area[] = {
-    { -2, -2 },
-    { -1, -2 },
-    { 0, -2 },
-    { 1, -2 },
-    { 2, -2 },
-
-    { -2, -1 },
-    { 2, -1 },
-    { -2, 0 },
-    { 2, 0 },
-    { -2, 1 },
-    { 2, 1 },
-
-    { -2, 2 },
-    { -1, 2 },
-    { 0, 2 },
-    { 1, 2 },
-    { 2, 2 }
-  };
-
   __shared__ bool isVectorOK[16];
   __shared__ CostResult result[16];
   __shared__ const pixel_t* pRefY[16];
@@ -569,8 +569,8 @@ __device__ void dev_expanding_search_2(
   __shared__ const pixel_t* pRefV[16];
 
   if (tx < 16) {
-    int x = result[tx].xy.x = cx + area[tx].x;
-    int y = result[tx].xy.y = cy + area[tx].y;
+		int x = result[tx].xy.x = cx + c_expanding_search_2_area[tx].x;
+		int y = result[tx].xy.y = cy + c_expanding_search_2_area[tx].y;
     bool ok = dev_check_mv(x, y, CLIP_RECT);
     int cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
@@ -617,6 +617,10 @@ __device__ void dev_expanding_search_2(
   }
 }
 
+__constant__ int2 c_hex2_search_1_area[] = {
+	{ -1, -2 }, { -2, 0 }, { -1, 2 }, { 1, 2 }, { 2, 0 }, { 1, -2 }, { -1, -2 }, { -2, 0 }
+};
+
 // __syncthreads()を呼び出しているので全員で呼ぶ
 template <typename pixel_t, int BLK_SIZE, int NPEL>
 __device__ void dev_hex2_search_1(
@@ -628,8 +632,6 @@ __device__ void dev_hex2_search_1(
   int nPitchY, int nPitchU, int nPitchV,
   int nImgPitchY, int nImgPitchU, int nImgPitchV)
 {
-  int2 area[] = { { -1,-2 },{ -2,0 },{ -1,2 },{ 1,2 },{ 2,0 },{ 1,-2 },{ -1,-2 },{ -2,0 } };
-
   __shared__ bool isVectorOK[8];
   __shared__ CostResult result[8];
   __shared__ const pixel_t* pRefY[8];
@@ -639,8 +641,8 @@ __device__ void dev_hex2_search_1(
   isVectorOK[tx] = false;
 
   if (tx < 6) {
-    int x = result[tx].xy.x = cx + area[tx].x;
-    int y = result[tx].xy.y = cy + area[tx].y;
+		int x = result[tx].xy.x = cx + c_hex2_search_1_area[tx].x;
+		int y = result[tx].xy.y = cy + c_hex2_search_1_area[tx].y;
     bool ok = dev_check_mv(x, y, CLIP_RECT);
     int cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
@@ -707,6 +709,7 @@ template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
 __global__ void kl_search(
   int nBlkX, int nBlkY, const SearchBlock* __restrict__ blocks,
   short2* vectors, // [x,y]
+	volatile int* prog,
   int nPad,
   const pixel_t* __restrict__ pSrcY, const pixel_t* __restrict__ pSrcU, const pixel_t* __restrict__ pSrcV,
   const pixel_t* __restrict__ pRefY, const pixel_t* __restrict__ pRefU, const pixel_t* __restrict__ pRefV,
@@ -762,7 +765,11 @@ __global__ void kl_search(
         }
       }
 
-			// TODO: 依存ブロックの計算が終わるのを待つ
+			// !!!!! 依存ブロックの計算が終わるのを待つ !!!!!!
+			if (tx == 0 && blkx >= 2)
+			{
+				while (prog[blkx - (1 + (blkx & 1))] < blky) ;
+			}
 
       __syncthreads();
 
@@ -855,10 +862,12 @@ __global__ void kl_search(
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
       }
 
-      // 結果書き込み
-      if (tx == 0) {
+			if (tx == 0) {
+				// 結果書き込み
         vectors[blky*nBlkX + blkx] = result[0].xy;
-      }
+				// 完了を書き込み
+				prog[blkx] = blky;
+			}
 
       // 共有メモリ保護
       __syncthreads();
@@ -962,7 +971,7 @@ __global__ void kl_prepare_search(
 	sad_t nLambdaLevel, sad_t lsad,
   sad_t penaltyZero, sad_t penaltyGlobal, sad_t penaltyNew,
   int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-  const int* sads, SearchBlock* dst_blocks)
+	const short2* vectors, const int* sads, short2* vectors_copy, SearchBlock* dst_blocks, int* prog)
 {
   int bx = threadIdx.x + blockIdx.x * blockDim.x;
   int by = threadIdx.y + blockIdx.y * blockDim.y;
@@ -972,6 +981,14 @@ __global__ void kl_prepare_search(
     int blkIdx = bx + by*nBlkX;
     int sad = sads[blkIdx];
     SearchBlock *data = &dst_blocks[blkIdx];
+
+		// 計算中に前のレベルから求めたベクタを保持したいのでコピーしておく
+		vectors_copy[blkIdx] = vectors[blkIdx];
+
+		// 進捗は-1に初期化しておく
+		if (by == 0) {
+			prog[bx] = -1;
+		}
 
     int x = nPad + nBlkSizeOvr * bx;
     int y = nPad + nBlkSizeOvr * by;
@@ -1010,7 +1027,10 @@ __global__ void kl_prepare_search(
     // bottom-right pridictor (from coarse level)
     if ((y < nBlkY - 1) && (x < nBlkX - 1))
     {
-      p3 = blkIdx + nBlkX + 1;
+			// すでに書き換わっている可能性がありそれでも計算は可能だが、
+			// デバッグのため非決定動作は避けたいので
+			// コピーしてある後ろのデータを使う
+			p3 = blkIdx + nBlkX + 1 + nBlkX * nBlkY;
     }
 
     data->data[4] = -2;    // zero
@@ -1336,6 +1356,7 @@ template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
 void launch_search(
 	int nBlkX, int nBlkY, const SearchBlock* searchblocks,
 	short2* vectors, // [x,y]
+	int* prog,
 	int nPad,
 	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
 	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
@@ -1345,7 +1366,7 @@ void launch_search(
 	dim3 threads(128);
 	dim3 blocks(nblocks(nBlkX, 2) * 2);
 	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL> << <blocks, threads, 0, stream >> >(
-		nBlkX, nBlkY, searchblocks, vectors, nPad,
+		nBlkX, nBlkY, searchblocks, vectors, prog, nPad,
 		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
 		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
 }
@@ -1381,7 +1402,7 @@ void KDeintKernel::Search(
 	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
 	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
 	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int* sads, void* _searchblocks)
+	const short2* globalMV, short2* vectors, int* sads, void* _searchblocks, int* prog)
 {
 	SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
 
@@ -1398,7 +1419,7 @@ void KDeintKernel::Search(
 			nBlkX, nBlkY, nBlkSize, nLogScale, nLambdaLevel, lsad,
 			penaltyZero, penaltyGlobal, penaltyNew,
 			nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
-			sads, searchblocks);
+			vectors, sads, &vectors[nBlkX*nBlkY], searchblocks, prog);
 		DebugSync();
 	}
 
@@ -1406,6 +1427,7 @@ void KDeintKernel::Search(
 		void(*table[])(
 			int nBlkX, int nBlkY, const SearchBlock* searchblocks,
 			short2* vectors, // [x,y]
+			int* prog,
 			int nPad,
 			const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
 			const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
@@ -1419,7 +1441,7 @@ void KDeintKernel::Search(
 		};
 
 		int fidx = ((nBlkSize == 16) ? 0 : 2) + ((nPel == 1) ? 0 : 1);
-		table[fidx](nBlkX, nBlkY, searchblocks, vectors, nPad,
+		table[fidx](nBlkX, nBlkY, searchblocks, vectors, prog, nPad,
 			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
 			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
 		DebugSync();
@@ -1456,7 +1478,7 @@ template void KDeintKernel::Search<uint8_t>(
 	const uint8_t* pSrcY, const uint8_t* pSrcU, const uint8_t* pSrcV,
 	const uint8_t* pRefY, const uint8_t* pRefU, const uint8_t* pRefV,
 	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int* sads, void* searchblocks);
+	const short2* globalMV, short2* vectors, int* sads, void* searchblocks, int* prog);
 template void KDeintKernel::Search<uint16_t>(
 	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
 	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
@@ -1464,7 +1486,7 @@ template void KDeintKernel::Search<uint16_t>(
 	const uint16_t* pSrcY, const uint16_t* pSrcU, const uint16_t* pSrcV,
 	const uint16_t* pRefY, const uint16_t* pRefU, const uint16_t* pRefV,
 	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int* sads, void* searchblocks);
+	const short2* globalMV, short2* vectors, int* sads, void* searchblocks, int* prog);
 
 void KDeintKernel::EstimateGlobalMV(const short2* vectors, int nBlkCount, short2* globalMV)
 {
