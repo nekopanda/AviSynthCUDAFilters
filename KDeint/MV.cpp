@@ -30,18 +30,6 @@ enum {
   MAX_BLOCK_SIZE = 32,
 };
 
-struct MVDataGroup
-{
-  int isValid;
-  BYTE data[1]; // MVData[]
-};
-
-struct MVData
-{
-  int nCount;
-  VECTOR data[1];
-};
-
 struct LevelInfo {
   int nBlkX; // number of blocks along X
   int nBlkY; // number of blocks along Y
@@ -962,10 +950,9 @@ public:
   virtual ~PlaneOfBlocksBase() { }
   virtual void EstimateGlobalMVDoubled(VECTOR* globalMV) = 0;
   virtual void InterpolatePrediction(const PlaneOfBlocksBase* pob) = 0;
-  virtual void SetMVs(const MVData *src, MVData *out) = 0;
-  virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, MVData *out) = 0;
-  virtual int GetArraySize() = 0;
-  virtual int WriteDefault(MVData *out) = 0;
+	virtual void SetMVs(const VECTOR *src, VECTOR *out, int nCount) = 0;
+	virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount) = 0;
+	virtual void WriteDefault(VECTOR *out, int nCount) = 0;
 };
 
 template <typename pixel_t>
@@ -1521,29 +1508,24 @@ public:
     }
   }
 
-  void SetMVs(const MVData *src, MVData *out)
+	void SetMVs(const VECTOR *src, VECTOR *out, int nCount)
   {
-    assert(src->nCount == nBlkCount);
-    // write the plane's header
-    out->nCount = nBlkCount;
+		assert(nCount == nBlkCount);
     for (int i = 0; i < nBlkCount; ++i) {
-      vectors[i] = src->data[i];
-      out->data[i] = src->data[i];
+			out[i] = vectors[i] = src[i];
     }
   }
 
   /* search the vectors for the whole plane */
-  void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, MVData *out)
-  {
+	void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount)
+	{
+		assert(nCount == nBlkCount);
     // -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
     // Frame- and plane-related data preparation
 
     VECTOR globalMV = *_globalMV;
     globalMV.x *= nPel;
     globalMV.y *= nPel;
-
-    // write the plane's header
-    out->nCount = nBlkCount;
 
     pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetYPlane());
     pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetUPlane());
@@ -1567,7 +1549,7 @@ public:
 
     // -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
 
-    VECTOR *pBlkData = out->data;
+		VECTOR *pBlkData = out;
 
     y[0] = pSrcYPlane->GetVPadding();
 
@@ -1890,27 +1872,20 @@ public:
     }	// for l < nBlkY
   }
 
-    // returns length (in bytes) written
-  int WriteDefault(MVData *out)
+	void WriteDefault(VECTOR *out, int nCount)
   {
-    out->nCount = nBlkCount;
     for (int i = 0; i < nBlkCount; ++i)
     {
-      out->data[i].x = 0;
-      out->data[i].y = 0;
-      out->data[i].sad = verybigSAD; // float or int!!
+			out[i].x = 0;
+			out[i].y = 0;
+			out[i].sad = verybigSAD; // float or int!!
     }
-    return GetArraySize();
-  }
-
-  int GetArraySize()
-  {
-    return offsetof(MVData, data) + nBlkCount * sizeof(VECTOR);
   }
 };
 
 class GroupOfPlanes
 {
+	const std::vector<LevelInfo> linfo;
   const int nLevelCount;
   const int nPreAnalyzedCount;
   const bool global;
@@ -1918,10 +1893,10 @@ class GroupOfPlanes
   std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> planes;
 
 public:
-  GroupOfPlanes(
-    int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nDropLevels, int nPreAnalyzedCount, 
-    int nPel, bool chroma,
-    int nOverlapX, int nOverlapY, const LevelInfo* linfo, int xRatioUV, int yRatioUV,
+	GroupOfPlanes(
+		int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nDropLevels, int nPreAnalyzedCount,
+		int nPel, bool chroma,
+		int nOverlapX, int nOverlapY, const std::vector<LevelInfo>& linfo, int xRatioUV, int yRatioUV,
     int divideExtra, int nPixelSize, int nBitsPerPixel,
     bool mt_flag, int chromaSADScale, 
     
@@ -1931,7 +1906,8 @@ public:
     int badrange, bool meander, bool tryMany,
 
     IScriptEnvironment *env)
-    : nLevelCount(nLevelCount)
+		: linfo(linfo)
+		, nLevelCount(nLevelCount)
     , nPreAnalyzedCount(nPreAnalyzedCount)
     , global(global)
     , planes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
@@ -1980,11 +1956,11 @@ public:
     }
   }
 
-  void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, const MVDataGroup* pre, MVDataGroup *out)
+	void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, const VECTOR* pre, VECTOR *out)
   {
-    out->isValid = true;
+    //out->isValid = true;
 
-    BYTE* ptr = out->data;
+		VECTOR* outptr = out;
 
     // create and init global motion vector as zero
     VECTOR globalMV = { 0, 0, -1 };
@@ -1993,23 +1969,21 @@ public:
 
     // preがあればoutにコピーしてレベルを進めておく
     if (pre) {
-      const BYTE* preptr = pre->data;
+			const VECTOR* preptr = pre;
       nLevelFrom -= nPreAnalyzedCount;
       for (int i = nLevelCount - 1; i > nLevelFrom; i--)
       {
-        planes[i]->SetMVs(
-          reinterpret_cast<const MVData*>(preptr),
-          reinterpret_cast<MVData*>(ptr));
-
-        int arraySize = planes[i]->GetArraySize();
-        ptr += arraySize;
-        preptr += arraySize;
+				int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+				planes[i]->SetMVs(preptr, outptr, nBlks);
+				preptr += nBlks;
+				outptr += nBlks;
       }
     }
 
     // Refining the search until we reach the highest detail interpolation.
     for (int i = nLevelFrom; i >= 0; i--)
-    {
+		{
+			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
       if (i != nLevelCount - 1) {
         if (global)
         {
@@ -2024,35 +1998,35 @@ public:
       planes[i]->SearchMVs(
         pSrcGOF->GetFrame(i),
         pRefGOF->GetFrame(i),
-        &globalMV,
-        reinterpret_cast<MVData*>(ptr)
-      );
+        &globalMV, outptr, nBlks);
 
-      ptr += planes[i]->GetArraySize();
+			outptr += nBlks;
     }
   }
 
-  void WriteDefault(MVDataGroup *out)
+	void WriteDefault(VECTOR *out)
   {
-    out->isValid = false;
+    //out->isValid = false;
 
-    BYTE* ptr = out->data;
+		VECTOR* ptr = out;
 
     // write planes
     for (int i = nLevelCount - 1; i >= 0; i--)
-    {
-      ptr += planes[i]->WriteDefault(reinterpret_cast<MVData*>(ptr));
+		{
+			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+			planes[i]->WriteDefault(ptr, nBlks);
+			ptr += nBlks;
     }
   }
 
   int GetArraySize()
   {
-    int size = offsetof(MVDataGroup, data);
+		int count = 0;
     for (int i = nLevelCount - 1; i >= 0; i--)
-    {
-      size += planes[i]->GetArraySize();
+		{
+			count += linfo[i].nBlkX * linfo[i].nBlkY;
     }
-    return size;
+		return count * sizeof(VECTOR);
   }
 };
 
@@ -2061,7 +2035,7 @@ class KMAnalyse : public GenericVideoFilter
 {
 private:
   KMVParam params;
-  std::unique_ptr<GroupOfPlanes> _vectorfields_aptr;
+  std::unique_ptr<GroupOfPlanes> pAnalyzer;
   std::unique_ptr<KMSuperFrame> pSrcSF, pRefSF;
 
   PClip partial;
@@ -2099,7 +2073,7 @@ public:
     bool mt_flag, int _chromaSADScale, IScriptEnvironment* env)
     : GenericVideoFilter(child)
     , params(KMVParam::MV_FRAME)
-    , _vectorfields_aptr()
+		, pAnalyzer()
     , partial(partial)
     , partialParams(partial ? KMVParam::GetParam(partial->GetVideoInfo(), env) : nullptr)
   {
@@ -2252,7 +2226,7 @@ public:
     pSrcSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
     pRefSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params));
 
-    _vectorfields_aptr = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
+		pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
       params.nBlkSizeY,
       int(params.levelInfo.size()),
@@ -2262,7 +2236,7 @@ public:
       params.chroma,
       params.nOverlapX,
       params.nOverlapY,
-      params.levelInfo.data(),
+      params.levelInfo,
       params.xRatioUV, // PF
       params.yRatioUV,
       0,
@@ -2289,7 +2263,7 @@ public:
     ));
 
     // Defines the format of the output vector clip
-    const int		out_frame_bytes = _vectorfields_aptr->GetArraySize();
+		const int		out_frame_bytes = pAnalyzer->GetArraySize();
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 2048;
     vi.height = nblocks(out_frame_bytes, vi.width * 4);
@@ -2305,14 +2279,15 @@ public:
     const int nref = nsrc + offset;
 
     PVideoFrame dst = env->NewVideoFrame(vi);
-    MVDataGroup* pDst = reinterpret_cast<MVDataGroup*>(dst->GetWritePtr());
+		VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
+		bool isValid = false;
 
     // 0: 2_size_validity+(foreachblock(1_validity+blockCount*3))
 
     if (nsrc < minframe || nsrc >= maxframe)
     {
       // fill all vectors with invalid data
-      _vectorfields_aptr->WriteDefault(pDst);
+			pAnalyzer->WriteDefault(pDst);
     }
     else
     {
@@ -2326,14 +2301,18 @@ public:
       LoadSourceFrame(pRefSF.get(), ref);
 
       PVideoFrame pre;
-      const MVDataGroup* pPre = nullptr;
+			const VECTOR* pPre = nullptr;
       if (partialParams) {
         pre = partial->GetFrame(n, env);
-        pPre = reinterpret_cast<const MVDataGroup*>(pre->GetReadPtr());
+				pPre = reinterpret_cast<const VECTOR*>(pre->GetReadPtr());
       }
 
-      _vectorfields_aptr->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst);
+			pAnalyzer->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst);
+
+			isValid = true;
     }
+
+		// TODO: KMVIsValidプロパティに入れる
 
     return dst;
   }
@@ -2656,15 +2635,16 @@ public:
     PVideoFrame ret = child->GetFrame(n, env);
     PVideoFrame kmvframe = kmv->GetFrame(n, env);
 
-    const MVDataGroup* kdata = reinterpret_cast<const MVDataGroup*>(kmvframe->GetReadPtr());
-    const MVData* kptr = reinterpret_cast<const MVData*>(kdata->data);
+		std::vector<LevelInfo> linfo = params->levelInfo;
+		const VECTOR* kdata = reinterpret_cast<const VECTOR*>(kmvframe->GetReadPtr());
 
     const int* pMv;
     int data_size;
     GetMVData(n, pMv, data_size, env);
 
     // validity
-    if (kdata->isValid != pMv[1]) {
+		bool isValid = false; // TODO: プロパティから取得
+		if (isValid != (pMv[1] != 0)) {
       env->ThrowError("Validity missmatch");
     }
     pMv += 2;
@@ -2674,7 +2654,7 @@ public:
       int length = pMv[0];
       
       for (int v = 0; v < nBlkCount; ++v) {
-        VECTOR kmv = kptr->data[v];
+				VECTOR kmv = kdata[v];
         VECTOR mmv = { pMv[v * 3 + 1], pMv[v * 3 + 2], pMv[v * 3 + 3] };
         if (kmv.x != mmv.x || kmv.y != mmv.y || kmv.sad != mmv.sad) {
           env->ThrowError("Motion vector missmatch");
@@ -2682,7 +2662,7 @@ public:
       }
 
       pMv += length;
-      kptr = reinterpret_cast<const MVData*>(&kptr->data[kptr->nCount]);
+			kdata += linfo[i].nBlkX * linfo[i].nBlkY;
     }
 
     return ret;
@@ -2716,29 +2696,29 @@ public:
     PVideoFrame kmvframe1 = kmv1->GetFrame(n, env);
     PVideoFrame kmvframe2 = kmv2->GetFrame(n, env);
 
-    const MVDataGroup* kdata1 = reinterpret_cast<const MVDataGroup*>(kmvframe1->GetReadPtr());
-    const MVData* kptr1 = reinterpret_cast<const MVData*>(kdata1->data);
-    const MVDataGroup* kdata2 = reinterpret_cast<const MVDataGroup*>(kmvframe2->GetReadPtr());
-    const MVData* kptr2 = reinterpret_cast<const MVData*>(kdata2->data);
+		std::vector<LevelInfo> linfo = params->levelInfo;
+		const VECTOR* kdata1 = reinterpret_cast<const VECTOR*>(kmvframe1->GetReadPtr());
+		const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
 
     // validity
-    if (kdata1->isValid != kdata2->isValid) {
-      env->ThrowError("Validity missmatch");
-    }
+		// TODO: プロパティから取得
+    //if (kdata1->isValid != kdata2->isValid) {
+    //  env->ThrowError("Validity missmatch");
+    //}
 
     for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
-      int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
 
-      for (int v = 0; v < nBlkCount; ++v) {
-        VECTOR kmv1 = kptr1->data[v];
-        VECTOR kmv2 = kptr2->data[v];
+			for (int v = 0; v < nBlks; ++v) {
+				VECTOR kmv1 = kdata1[v];
+				VECTOR kmv2 = kdata2[v];
         if (kmv1.x != kmv2.x || kmv1.y != kmv2.y || kmv1.sad != kmv2.sad) {
           env->ThrowError("Motion vector missmatch");
         }
       }
 
-      kptr1 = reinterpret_cast<const MVData*>(&kptr1->data[kptr1->nCount]);
-      kptr2 = reinterpret_cast<const MVData*>(&kptr2->data[kptr2->nCount]);
+			kdata1 += nBlks;
+			kdata2 += nBlks;
     }
 
     return ret;
@@ -3110,7 +3090,7 @@ class KMVClip
     const int nOverlapX;
     const int nOverlapY;
 
-    const MVData* pdata;
+    const VECTOR* pdata;
 
     KMVFrame(int nBlkX, int nBlkY, int nBlkSizeX, int nBlkSizeY, int nOverlapX, int nOverlapY)
       : nBlkX(nBlkX)
@@ -3123,15 +3103,16 @@ class KMVClip
       //
     }
 
-    void SetData(const MVData* _pdata)
+    void SetData(const VECTOR* _pdata, int nCount)
     {
+			assert(nCount == nBlkX * nBlkY);
       pdata = _pdata;
     }
 
     BlockData GetBlock(int ix, int iy) const
     {
       int i = ix + iy * nBlkX;
-      BlockData ret = { ix * (nBlkSizeX - nOverlapX), iy * (nBlkSizeY - nOverlapY), pdata->data[i] };
+			BlockData ret = { ix * (nBlkSizeX - nOverlapX), iy * (nBlkSizeY - nOverlapY), pdata[i] };
       return ret;
     }
 
@@ -3141,7 +3122,7 @@ class KMVClip
       for (int iy = 0; iy < nBlkY; ++iy) {
         for (int ix = 0; ix < nBlkX; ++ix) {
           int i = ix + iy * nBlkX;
-          sum += (pdata->data[i].sad > nTh1) ? 1 : 0;
+					sum += (pdata[i].sad > nTh1) ? 1 : 0;
         }
       }
 
@@ -3187,13 +3168,14 @@ public:
     }
   }
 
-  void SetData(const MVDataGroup* pgroup)
+  void SetData(const VECTOR* pgroup, bool isValid)
   {
-    isValid = pgroup->isValid != 0;
-    const MVData* pdata = reinterpret_cast<const MVData*>(pgroup->data);
+		isValid = isValid;
+		const VECTOR* pdata = pgroup;
     for (int i = (int)params->levelInfo.size() - 1; i >= 0; --i) {
-      pFrames[i]->SetData(pdata);
-      pdata = reinterpret_cast<const MVData*>(&pdata->data[pdata->nCount]);
+			int nBlks = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+			pFrames[i]->SetData(pdata, nBlks);
+			pdata += nBlks;
     }
   }
 
@@ -3757,8 +3739,9 @@ public:
     // mv,ref取得
     for (int j = delta - 1; j >= 0; j--)
     {
-      mvF[j] = rawClipF[j]->GetFrame(n, env);
-      mvClipF[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvF[j]->GetReadPtr()));
+			mvF[j] = rawClipF[j]->GetFrame(n, env);
+			bool isValid = false; // TODO: プロパティから取得
+			mvClipF[j]->SetData(reinterpret_cast<const VECTOR*>(mvF[j]->GetReadPtr()), isValid);
       refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
       SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
     }
@@ -3770,7 +3753,8 @@ public:
     for (int j = 0; j < delta; j++)
     {
       mvB[j] = rawClipB[j]->GetFrame(n, env);
-      mvClipB[j]->SetData(reinterpret_cast<const MVDataGroup*>(mvB[j]->GetReadPtr()));
+			bool isValid = false; // TODO: プロパティから取得
+			mvClipB[j]->SetData(reinterpret_cast<const VECTOR*>(mvB[j]->GetReadPtr()), isValid);
       refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
       SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
     }
@@ -4195,8 +4179,9 @@ public:
     PVideoFrame	ref0 = super->GetFrame(n, env);
     SetSuperFrameTarget(superFrame[0].get(), ref0, params->nPixelShift);
 
-    PVideoFrame mv = vectors->GetFrame(n, env);
-    mvClip->SetData(reinterpret_cast<const MVDataGroup*>(mv->GetReadPtr()));
+		PVideoFrame mv = vectors->GetFrame(n, env);
+		bool isValid = false; // TODO: プロパティから取得
+		mvClip->SetData(reinterpret_cast<const VECTOR*>(mv->GetReadPtr()), isValid);
     PVideoFrame	ref = mvClip->GetRefFrame(usable_flag, super, n, env);
     SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);
 
