@@ -1526,3 +1526,109 @@ void KDeintKernel::WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD)
 	kl_write_default_mv << <blocks, threads, 0, stream >> >(dst, nBlkCount, verybigSAD);
 	DebugSync();
 }
+
+/////////////////////////////////////////////////////////////////////////////
+// DEGRAIN
+/////////////////////////////////////////////////////////////////////////////
+
+template <typename pixel_t, int N>
+union DegrainBlock {
+	enum { LEN = sizeof(Data) / 4 };
+	struct Data {
+		const short *winOver;
+		const pixel_t *pSrc, *pB[N], *pF[N];
+		pixel_t *pDst;
+		int WSrc, WRefB[N], WRefF[N];
+	} d;
+	uint32_t m[LEN];
+};
+
+enum {
+	OVER_KER_SPAN_W = 4,
+	OVER_KER_SPAN_H = 4,
+};
+
+template <typename pixel_t>
+struct DegrainMeta {
+	typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
+};
+
+template <typename pixel_t, int N, int BLK_SIZE>
+__global__ void kl_degrain(
+	int nPatternX, int nPatternY,
+	int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, pixel_t* pDst, int pitch
+	)
+{
+	typedef DegrainMeta<pixel_t>::tmp_t tmp_t;
+	typedef DegrainBlock<pixel_t, N> blk_t;
+
+	enum {
+		BLK_SIZE_UV = BLK_SIZE / 2,
+		BLK_STEP = BLK_SIZE / 2,
+		THREADS = BLK_SIZE*BLK_SIZE,
+		TMP_W = BLK_SIZE + BLK_STEP * (OVER_KER_SPAN_W - 1),
+		TMP_H = BLK_SIZE + BLK_STEP * (OVER_KER_SPAN_H - 1)
+	};
+
+	int tx = threadIdx.x;
+	int ty = threadIdx.y;
+
+	int tid = tx + ty * BLK_SIZE;
+	int offset = tx + ty * pitch;
+
+	__shared__ tmp_t tmp[TMP_H][TMP_W];
+	__shared__ blk_t info;
+
+	// tmpèâä˙âª
+	// TODO:
+	//for (int x = )
+	for (int i = tid; i < TMP_H*TMP_W; i += THREADS) {
+		tmp[i] = 0;
+	}
+
+	__syncthreads();
+
+	const bool no_need_round = (sizeof(pixel_t) > 1);
+
+	for (int bby = 0; bby < OVER_KER_SPAN_H; ++bby) {
+		for (int bbx = 0; bbx < OVER_KER_SPAN_W; ++bbx) {
+			int bx = (blockIdx.x * 2 + nPatternX) * OVER_KER_SPAN_W + bbx;
+			int by = (blockIdx.y * 2 + nPatternY) * OVER_KER_SPAN_H + bby;
+			if (bx >= nBlkX || by >= nBlkY) continue;
+
+			int blkidx = bx + by * nBlkX;
+
+			// ÉuÉçÉbÉNèÓïÒÇì«Ç›çûÇﬁ
+			if (blk_t::LEN <= THREADS) {
+				if (tid < blk_t::LEN)
+					info.m[i] = data[blkidx].m[i];
+			}
+			else {
+				for (int i = tid; i < blk_t::LEN; i += THREADS) {
+					info.m[i] = data[blkidx].m[i];
+				}
+			}
+			__syncthreads();
+
+			int dstx = bbx * BLK_STEP + tx;
+			int dsty = bby * BLK_STEP + ty;
+
+			int val = 0;
+			if (N == 1)
+				val = info.d.pSrc[offset] * WSrc +
+					info.d.pRefF[0][offset] * info.d.WRefF[0] + info.d.pRefB[0][offset] * info.d.WRefB[0];
+			else if (N == 2)
+				val = info.d.pSrc[offset] * WSrc +
+					info.d.pRefF[0][offset] * info.d.WRefF[0] + info.d.pRefB[0][offset] * info.d.WRefB[0] +
+					info.d.pRefF[1][offset] * info.d.WRefF[1] + info.d.pRefB[1][offset] * info.d.WRefB[1];
+
+			val = (val + (no_need_round ? 0 : 128)) >> 8;
+			tmp[dsty][dstx] += val * info.d.winOver[tid];
+
+			__syncthreads();
+		}
+	}
+
+	//
+}
+

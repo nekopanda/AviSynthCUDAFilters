@@ -78,4 +78,7 @@ public:
 		const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
 		int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
 		const short2* globalMV, short2* vectors, int* sads, void* blocks, int* prog);
+
+	// Degrain //
+
 };
