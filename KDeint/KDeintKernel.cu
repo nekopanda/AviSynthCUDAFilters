@@ -444,20 +444,23 @@ __device__ sad_t dev_calc_sad(
 	return sad;
 }
 
+__device__ void MinCost(CostResult& a, CostResult& b) {
+	if (*(volatile sad_t*)&a.cost < *(volatile sad_t*)&b.cost) {
+		*(volatile sad_t*)&a.cost = *(volatile sad_t*)&b.cost;
+		*(volatile short*)&a.xy.x = *(volatile short*)&b.xy.x;
+		*(volatile short*)&a.xy.y = *(volatile short*)&b.xy.y;
+	}
+}
+
 // MAX - (MAX/4) <= (結果の個数) <= MAX であること
 // スレッド数は (結果の個数) - MAX/2
 template <int MAX>
-__device__ void dev_reduce_result(CostResult* tmp_, int tid)
+__device__ void dev_reduce_result(CostResult* tmp, int tid)
 {
-	struct VResult {
-		volatile sad_t cost;
-		volatile short2 xy;
-	};
-	VResult* tmp = (VResult*)tmp_;
-  if(MAX >= 16) tmp[tid] = (tmp[tid].cost < tmp[tid + 8].cost) ? tmp[tid] : tmp[tid + 8];
-  tmp[tid] = (tmp[tid].cost < tmp[tid + 4].cost) ? tmp[tid] : tmp[tid + 4];
-  tmp[tid] = (tmp[tid].cost < tmp[tid + 2].cost) ? tmp[tid] : tmp[tid + 2];
-  tmp[tid] = (tmp[tid].cost < tmp[tid + 1].cost) ? tmp[tid] : tmp[tid + 1];
+  if(MAX >= 16) MinCost(tmp[tid] , tmp[tid + 8]);
+	MinCost(tmp[tid], tmp[tid + 4]);
+	MinCost(tmp[tid], tmp[tid + 2]);
+	MinCost(tmp[tid], tmp[tid + 1]);
 }
 
 __constant__ int2 c_expanding_search_1_area[] = {
@@ -766,9 +769,9 @@ __global__ void kl_search(
       }
 
 			// !!!!! 依存ブロックの計算が終わるのを待つ !!!!!!
-			if (tx == 0 && blkx >= 2)
+			if (tx == 0 && blkx > 0)
 			{
-				while (prog[blkx - (1 + (blkx & 1))] < blky) ;
+				while (prog[blkx - 1] < blky) ;
 			}
 
       __syncthreads();
@@ -865,6 +868,10 @@ __global__ void kl_search(
 			if (tx == 0) {
 				// 結果書き込み
         vectors[blky*nBlkX + blkx] = result[0].xy;
+
+				// 結果の書き込みが終わるのを待つ
+				__threadfence();
+				
 				// 完了を書き込み
 				prog[blkx] = blky;
 			}
@@ -1007,9 +1014,9 @@ __global__ void kl_prepare_search(
 
     int p1 = -2; // -2はzeroベクタ
     // Left (or right) predictor
-    if (x >= 2)
+    if (x > 0)
     {
-      p1 = blkIdx - (1 + (x & 1));
+      p1 = blkIdx - 1;
     }
 
     int p2 = -2;
@@ -1532,14 +1539,17 @@ void KDeintKernel::WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD)
 /////////////////////////////////////////////////////////////////////////////
 
 template <typename pixel_t, int N>
+struct DegrainBlockData {
+	const short *winOver;
+	const pixel_t *pSrc, *pB[N], *pF[N];
+	pixel_t *pDst;
+	int WSrc, WRefB[N], WRefF[N];
+};
+
+template <typename pixel_t, int N>
 union DegrainBlock {
-	enum { LEN = sizeof(Data) / 4 };
-	struct Data {
-		const short *winOver;
-		const pixel_t *pSrc, *pB[N], *pF[N];
-		pixel_t *pDst;
-		int WSrc, WRefB[N], WRefF[N];
-	} d;
+	enum { LEN = sizeof(DegrainBlockData<pixel_t, N>) / 4 };
+	DegrainBlockData<pixel_t, N> d;
 	uint32_t m[LEN];
 };
 
@@ -1548,18 +1558,13 @@ enum {
 	OVER_KER_SPAN_H = 4,
 };
 
-template <typename pixel_t>
-struct DegrainMeta {
-	typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
-};
-
 template <typename pixel_t, int N, int BLK_SIZE>
 __global__ void kl_degrain(
 	int nPatternX, int nPatternY,
 	int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, pixel_t* pDst, int pitch
 	)
 {
-	typedef DegrainMeta<pixel_t>::tmp_t tmp_t;
+	typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
 	typedef DegrainBlock<pixel_t, N> blk_t;
 
 	enum {
@@ -1601,11 +1606,11 @@ __global__ void kl_degrain(
 			// ブロック情報を読み込む
 			if (blk_t::LEN <= THREADS) {
 				if (tid < blk_t::LEN)
-					info.m[i] = data[blkidx].m[i];
+					info.m[tid] = data[blkidx].m[tid];
 			}
 			else {
 				for (int i = tid; i < blk_t::LEN; i += THREADS) {
-					info.m[i] = data[blkidx].m[i];
+					info.m[tid] = data[blkidx].m[tid];
 				}
 			}
 			__syncthreads();
@@ -1615,10 +1620,10 @@ __global__ void kl_degrain(
 
 			int val = 0;
 			if (N == 1)
-				val = info.d.pSrc[offset] * WSrc +
+				val = info.d.pSrc[offset] * info.d.WSrc +
 					info.d.pRefF[0][offset] * info.d.WRefF[0] + info.d.pRefB[0][offset] * info.d.WRefB[0];
 			else if (N == 2)
-				val = info.d.pSrc[offset] * WSrc +
+				val = info.d.pSrc[offset] * info.d.WSrc +
 					info.d.pRefF[0][offset] * info.d.WRefF[0] + info.d.pRefB[0][offset] * info.d.WRefB[0] +
 					info.d.pRefF[1][offset] * info.d.WRefF[1] + info.d.pRefB[1][offset] * info.d.WRefB[1];
 

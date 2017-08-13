@@ -55,9 +55,12 @@ __host__ __device__ T clamp(T n, T min, T max)
 	do { \
 		cudaError_t err__ = call; \
 		if (err__ != cudaSuccess) { \
+			OnCudaError(err__); \
 			env->ThrowError("[CUDA Error] %d: %s", err__, cudaGetErrorString(err__)); \
 				} \
 		} while (0)
+
+void OnCudaError(cudaError_t err);
 #endif
 
 

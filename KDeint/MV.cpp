@@ -1202,21 +1202,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     VECTOR zero = { 0,0,0 };
 
     // Left (or right) predictor
-    if (false) {
-			if ((blkScanDir == 1 && blkx >= 2) || (blkScanDir == -1 && blkx < p.nBlkX - 2))
-      {
-        int diff = -1;
-        if (blkScanDir == 1) {
-          diff = blkx - ((blkx & ~1) - 1);
-        }
-        predictors[1] = ClipMV(vectors[blkIdx - diff]);
-      }
-      else
-      {
-        predictors[1] = ClipMV(zero); // v1.11.1 - values instead of pointer
-      }
-    }
-		else if ((blkScanDir == 1 && blkx > 0) || (blkScanDir == -1 && blkx < p.nBlkX - 1))
+    if ((blkScanDir == 1 && blkx > 0) || (blkScanDir == -1 && blkx < p.nBlkX - 1))
     {
       predictors[1] = ClipMV(vectors[blkIdx - blkScanDir]);
     }
@@ -1280,6 +1266,71 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     //	int a = LSAD/(LSAD + (predictor.sad>>1));
     //	nCurrentLambda = nCurrentLambda*a*a;
   }
+
+	void FetchPredictorsCudaEmu()
+	{
+		VECTOR zero = { 0,0,0 };
+
+		// Left (or right) predictor
+		if (blkx > 0)
+		{
+			predictors[1] = ClipMV(vectors[blkIdx - 1]);
+		}
+		else
+		{
+			predictors[1] = ClipMV(zero); // v1.11.1 - values instead of pointer
+		}
+
+		// Up predictor
+		if (blky > 0)
+		{
+			predictors[2] = ClipMV(vectors[blkIdx - p.nBlkX]);
+		}
+		else
+		{
+			predictors[2] = ClipMV(zero);
+		}
+
+		// bottom-right pridictor (from coarse level)
+		if ((blky < p.nBlkY - 1) && (blkx < p.nBlkX - 1))
+		{
+			predictors[3] = ClipMV(vectors[blkIdx + p.nBlkX + blkScanDir]);
+		}
+		else
+		{
+			predictors[3] = ClipMV(zero);
+		}
+
+		// Median predictor
+		if (blky > 0) // replaced 1 by 0 - Fizick
+		{
+			predictors[0].x = Median(predictors[1].x, predictors[2].x, predictors[3].x);
+			predictors[0].y = Median(predictors[1].y, predictors[2].y, predictors[3].y);
+			//		predictors[0].sad = Median(predictors[1].sad, predictors[2].sad, predictors[3].sad);
+			// but it is not true median vector (x and y may be mixed) and not its sad ?!
+			// we really do not know SAD, here is more safe estimation especially for phaseshift method - v1.6.0
+			predictors[0].sad = std::max(predictors[1].sad, std::max(predictors[2].sad, predictors[3].sad));
+		}
+		else
+		{
+			// but for top line we have only left predictor[1] - v1.6.0
+			predictors[0].x = predictors[1].x;
+			predictors[0].y = predictors[1].y;
+			predictors[0].sad = predictors[1].sad;
+		}
+
+		// if there are no other planes, predictor is the median
+		if (p.smallestPlane)
+		{
+			predictor = predictors[0];
+		}
+
+		typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+		nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
+		// replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
+		//	int a = LSAD/(LSAD + (predictor.sad>>1));
+		//	nCurrentLambda = nCurrentLambda*a*a;
+	}
 
   void ExpandingSearch(int r, int s, int mvx, int mvy) // diameter = 2*r + 1, step=s
   { // part of true enhaustive search (thin expanding square) around mvx, mvy
@@ -2109,8 +2160,6 @@ public:
 		int nLevelFrom = nLevelCount - 1;
 		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
 		for (int i = nLevelFrom; i >= 0; i--) {
-			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
-			// TODO:
 			size += planes[i]->GetWorkSize();
 		}
 		return size;
@@ -2128,6 +2177,12 @@ public:
 		uint8_t* planework = (uint8_t*)&globalMV[1];
 
     int nLevelFrom = nLevelCount - 1;
+
+		for (int i = nLevelFrom; i >= 0; i--) {
+			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+			planes[i]->SetWorkMemory(planework);
+			planework += planes[i]->GetWorkSize();
+		}
 
 		planes[0]->InitializeGlobalMV(globalMV);
 
@@ -2152,7 +2207,7 @@ public:
         if (global)
         {
           // get updated global MV (doubled)
-					planes[i]->EstimateGlobalMVDoubled(globalMV);
+					planes[i + 1]->EstimateGlobalMVDoubled(globalMV);
         }
 
 				planes[i]->InterpolatePrediction(planes[i + 1].get());
@@ -2195,6 +2250,9 @@ public:
   }
 };
 
+const char* GetAnalyzeValidPropName() {
+	return "KMVIsValid";
+}
 
 class KMAnalyse : public GenericVideoFilter
 {
@@ -2483,12 +2541,16 @@ public:
 			workvi.height = nblocks(work_bytes, vi.width * 4);
 			PVideoFrame work = env->NewVideoFrame(workvi);
 
+			if (kernel.IsEnabled()) {
+				printf("!!!\n");
+			}
+
 			pAnalyzer->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst, work->GetWritePtr());
 
 			isValid = true;
     }
 
-		// TODO: KMVIsValidプロパティに入れる
+		dst->SetProps(GetAnalyzeValidPropName(), isValid);
 
     return dst;
   }
@@ -2819,7 +2881,7 @@ public:
     GetMVData(n, pMv, data_size, env);
 
     // validity
-		bool isValid = false; // TODO: プロパティから取得
+		bool isValid = (kmvframe->GetProps(GetAnalyzeValidPropName())->GetInt() != 0);
 		if (isValid != (pMv[1] != 0)) {
       env->ThrowError("Validity missmatch");
     }
@@ -2876,11 +2938,12 @@ public:
 		const VECTOR* kdata1 = reinterpret_cast<const VECTOR*>(kmvframe1->GetReadPtr());
 		const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
 
-    // validity
-		// TODO: プロパティから取得
-    //if (kdata1->isValid != kdata2->isValid) {
-    //  env->ThrowError("Validity missmatch");
-    //}
+		// validity
+		bool data1valid = kmvframe1->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
+		bool data2valid = kmvframe2->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
+    if (data1valid != data2valid) {
+      env->ThrowError("Validity missmatch");
+    }
 
     for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
 			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
@@ -3916,7 +3979,7 @@ public:
     for (int j = delta - 1; j >= 0; j--)
     {
 			mvF[j] = rawClipF[j]->GetFrame(n, env);
-			bool isValid = false; // TODO: プロパティから取得
+			bool isValid = mvF[j]->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
 			mvClipF[j]->SetData(reinterpret_cast<const VECTOR*>(mvF[j]->GetReadPtr()), isValid);
       refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
       SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
@@ -3929,7 +3992,7 @@ public:
     for (int j = 0; j < delta; j++)
     {
       mvB[j] = rawClipB[j]->GetFrame(n, env);
-			bool isValid = false; // TODO: プロパティから取得
+			bool isValid = mvB[j]->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
 			mvClipB[j]->SetData(reinterpret_cast<const VECTOR*>(mvB[j]->GetReadPtr()), isValid);
       refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
       SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
@@ -4356,7 +4419,7 @@ public:
     SetSuperFrameTarget(superFrame[0].get(), ref0, params->nPixelShift);
 
 		PVideoFrame mv = vectors->GetFrame(n, env);
-		bool isValid = false; // TODO: プロパティから取得
+		bool isValid = mv->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
 		mvClip->SetData(reinterpret_cast<const VECTOR*>(mv->GetReadPtr()), isValid);
     PVideoFrame	ref = mvClip->GetRefFrame(usable_flag, super, n, env);
     SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);

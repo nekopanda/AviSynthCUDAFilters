@@ -2,6 +2,11 @@
 #include <windows.h>
 #include "avisynth.h"
 
+#undef min
+#undef max
+
+#include "CommonFunctions.h"
+
 #include <string>
 
 void AddFuncKernel(IScriptEnvironment* env);
@@ -12,6 +17,10 @@ static void init_console()
 	AllocConsole();
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONIN$", "r", stdin);
+}
+
+void OnCudaError(cudaError_t err) {
+	printf("[CUDA Error] %s (code: %d)\n", cudaGetErrorString(err), err);
 }
 
 class Time : public GenericVideoFilter {

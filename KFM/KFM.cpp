@@ -102,6 +102,15 @@ static const int tbl2233[][2] = {
 struct FieldMathingScore {
 	float n1; // 1フィールド先
 	float n2; // 2フィールド先
+
+	FieldMathingScore operator+(const FieldMathingScore& o) {
+		FieldMathingScore ret = { n1 + o.n1, n2 + o.n2 };
+		return ret;
+	}
+	FieldMathingScore operator*(float o) {
+		FieldMathingScore ret = { n1 * o, n2 * o };
+		return ret;
+	}
 };
 
 class KFMCoreBase
@@ -280,14 +289,6 @@ public:
 				// 1ピクセル単位にする
 				sum *= 1.0f / ((xEnd - xStart) * (yEnd - yStart));
 
-				// 上限制限
-				if (sum >= 10 * 10) {
-          sum = 5 * 5 * 100;
-				}
-        else if (sum >= 3 * 3) {
-          sum *= 25;
-        }
-
 				fms[bx + by * prm->numBlkX].n1 = sum;
 			}
 		}
@@ -351,14 +352,6 @@ public:
 				// 1ピクセル単位にする
 				sum *= 1.0f / ((xEnd - xStart) * (yEnd - yStart));
 
-				// 上限制限
-				if (sum >= 5 * 5) {
-          sum = 5 * 5 * 100;
-				}
-        else if (sum >= 3 * 3) {
-          sum *= 25;
-        }
-
 				fms[bx + by * prm->numBlkX].n2 = sum;
 			}
 		}
@@ -370,21 +363,124 @@ typedef float PSCORE;
 
 struct KFMFrame {
   int pattern;
-  PSCORE score;
+  float reliability; // 信頼度
   FieldMathingScore fms[1];
 };
 
-PSCORE MatchingScore(const FieldMathingScore* pBlk, bool is3)
-{
-  PSCORE ret;
-  if (is3) {
-    ret = (pBlk[0].n1 + pBlk[0].n2 * 2 + pBlk[1].n1) / 4;
-  }
-  else {
-    ret = pBlk[0].n1;
-  }
-  return ret;
-}
+class TelecinePattern {
+	bool limitUpper;
+
+	FieldMathingScore MatchingPattern2323(const FieldMathingScore* pBlks, int pattern)
+	{
+		FieldMathingScore result = { 0 };
+		if (pattern == 0) { // 2323
+			result = result + MatchingScore(pBlks + 0, false);
+			result = result + MatchingScore(pBlks + 2, true);
+			result = result + MatchingScore(pBlks + 5, false);
+			result = result + MatchingScore(pBlks + 7, true);
+		}
+		else { // 3232
+			result = result + MatchingScore(pBlks + 0, true);
+			result = result + MatchingScore(pBlks + 3, false);
+			result = result + MatchingScore(pBlks + 5, true);
+			result = result + MatchingScore(pBlks + 8, false);
+		}
+		return result;
+	}
+
+	FieldMathingScore MatchingPattern2233(const FieldMathingScore* pBlks, int pattern)
+	{
+		FieldMathingScore result = { 0 };
+		switch (pattern) {
+		case 0: // 2233
+			result = result + MatchingScore(pBlks + 0, false);
+			result = result + MatchingScore(pBlks + 2, false);
+			result = result + MatchingScore(pBlks + 4, true);
+			result = result + MatchingScore(pBlks + 7, true);
+			break;
+		case 1: // 2332
+			result = result + MatchingScore(pBlks + 0, false);
+			result = result + MatchingScore(pBlks + 2, true);
+			result = result + MatchingScore(pBlks + 5, true);
+			result = result + MatchingScore(pBlks + 8, false);
+			break;
+		case 2: // 3322
+			result = result + MatchingScore(pBlks + 0, true);
+			result = result + MatchingScore(pBlks + 3, true);
+			result = result + MatchingScore(pBlks + 6, false);
+			result = result + MatchingScore(pBlks + 8, false);
+			break;
+		case 3: // 3223
+			result = result + MatchingScore(pBlks + 0, true);
+			result = result + MatchingScore(pBlks + 3, false);
+			result = result + MatchingScore(pBlks + 5, false);
+			result = result + MatchingScore(pBlks + 7, true);
+			break;
+		}
+		return result;
+	}
+public:
+	TelecinePattern(bool limitUpper) : limitUpper(limitUpper) { }
+
+	FieldMathingScore MatchingScore(const FieldMathingScore* pBlk, bool is3)
+	{
+		FieldMathingScore ret = { 0 };
+		if (is3) {
+			ret.n1 = (pBlk[0].n1 + pBlk[1].n1) / 4;
+			ret.n2 = pBlk[0].n2 / 2;
+		}
+		else {
+			ret.n1 = pBlk[0].n1;
+		}
+		if (limitUpper) {
+			// 上限制限
+			if (ret.n1 >= 10 * 10) {
+				ret.n1 = 5 * 5 * 100;
+			}
+			else if (ret.n1 >= 3 * 3) {
+				ret.n1 *= 25;
+			}
+			if (ret.n2 >= 5 * 5) {
+				ret.n2 = 5 * 5 * 100;
+			}
+			else if (ret.n2 >= 3 * 3) {
+				ret.n2 *= 25;
+			}
+		}
+		return ret;
+	}
+
+	FieldMathingScore MatchingPattern(const FieldMathingScore* pBlks, int pattern)
+	{
+		FieldMathingScore s;
+		if (pattern < 5) {
+			int offset = tbl2323[pattern][0];
+			s = MatchingPattern2323(&pBlks[offset + 2], tbl2323[pattern][1]);
+			// 前が空いているパターンは前に３フィールド連続があるはずなのでそれもチェック
+			if (offset == 1) {
+				s = (s + MatchingScore(pBlks, true)) * 0.8f;
+			}
+			// 後ろが空いているパターンは後ろ２フィールドは確実に連続するはずなのでそれもチェック
+			if (offset == -1) {
+				s = (s + MatchingScore(pBlks + 11, false)) * 0.8f;
+			}
+		}
+		else {
+			int offset = tbl2233[pattern - 5][0];
+			s = MatchingPattern2233(&pBlks[offset + 2], tbl2233[pattern - 5][1]);
+			// 前が空いているパターンは前に３フィールド連続があるはずなのでそれもチェック
+			if (offset == 1) {
+				s = (s + MatchingScore(pBlks, true)) * 0.8f;
+			}
+			// 後ろが空いているパターンは後ろ２フィールドは確実に連続するはずなのでそれもチェック
+			if (offset == -1) {
+				s = (s + MatchingScore(pBlks + 11, false)) * 0.8f;
+			}
+		}
+		return s;
+	}
+};
+
 
 class KFM : public GenericVideoFilter
 {
@@ -405,73 +501,12 @@ class KFM : public GenericVideoFilter
     }
   }
 
-	PSCORE MatchingPattern2323(const FieldMathingScore* pBlks, int pattern)
+	void CalcAllPatternScore(const FieldMathingScore* pBlks, PSCORE* score)
 	{
-    PSCORE result = 0;
-		if (pattern == 0) { // 2323
-			result += MatchingScore(pBlks + 0, false);
-			result += MatchingScore(pBlks + 2, true);
-			result += MatchingScore(pBlks + 5, false);
-			result += MatchingScore(pBlks + 7, true);
-		}
-		else { // 3232
-			result += MatchingScore(pBlks + 0, true);
-			result += MatchingScore(pBlks + 3, false);
-			result += MatchingScore(pBlks + 5, true);
-			result += MatchingScore(pBlks + 8, false);
-		}
-		return result;
-	}
-
-	PSCORE MatchingPattern2233(const FieldMathingScore* pBlks, int pattern)
-	{
-    PSCORE result = 0;
-		switch (pattern) {
-		case 0: // 2233
-			result += MatchingScore(pBlks + 0, false);
-			result += MatchingScore(pBlks + 2, false);
-			result += MatchingScore(pBlks + 4, true);
-			result += MatchingScore(pBlks + 7, true);
-			break;
-		case 1: // 2332
-			result += MatchingScore(pBlks + 0, false);
-			result += MatchingScore(pBlks + 2, true);
-			result += MatchingScore(pBlks + 5, true);
-			result += MatchingScore(pBlks + 8, false);
-			break;
-		case 2: // 3322
-			result += MatchingScore(pBlks + 0, true);
-			result += MatchingScore(pBlks + 3, true);
-			result += MatchingScore(pBlks + 6, false);
-			result += MatchingScore(pBlks + 8, false);
-			break;
-		case 3: // 3223
-			result += MatchingScore(pBlks + 0, true);
-			result += MatchingScore(pBlks + 3, false);
-			result += MatchingScore(pBlks + 5, false);
-			result += MatchingScore(pBlks + 7, true);
-			break;
-		}
-		return result;
-	}
-
-	void MatchingPattern(const FieldMathingScore* pBlks, PSCORE* score)
-	{
-		for (int i = 0; i < 5; ++i) {
-			int offset = tbl2323[i][0];
-			score[i] = MatchingPattern2323(&pBlks[offset + 2], tbl2323[i][1]);
-			// 前が空いているパターンは前に３フィールド連続があるはずなのでそれもチェック
-			if (offset == 1) {
-				score[i] = (score[i] + MatchingScore(pBlks, true)) * 0.8f;
-			}
-		}
-		for (int i = 0; i < 10; ++i) {
-			int offset = tbl2233[i][0];
-			score[i + 5] = MatchingPattern2233(&pBlks[offset + 2], tbl2233[i][1]);
-			// 前が空いているパターンは前に３フィールド連続があるはずなのでそれもチェック
-			if (offset == 1) {
-				score[i + 5] = (score[i + 5] + MatchingScore(pBlks, true)) * 0.8f;
-			}
+		TelecinePattern tp(true);
+		for (int i = 0; i < 15; ++i) {
+			FieldMathingScore s = tp.MatchingPattern(pBlks, i);
+			score[i] = s.n1 + s.n2;
 		}
 	}
 
@@ -566,7 +601,7 @@ public:
 				for (int i = 0; i < 14; ++i) {
 					blks[i] = fms[i * fmsPitch + blkidx];
 				}
-				MatchingPattern(blks, &blockpms[15 * blkidx]);
+				CalcAllPatternScore(blks, &blockpms[15 * blkidx]);
 			}
 		}
 
@@ -580,9 +615,11 @@ public:
 				}
 			}
 		}
+		PSCORE sum = 0;
     // 見やすくするために値を小さくする
     for (int i = 0; i < 15; ++i) {
       pms[i] /= fmsPitch;
+			sum += pms[i];
     }
 
 		// 最良パターン
@@ -594,8 +631,9 @@ public:
 				pattern = i;
 			}
 		}
+
     fmframe->pattern = pattern;
-    fmframe->score = curscore;
+    fmframe->reliability = (sum / 15) / curscore;
 
     return outframe;
 	}
@@ -751,7 +789,7 @@ class KIVTC : public GenericVideoFilter
   void DrawInfo(PVideoFrame& dst, const KFMFrame* fmframe, IScriptEnvironment* env) {
     env->MakeWritable(&dst);
 
-    char buf[100]; sprintf(buf, "KFM: %d (%.1f)", fmframe->pattern, fmframe->score);
+    char buf[100]; sprintf(buf, "KFM: %d (%.1f)", fmframe->pattern, fmframe->reliability);
     DrawText(dst, true, 0, 0, buf);
   }
 
@@ -796,7 +834,7 @@ public:
 
     PVideoFrame out = CreateWeaveFrame(child, 0, fstart, fnum, env);
 
-    //DrawInfo(out, fmframe, env);
+    DrawInfo(out, fmframe, env);
 
     return out;
   }
@@ -940,23 +978,191 @@ public:
   }
 };
 
+struct Frame24Info {
+	int index24;     // サイクル内での24pにおけるフレーム番号
+	int start60;     // 24pフレームの開始フィールド番号
+	bool is3;        // 24pフレームのフィールド数
+};
+
+class KTCMergeMatching : public GenericVideoFilter
+{
+	const KFMParam* prm;
+	VideoInfo tmpvi;
+
+	float thMatch;
+	float thDiff;
+	int tempWidth;
+	int spatialWidth;
+
+	void GetPatternMatch(const KFMFrame* fmframe, bool* match)
+	{
+		TelecinePattern tp(false);
+		int fmsPitch = prm->numBlkX * prm->numBlkY;
+		for (int by = 0; by < prm->numBlkY; ++by) {
+			for (int bx = 0; bx < prm->numBlkX; ++bx) {
+				int blkidx = bx + by * prm->numBlkX;
+				FieldMathingScore blks[14];
+				for (int i = 0; i < 14; ++i) {
+					blks[i] = fmframe->fms[i * fmsPitch + blkidx];
+				}
+				FieldMathingScore s = tp.MatchingPattern(blks, fmframe->pattern);
+
+				bool ismatch;
+				if (s.n2 > thDiff) {
+					ismatch = false;
+				}
+				else {
+					ismatch = (fmframe->reliability >= 2.5) || (s.n1 <= thMatch);
+				}
+
+				match[blkidx] = ismatch;
+			}
+		}
+	}
+
+	void GetFrameDiff(const KFMFrame* fmframe, bool* match)
+	{
+		int fmsPitch = prm->numBlkX * prm->numBlkY;
+		for (int by = 0; by < prm->numBlkY; ++by) {
+			for (int bx = 0; bx < prm->numBlkX; ++bx) {
+				int blkidx = bx + by * prm->numBlkX;
+				bool ismatch = true;
+				// サイクル内のマッチングのみを見る
+				for (int i = 2; i < 10; i += 2) {
+					float f0 = fmframe->fms[i * fmsPitch + blkidx].n2;
+					float f1 = fmframe->fms[(i + 1) * fmsPitch + blkidx].n2;
+					ismatch &= ((f0 + f1) <= thDiff);
+				}
+				match[blkidx] |= ismatch;
+			}
+		}
+	}
+
+	void GetMatchFrame(int n, bool* match, IScriptEnvironment* env)
+	{
+		n = clamp(n, 0, vi.num_frames - 1);
+		PVideoFrame fm = child->GetFrame(n, env);
+		const KFMFrame* fmframe = (KFMFrame*)fm->GetReadPtr();
+
+		GetPatternMatch(fmframe, match);
+
+		// 文字とかの単フレームで見るとコーミングかどうか
+		// 判断がつかないようなブロックに対する救済措置
+		// フレームが前後のフレームと差がない場合はOKとみなす
+		GetFrameDiff(fmframe, match);
+	}
+
+	void ExpandX(const bool* src, bool* dst, int numBlkX, int numBlkY) {
+		for (int by = 0; by < numBlkY; ++by) {
+			for (int bx = 0; bx < numBlkX; ++bx) {
+				int xstart = std::max(0, bx - spatialWidth / 2);
+				int xend = std::min(numBlkX - 1, bx + spatialWidth / 2 + 1);
+				bool s = true;
+				for (int x = xstart; x < xend; ++x) {
+					s &= src[x + by * numBlkX];
+				}
+				dst[bx + by * numBlkX] = s;
+			}
+		}
+	}
+
+	void ExpandY(const bool* src, bool* dst, int numBlkX, int numBlkY) {
+		for (int by = 0; by < numBlkY; ++by) {
+			for (int bx = 0; bx < numBlkX; ++bx) {
+				int ystart = std::max(0, by - spatialWidth / 2);
+				int yend = std::min(numBlkY - 1, by + spatialWidth / 2 + 1);
+				bool s = true;
+				for (int y = ystart; y < yend; ++y) {
+					s &= src[bx + y * numBlkX];
+				}
+				dst[bx + by * numBlkX] = s;
+			}
+		}
+	}
+
+public:
+	KTCMergeMatching(PClip fmclip, float thMatch, float thDiff, int tempWidth, int spatialWidth, IScriptEnvironment* env)
+		: GenericVideoFilter(fmclip)
+		, prm(KFMParam::GetParam(vi, env))
+		, tmpvi()
+		, thMatch(thMatch)
+		, thDiff(thDiff)
+		, tempWidth(tempWidth)
+		, spatialWidth(spatialWidth)
+	{
+		int numBlks = prm->numBlkX * prm->numBlkY;
+
+		int tmp_frame_bytes = sizeof(bool) * numBlks;
+		tmpvi.pixel_type = VideoInfo::CS_BGR32;
+		tmpvi.width = 2048;
+		tmpvi.height = nblocks(tmp_frame_bytes, vi.width * 4);
+
+		int out_frame_bytes = sizeof(bool) * numBlks;
+		vi.pixel_type = VideoInfo::CS_BGR32;
+		vi.width = 2048;
+		vi.height = nblocks(out_frame_bytes, vi.width * 4);
+	}
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		int numBlks = prm->numBlkX * prm->numBlkY;
+
+		// メモリ確保
+		PVideoFrame outframe = env->NewVideoFrame(vi);
+		PVideoFrame tmpframe = env->NewVideoFrame(tmpvi);
+		bool* match = (bool*)outframe->GetWritePtr();
+		bool* work = (bool*)tmpframe->GetWritePtr();
+
+		for (int by = 0; by < prm->numBlkY; ++by) {
+			for (int bx = 0; bx < prm->numBlkX; ++bx) {
+				match[bx + by * prm->numBlkX] = true;
+			}
+		}
+
+		for (int i = 0; i < tempWidth; ++i) {
+			GetMatchFrame(n + i - tempWidth / 2, work, env);
+
+			for (int by = 0; by < prm->numBlkY; ++by) {
+				for (int bx = 0; bx < prm->numBlkX; ++bx) {
+					match[bx + by * prm->numBlkX] &= work[bx + by * prm->numBlkX];
+				}
+			}
+		}
+
+		ExpandX(match, work, prm->numBlkX, prm->numBlkY);
+		ExpandY(work, match, prm->numBlkX, prm->numBlkY);
+
+		return outframe;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new KTCMergeMatching(
+			args[0].AsClip(),       // fmclip
+			args[1].AsFloat(),
+			args[2].AsFloat(),
+			args[3].AsInt(),
+			args[4].AsInt(),
+			env
+		);
+	}
+};
+
 class KTCMerge : public GenericVideoFilter
 {
   PClip fmclip;
+	PClip matchclip;
   PClip clip24;
 
   const KFMParam* prm;
+
+	float thMatch;
+	float thDiff;
 
   VideoInfo vi24;
   VideoInfo tmpvi;
 
   std::unique_ptr<KTCMergeCoreBase> core;
-
-  struct Frame24Info {
-    int index24;     // サイクル内での24pにおけるフレーム番号
-    int start60;     // 24pフレームの開始フィールド番号
-    bool is3;        // 24pフレームのフィールド数
-  };
 
   std::vector<Frame24Info> table24;
   std::vector<Frame24Info> table60;
@@ -1021,39 +1227,12 @@ class KTCMerge : public GenericVideoFilter
     return table60[frameIndex60 + pattern * 10];
   }
 
-  void GetMatchingScoreFrame(const KFMFrame* fmframe, Frame24Info frame24info, PSCORE *out)
-  {
-    // ブロックごとのマッチング度合いを取得
-    int fmsPitch = prm->numBlkX * prm->numBlkY;
-    const FieldMathingScore* pfms = &fmframe->fms[(frame24info.start60 + 2) * fmsPitch];
-    for (int by = 0; by < prm->numBlkY; ++by) {
-      for (int bx = 0; bx < prm->numBlkX; ++bx) {
-        int blkidx = bx + by * prm->numBlkX;
-        if (frame24info.is3) {
-          FieldMathingScore blks[2];
-          blks[0] = pfms[blkidx];
-          blks[1] = pfms[blkidx + fmsPitch];
-          out[blkidx] = MatchingScore(blks, frame24info.is3);
-        }
-        else {
-          out[blkidx] = MatchingScore(&pfms[blkidx], frame24info.is3);
-        }
-      }
-    }
-  }
-
-  void GetMatchingScoreFrame(PClip fmclip, int n24, PSCORE *out, IScriptEnvironment* env)
-  {
-    n24 = clamp(n24, 0, vi24.num_frames - 1);
-
-    int cycleIndex = n24 / 4;
-    int frameIndex24 = n24 % 4;
-    PVideoFrame fm = fmclip->GetFrame(cycleIndex, env);
-    const KFMFrame* fmframe = (KFMFrame*)fm->GetReadPtr();
-    Frame24Info frame24info = table24[frameIndex24 + fmframe->pattern * 4];
-
-    GetMatchingScoreFrame(fmframe, frame24info, out);
-  }
+	int GetPattern(int cycleIndex, IScriptEnvironment* env)
+	{
+		PVideoFrame fm = fmclip->GetFrame(cycleIndex, env);
+		const KFMFrame* fmframe = (KFMFrame*)fm->GetReadPtr();
+		return fmframe->pattern;
+	}
 
   void DrawInfo(PVideoFrame& dst, int unmatched, IScriptEnvironment* env) {
     env->MakeWritable(&dst);
@@ -1063,11 +1242,14 @@ class KTCMerge : public GenericVideoFilter
   }
 
 public:
-  KTCMerge(PClip clip60, PClip clip24, PClip fmclip, IScriptEnvironment* env)
+  KTCMerge(PClip clip60, PClip clip24, PClip fmclip, PClip matchclip, IScriptEnvironment* env)
     : GenericVideoFilter(clip60)
     , fmclip(fmclip)
+		, matchclip(matchclip)
     , clip24(clip24)
     , prm(KFMParam::GetParam(fmclip->GetVideoInfo(), env))
+		, thMatch(thMatch)
+		, thDiff(thDiff)
     , vi24(clip24->GetVideoInfo())
     , tmpvi()
   {
@@ -1080,7 +1262,7 @@ public:
 
     // メモリを確保するデバイスとかマルチスレッドとかメモリ再利用とか考えたくないので、
     // ワークメモリの確保も全部都度NewVideoFrameで行う
-    int tmp_frame_bytes = sizeof(PSCORE) * numBlks * 3 + sizeof(bool) * numBlks + core->WorkSize();
+    int tmp_frame_bytes = core->WorkSize();
     tmpvi.pixel_type = VideoInfo::CS_BGR32;
     tmpvi.width = 2048;
     tmpvi.height = nblocks(tmp_frame_bytes, vi.width * 4);
@@ -1092,124 +1274,53 @@ public:
 
     int cycleIndex = n / 10;
     int frameIndex60 = n % 10;
-    PVideoFrame fm = fmclip->GetFrame(cycleIndex, env);
-    const KFMFrame* fmframe = (KFMFrame*)fm->GetReadPtr();
-    Frame24Info frame24info = table60[frameIndex60 + fmframe->pattern * 10];
-    int n24 = cycleIndex * 4 + frame24info.index24;
 
-    // メモリ確保
-    PVideoFrame outframe = env->NewVideoFrame(vi);
-    PVideoFrame tmpframe = env->NewVideoFrame(tmpvi);
+		PVideoFrame matchframe;
+		matchframe = matchclip->GetFrame(cycleIndex, env);
+		bool* match = (bool*)matchframe->GetReadPtr();
 
-    PSCORE *pscore = (PSCORE*)tmpframe->GetWritePtr();
-    PSCORE *score = &pscore[numBlks];
-    PSCORE *nscore = &score[numBlks];
-    bool* match = (bool*)&nscore[numBlks];
-    uint8_t* work = (uint8_t*)&match[numBlks];
+		int pattern = GetPattern(cycleIndex, env);
+    Frame24Info frame24info = table60[frameIndex60 + pattern * 10];
 
-    // 24pでの前後を含む3フレームのブロックごとのマッチング度合いを取得
-    if (frame24info.index24 == -1 || frame24info.index24 == 4) {
-      // 現在のフィールドに対応する24pフレームがない
-      int n24p, n24n;
-
-      // 現在のフィールドが前後どちらのフレームと近いか計算
-      if (frame24info.index24 == -1) {
-        Frame24Info f0 = { -1,-2,true }; // -2,-1,0の3フィールド
-        Frame24Info f1 = { -1,0,true };  // 0,1,2の3フィールド
-        GetMatchingScoreFrame(fmframe, f0, pscore);
-        GetMatchingScoreFrame(fmframe, f1, nscore);
-        n24p = n24;
-        n24n = n24 + 1;
-      }
-      else {
-        Frame24Info f0 = { -1,7,true }; // 7,8,9の3フィールド
-        Frame24Info f1 = { -1,9,true }; // 9,10,11の3フィールド
-        GetMatchingScoreFrame(fmframe, f0, pscore);
-        GetMatchingScoreFrame(fmframe, f1, nscore);
-        n24p = n24 - 1;
-        n24n = n24;
-      }
-      
-      PSCORE ptotal = 0;
-      PSCORE ntotal = 0;
-      for (int by = 0; by < prm->numBlkY; ++by) {
-        for (int bx = 0; bx < prm->numBlkX; ++bx) {
-          int blkidx = bx + by * prm->numBlkX;
-          ptotal += pscore[blkidx];
-          ntotal += nscore[blkidx];
-        }
-      }
-
-      // 低い方のマッチング度合いを現在のフレームのマッチング度合いとする
-      if (ptotal < ntotal) {
-        // 前のフレームの方が近い
-        n24 = n24p;
-        memcpy(score, pscore, sizeof(PSCORE)*numBlks);
-      }
-      else {
-        // 後のフレームの方が近い
-        n24 = n24n;
-        memcpy(score, nscore, sizeof(PSCORE)*numBlks);
-      }
-
-      // 前後フレームのマッチング度合い
-      GetMatchingScoreFrame(fmclip, n24p, pscore, env);
-      GetMatchingScoreFrame(fmclip, n24n, nscore, env);
-    }
-    else {
-      // 前後を含む3フレームのブロックごとのマッチング度合い
-      GetMatchingScoreFrame(fmclip, n24 - 1, pscore, env);
-      GetMatchingScoreFrame(fmclip, n24, score, env);
-      GetMatchingScoreFrame(fmclip, n24 + 1, nscore, env);
-    }
-
-    // 3x3x3の最大値フィルタ適用
-    // 時間軸方向
-    for (int by = 0; by < prm->numBlkY; ++by) {
-      for (int bx = 0; bx < prm->numBlkX; ++bx) {
-        int blkidx = bx + by * prm->numBlkX;
-        pscore[blkidx] = max(pscore[blkidx], max(score[blkidx], nscore[blkidx]));
-      }
-    }
-    // x方向
-    for (int by = 0; by < prm->numBlkY; ++by) {
-      for (int bx = 0; bx < prm->numBlkX; ++bx) {
-        int xstart = std::max(0, bx - 1);
-        int xend = std::min(prm->numBlkX - 1, bx + 2);
-        PSCORE s = 0;
-        for (int x = xstart; x < xend; ++x) {
-          s = std::max(s, pscore[x + by * prm->numBlkX]);
-        }
-        nscore[bx + by * prm->numBlkX] = s;
-      }
-    }
-    // y方向
-    for (int by = 0; by < prm->numBlkY; ++by) {
-      for (int bx = 0; bx < prm->numBlkX; ++bx) {
-        int ystart = std::max(0, by - 1);
-        int yend = std::min(prm->numBlkY - 1, by + 2);
-        PSCORE s = 0;
-        for (int y = ystart; y < yend; ++y) {
-          s = std::max(s, nscore[bx + y * prm->numBlkX]);
-        }
-        score[bx + by * prm->numBlkX] = s;
-      }
-    }
-
-    PSCORE threshold = 1000.0f; // TODO:
+		if (frame24info.index24 == 4) {
+			if (cycleIndex + 1 >= fmclip->GetVideoInfo().num_frames) {
+				// 後ろがないので前にしておく
+				frame24info.index24 = 3;
+			}
+			else {
+				// 後ろのパターンが前空きの場合は前にする
+				bool isNoTop = false;
+				int nextPattern = GetPattern(cycleIndex + 1, env);
+				if (nextPattern < 5) {
+					isNoTop = (tbl2323[nextPattern][0] == 1);
+				}
+				else {
+					isNoTop = (tbl2233[nextPattern - 5][0] == 1);
+				}
+				if (isNoTop) {
+					frame24info.index24 = 3;
+				}
+			}
+		}
 
     int numUnmatchBlks = 0;
     for (int by = 0; by < prm->numBlkY; ++by) {
       for (int bx = 0; bx < prm->numBlkX; ++bx) {
         int blkidx = bx + by * prm->numBlkX;
-        match[blkidx] = (score[blkidx] <= threshold);
-        if (score[blkidx] > threshold) {
+        if (match[blkidx] == false) {
           ++numUnmatchBlks;
         }
       }
     }
 
-    if (numUnmatchBlks >= 0.75 * numBlks) {
+		// メモリ確保
+		PVideoFrame outframe = env->NewVideoFrame(vi);
+		PVideoFrame tmpframe = env->NewVideoFrame(tmpvi);
+		uint8_t* work = (uint8_t*)tmpframe->GetWritePtr();
+
+		int n24 = cycleIndex * 4 + frame24info.index24;
+
+    if (numUnmatchBlks >= 0.35 * numBlks) {
       return child->GetFrame(n, env);
     }
     else if (numUnmatchBlks == 0) {
@@ -1221,17 +1332,25 @@ public:
 
     core->Merge(match, src24, src60, outframe, work);
 
-    DrawInfo(outframe, numUnmatchBlks, env);
+    //DrawInfo(outframe, numUnmatchBlks, env);
 
     return outframe;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
-    return new KTCMerge(
-      args[0].AsClip(),       // clip60
-      args[1].AsClip(),       // clip24
-      args[2].AsClip(),       // fmclip
+		AVSValue mathingArgs[5] = {
+			args[2].AsClip(),       // fmclip
+			args[3].AsFloat(50.0f),
+			args[4].AsFloat(50.0f),
+			args[5].AsInt(7),
+			args[6].AsInt(5)
+		};
+		return new KTCMerge(
+			args[0].AsClip(),       // clip60
+			args[1].AsClip(),       // clip24
+			args[2].AsClip(),       // fmclip
+			env->Invoke("KTCMergeMatching", AVSValue(mathingArgs, 5)).AsClip(),
       env
     );
   }
@@ -1241,7 +1360,9 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KFM", "c", KFM::Create, 0);
   env->AddFunction("KIVTC", "cc", KIVTC::Create, 0);
-  env->AddFunction("KTCMerge", "ccc", KTCMerge::Create, 0);
+	env->AddFunction("KTCMerge", "ccc[thmatch]f[thdiff]f[temp]i[spatial]i", KTCMerge::Create, 0);
+	// 内部用
+	env->AddFunction("KTCMergeMatching", "cffii", KTCMergeMatching::Create, 0);
 }
 
 #include <Windows.h>
@@ -1258,7 +1379,7 @@ const AVS_Linkage *AVS_linkage = 0;
 extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors)
 {
   AVS_linkage = vectors;
-  init_console();
+  //init_console();
 
   AddFuncFM(env);
 

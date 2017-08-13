@@ -7,17 +7,17 @@ TDecimate(mode=1)
 
 ks = KMSuper().Time("Super1")
 # check fail if isse=true
-ms = MSuper(pel=2,isse=false).Time("Super2")
-kb1a = ks.KMAnalyse(isb=true,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
+#ms = MSuper(pel=2,isse=false).Time("Super2")
+kb1 = ks.KMAnalyse(isb=true,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
 kb1p = ks.KMPartialSuper().KMAnalyse(isb=true, delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true).Time("KMPartialAnalyze")
-kb1 = ks.KMAnalyse(partial = kb1p, isb=true,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
+kb1a = ks.OnCPU(0).KMAnalyse(partial = kb1p.OnCPU(0), isb=true,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true).OnCUDA(0)
 #mb1 = ms.MAnalyse(isb=true,  delta=1, blksize=16, overlap=8, search=4, searchparam=2, pelsearch=2, truemotion=false, lambda=400, lsad=400, pnew=25, plevel=0, global=true, DCT=0)
 #kf1 = ks.KMAnalyse(isb=false,  delta=1, blksize=16, overlap=8, lambda=400, lsad=400, global=true)
 #mf1 = ms.MAnalyse(isb=false,  delta=1, blksize=16, overlap=8, search=4, searchparam=2, pelsearch=2, truemotion=false, lambda=400, lsad=400, pnew=25, plevel=0, global=true, DCT=0)
 
 #KMSuperCheck(ks, ms, last).Time("KMSuperCheck")
 return KMAnalyzeCheck2(kb1a, kb1, last).Time("KMAnalyzeCheckB")
-#KMAnalyzeCheck(kf1, mf1, last).Time("KMAnalyzeCheckF")
+#KMAnalyzeCheck(kb1, mb1, last).Time("KMAnalyzeCheckF")
 
 #kdeg = KMDegrain1(ks, kb1, kf1)
 #mdeg = MDegrain1(ms, mb1, mf1)
