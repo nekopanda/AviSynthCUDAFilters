@@ -2140,8 +2140,8 @@ public:
 
 		int nSrcPitchY = pSrcYPlane->GetPitch();
 		int nSrcPitchUV = pSrcUPlane->GetPitch();
-		int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedWidth();
-		int nImgPitchUV = nSrcPitchUV * pSrcUPlane->GetExtendedWidth();
+		int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
+		int nImgPitchUV = nSrcPitchUV * pSrcUPlane->GetExtendedHeight();
 
 		kernel->Search(p.nBlkX, p.nBlkY, p.nBlkSizeX, 
 			p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
@@ -2299,8 +2299,8 @@ public:
         globalMV, outptr, nBlks);
 
 			// デバッグ用
-			//if (i == 2 && kernel->IsEnabled() == false) {
-			//	FILE *fp = fopen("vector.txt", "w");
+			//if (i == 1 && kernel->IsEnabled() == false) {
+			//	FILE *fp = fopen("vector-1.txt", "w");
 			//	for (int i = 0; i < nBlks; ++i) fprintf(fp, "%d,%d,%d,%d\n", i, outptr[i].x, outptr[i].y, outptr[i].sad);
 			//	fclose(fp);
 			//}

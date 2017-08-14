@@ -834,7 +834,7 @@ public:
 
     PVideoFrame out = CreateWeaveFrame(child, 0, fstart, fnum, env);
 
-    DrawInfo(out, fmframe, env);
+    //DrawInfo(out, fmframe, env);
 
     return out;
   }

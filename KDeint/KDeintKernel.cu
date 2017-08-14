@@ -412,16 +412,24 @@ __device__ int dev_sq_norm(int ax, int ay, int bx, int by) {
 template <typename pixel_t, int NPEL>
 __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int nImgPitch, int vx, int vy)
 {
-  if (NPEL != 1) {
-    int sx = vx % NPEL;
-    int sy = vy % NPEL;
-    int si = sx + sy * NPEL;
-    int x = vx / NPEL;
-    int y = vy / NPEL;
-    return &pRef[x + y * nPitch + si * nImgPitch];
-  }
-  else {
-    return &pRef[vx + vy * nPitch];
+	if (NPEL == 1) {
+		return &pRef[vx + vy * nPitch];
+	}
+	else if (NPEL == 2) {
+		int sx = vx & 1;
+		int sy = vy & 1;
+		int si = sx + sy * 2;
+		int x = vx >> 1;
+		int y = vy >> 1;
+		return &pRef[x + y * nPitch + si * nImgPitch];
+	}
+	else { // NPEL == 4
+		int sx = vx & 3;
+		int sy = vy & 3;
+		int si = sx + sy * 4;
+		int x = vx >> 2;
+		int y = vy >> 2;
+		return &pRef[x + y * nPitch + si * nImgPitch];
   }
 }
 
@@ -759,6 +767,9 @@ __device__ void dev_read_pixels(int tx, const pixel_t* src, int nPitch, int offx
   }
 }
 
+// 同期方法 0:同期なし（デバッグ用）, 1:1ずつ同期（高精度）, 2:2ずつ同期（低精度）
+#define ANALYZE_SYNC 1
+
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
 __global__ void kl_search(
   int nBlkX, int nBlkY, const SearchBlock* __restrict__ blocks,
@@ -782,7 +793,7 @@ __global__ void kl_search(
   const int wi = tx % 16;
   const int bx = tx / 16;
 
-  for (int blkx = blockIdx.x; blkx < nBlkX; blkx += blockDim.x) {
+  for (int blkx = blockIdx.x; blkx < nBlkX; blkx += gridDim.x) {
     for (int blky = 0; blky < nBlkY; ++blky) {
 
       // srcをshared memoryに転送
@@ -820,10 +831,17 @@ __global__ void kl_search(
       }
 
 			// !!!!! 依存ブロックの計算が終わるのを待つ !!!!!!
+#if ANALYZE_SYNC == 1
 			if (tx == 0 && blkx > 0)
 			{
 				while (prog[blkx - 1] < blky) ;
 			}
+#elif ANALYZE_SYNC == 2
+			if (tx == 0 && blkx >= 2)
+			{
+				while (prog[blkx - (1 + (blkx & 1))] < blky);
+			}
+#endif
 
       __syncthreads();
 
@@ -1129,10 +1147,22 @@ __global__ void kl_prepare_search(
 
     int p1 = -2; // -2はzeroベクタ
     // Left (or right) predictor
+#if ANALYZE_SYNC == 0
 		if (bx > 0)
     {
-      p1 = blkIdx - 1;
+      p1 = blkIdx - 1 + nBlkX * nBlkY;
     }
+#elif ANALYZE_SYNC == 1
+		if (bx > 0)
+		{
+			p1 = blkIdx - 1;
+		}
+#else // ANALYZE_SYNC == 2
+		if (x >= 2)
+		{
+			p1 = blkIdx - (1 + (x & 1));
+		}
+#endif
 
     int p2 = -2;
     // Up predictor
@@ -1472,13 +1502,15 @@ __global__ void kl_write_default_mv(VECTOR* dst, int nBlkCount, int verybigSAD)
   }
 }
 
-__global__ void kl_init_const_vec(short2* vectors, const short2* globalMV)
+__global__ void kl_init_const_vec(short2* vectors, const short2* globalMV, int nPel)
 {
 	if (blockIdx.x == 0) {
 		vectors[-2] = short2();
 	}
 	else {
-		vectors[-1] = *globalMV;
+		short2 g = *globalMV;
+		short2 c = { g.x * nPel, g.y * nPel };
+		vectors[-1] = c;
 	}
 }
 
@@ -1494,7 +1526,8 @@ void launch_search(
 	int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
 {
 	dim3 threads(128);
-	dim3 blocks(nblocks(nBlkX, 2) * 2);
+	// TODO: デバイス情報からブロック数を設定
+	dim3 blocks(std::min(50, std::min(nBlkX, nBlkY)));
 	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL> << <blocks, threads, 0, stream >> >(
 		nBlkX, nBlkY, searchblocks, vectors, prog, nPad,
 		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
@@ -1538,7 +1571,7 @@ void KDeintKernel::Search(
 
 	{
 		// set zeroMV and globalMV
-		kl_init_const_vec << <2, 1, 0, stream >> >(vectors, globalMV);
+		kl_init_const_vec << <2, 1, 0, stream >> >(vectors, globalMV, nPel);
 		DebugSync();
 	}
 
@@ -1569,7 +1602,8 @@ void KDeintKernel::Search(
 			const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
 			int nPitchY, int nPitchUV,
 			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
-		{
+		{ // TODO: nPel==1に対応する
+			// デバッグ用にSEARCH=1にしてる
 			launch_search<pixel_t, 16, 1, 1>,
 			launch_search<pixel_t, 16, 2, 2>,
 			launch_search<pixel_t, 32, 1, 1>,
@@ -1610,7 +1644,6 @@ void KDeintKernel::Search(
 
 		DataDebug<int> d(sads, nBlkX*nBlkY, env);
 		d.Show();
-		env->ThrowError("Debug end");
 	}
 }
 
