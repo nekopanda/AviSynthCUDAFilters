@@ -1180,7 +1180,7 @@ public:
   AVSMapValue(const char* pdata, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR5)(pdata, size))
   AVSMapValue(const AVSMapValue& other) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR6)(other))
   ~AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_DESTRUCTOR)())
-  AVSMapValue& operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
+  AVSMapValue operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
 
   bool IsInt() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsInt)())
   bool IsIntArray() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsIntArray)())

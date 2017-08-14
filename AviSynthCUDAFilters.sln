@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio 2013
+VisualStudioVersion = 12.0.40629.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "InvertNegCUDA", "InvertNegCUDA\InvertNegCUDA.vcxproj", "{603B9037-FFED-4B8A-88E0-CB8E4810C3D4}"
 EndProject
@@ -10,6 +10,11 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KDeint", "KDeint\KDeint.vcxproj", "{9EC2BA4B-EA05-4242-84DA-7A6239DD2691}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KFM", "KFM\KFM.vcxproj", "{24CEA66A-DCE2-46FE-9E62-882CFEC40157}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KDeintTest", "KDeintTest\KDeintTest.vcxproj", "{2C860B36-4C57-4FFB-896E-DA151F124F2B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{9EC2BA4B-EA05-4242-84DA-7A6239DD2691} = {9EC2BA4B-EA05-4242-84DA-7A6239DD2691}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -69,6 +74,18 @@ Global
 		{24CEA66A-DCE2-46FE-9E62-882CFEC40157}.Release|Win32.Build.0 = Release|Win32
 		{24CEA66A-DCE2-46FE-9E62-882CFEC40157}.Release|x64.ActiveCfg = Release|x64
 		{24CEA66A-DCE2-46FE-9E62-882CFEC40157}.Release|x64.Build.0 = Release|x64
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Debug|Mixed Platforms.Build.0 = Debug|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Debug|Win32.ActiveCfg = Debug|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Debug|Win32.Build.0 = Debug|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Debug|x64.ActiveCfg = Debug|x64
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Debug|x64.Build.0 = Debug|x64
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|Mixed Platforms.ActiveCfg = Release|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|Mixed Platforms.Build.0 = Release|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|Win32.ActiveCfg = Release|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|Win32.Build.0 = Release|Win32
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|x64.ActiveCfg = Release|x64
+		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

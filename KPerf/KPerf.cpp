@@ -45,7 +45,7 @@ const AVS_Linkage *AVS_linkage = 0;
 
 extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors) {
 	AVS_linkage = vectors;
-	init_console();
+	//init_console();
 	env->AddFunction("Time", "c[name]s", Create_Time, 0);
 	return "Performance Measurement Plugin";
 }

@@ -1460,6 +1460,39 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 			cost += saduv + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)saduv) >> 8));
       if (cost >= nMinCost) return;
 
+#if 0
+			if (debug && vx == -3 && vy == 2) {
+				const pixel_t* pRefY = GetRefBlock(vx, vy);
+				const pixel_t* pRefU = GetRefBlockU(vx, vy);
+				const pixel_t* pRefV = GetRefBlockV(vx, vy);
+
+				for (int y = 0; y < 16; ++y) {
+					for (int x = 0; x < 16; ++x) {
+						printf("Y,%d,%d,%d\n", x, y, std::abs(pSrc[0][x + nSrcPitch[0] * y] - pRefY[x + nRefPitch[0] * y]));
+					}
+				}
+				for (int y = 0; y < 8; ++y) {
+					for (int x = 0; x < 8; ++x) {
+						printf("U,%d,%d,%d\n", x, y, std::abs(pSrc[1][x + nSrcPitch[1] * y] - pRefU[x + nRefPitch[1] * y]));
+						printf("V,%d,%d,%d\n", x, y, std::abs(pSrc[2][x + nSrcPitch[2] * y] - pRefV[x + nRefPitch[2] * y]));
+					}
+				}
+
+				printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
+					pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
+					pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
+					);
+				printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
+					pSrc[1][0], pSrc[1][1], pSrc[1][0 + nSrcPitch[1]], pSrc[1][1 + nSrcPitch[1]],
+					pRefU[0], pRefU[1], pRefU[0 + nRefPitch[1]], pRefU[1 + nRefPitch[1]]
+					);
+				printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
+					pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
+					pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
+					);
+			}
+#endif
+
       bestMV.x = vx;
       bestMV.y = vy;
       nMinCost = cost;
@@ -1493,6 +1526,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     }
   }
 
+	bool debug;
   void PseudoEPZSearch()
   {
     typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
@@ -1509,6 +1543,34 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     bestMV.sad = sad;
 		nMinCost = sad + ((p.penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
 
+		if (debug) {
+			printf("zero: sad=%d, mincost=%d\n", sad, nMinCost);
+#if 0
+			const pixel_t* pRefY = GetRefBlock(0, 0);
+			const pixel_t* pRefU = GetRefBlockU(0, 0);
+			const pixel_t* pRefV = GetRefBlockV(0, 0);
+			printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
+				pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
+				pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
+				);
+			int sum = 0;
+			for (int i = 0; i < 16; ++i) {
+				int s = pSrc[0][nSrcPitch[0] * i];
+				int r = pRefY[nRefPitch[0] * i];
+				sum += std::abs(s - r);
+				printf("i=%d,sum=%d\n", i, sum);
+			}
+			for (int i = 0; i < 8; i += 2) {
+				int su = pSrc[1][nSrcPitch[1] * i];
+				int ru = pRefU[nRefPitch[1] * i];
+				int sv = pSrc[2][nSrcPitch[2] * i];
+				int rv = pRefV[nRefPitch[2] * i];
+				sum += std::abs(su - ru);
+				sum += std::abs(sv - rv);
+				printf("i=%d,sum=%d\n", i, sum);
+			}
+#endif
+		}
                                                                     // Global MV predictor  - added by Fizick
     globalMVPredictor = ClipMV(globalMVPredictor);
     //	if ( IsVectorOK(globalMVPredictor.x, globalMVPredictor.y ) )
@@ -1705,8 +1767,10 @@ public:
         VECTOR zeroMV = { 0,0,0 };
         predictors[4] = ClipMV(zeroMV);
 
+				// debug
+				debug = (nCount == 1888 && blkIdx == 2);
+
         PseudoEPZSearch();
-        //			bestMV = zeroMV; // debug
 
         /* write the results */
         pBlkData[blkx] = bestMV;
@@ -1799,9 +1863,19 @@ public:
       int result = index - (freqSize >> 1);
       if (y == 0) {
         globalMVec->x = result;
+#if 0
+				if (p.nBlkCount < 1888) {
+					printf("Most frequenct X: %d\n", result);
+				}
+#endif
       }
       else {
-        globalMVec->y = result;
+				globalMVec->y = result;
+#if 0
+				if (p.nBlkCount < 1888) {
+					printf("Most frequenct Y: %d\n", result);
+				}
+#endif
       }
     }
 
@@ -1831,7 +1905,12 @@ public:
     {
       globalMVec->x = 2 * medianx;
       globalMVec->y = 2 * mediany;
-    }
+		}
+#if 0
+		if (p.nBlkCount < 1888) {
+			printf("mean: (%d, %d)\n", globalMVec->x, globalMVec->y);
+		}
+#endif
   }
 
   void InterpolatePrediction(const PlaneOfBlocksBase* _pob)
@@ -2219,6 +2298,13 @@ public:
         pRefGOF->GetFrame(i),
         globalMV, outptr, nBlks);
 
+			// デバッグ用
+			//if (i == 2 && kernel->IsEnabled() == false) {
+			//	FILE *fp = fopen("vector.txt", "w");
+			//	for (int i = 0; i < nBlks; ++i) fprintf(fp, "%d,%d,%d,%d\n", i, outptr[i].x, outptr[i].y, outptr[i].sad);
+			//	fclose(fp);
+			//}
+
 			outptr += nBlks;
     }
   }
@@ -2580,7 +2666,7 @@ public:
 
     return new KMAnalyse(
       args[0].AsClip(),       // super
-      args[11].AsClip(),      // partial
+			args[11].Defined() ? args[11].AsClip() : nullptr,      // partial
       blksize,
       blksizeV,                // v.1.7
       0,       // levels skip

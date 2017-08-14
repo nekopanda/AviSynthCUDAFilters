@@ -58,7 +58,7 @@ const AVS_Linkage *AVS_linkage = 0;
 extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors)
 {
 	AVS_linkage = vectors;
-	init_console();
+	//init_console();
 
 	AddFuncKernel(env);
   AddFuncMV(env);
