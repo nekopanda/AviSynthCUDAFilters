@@ -1451,6 +1451,13 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
+#if 1 // CUDA”Å‚Æ‡‚í‚¹‚é
+			int sad = LumaSAD(GetRefBlock(vx, vy))
+				+ SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
+				+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+			cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
+			int saduv = 0;
+#else
       int sad = LumaSAD(GetRefBlock(vx, vy));
       cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
       if (cost >= nMinCost) return;
@@ -1458,10 +1465,10 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
 			cost += saduv + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)saduv) >> 8));
+#endif
       if (cost >= nMinCost) return;
-
 #if 0
-			if (debug && vx == -3 && vy == 2) {
+			if (debug && vx == 1 && vy == 0) {
 				const pixel_t* pRefY = GetRefBlock(vx, vy);
 				const pixel_t* pRefU = GetRefBlockU(vx, vy);
 				const pixel_t* pRefV = GetRefBlockV(vx, vy);
@@ -1511,6 +1518,13 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
+#if 1 // CUDA”Å‚Æ‡‚í‚¹‚é
+			int sad = LumaSAD(GetRefBlock(vx, vy))
+				+ SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
+				+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+			cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
+			int saduv = 0;
+#else
       int sad = LumaSAD(GetRefBlock(vx, vy));
 			cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
       if (cost >= nMinCost) return;
@@ -1518,8 +1532,8 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
 			cost += saduv + ((p.penaltyNew*(safe_sad_t)saduv) >> 8);
+#endif
       if (cost >= nMinCost) return;
-
       nMinCost = cost;
       bestMV.sad = sad + saduv;
       *dir = val;
@@ -1530,7 +1544,11 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   void PseudoEPZSearch()
   {
     typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+#if 1 // CUDA”Å‚Æ‡‚í‚¹‚é
+		FetchPredictorsCudaEmu();
+#else
     FetchPredictors();
+#endif
 
     // We treat zero alone
     // Do we bias zero with not taking into account distorsion ?
@@ -1544,8 +1562,8 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 		nMinCost = sad + ((p.penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
 
 		if (debug) {
-			printf("zero: sad=%d, mincost=%d\n", sad, nMinCost);
 #if 0
+			printf("zero: sad=%d, mincost=%d\n", sad, nMinCost);
 			const pixel_t* pRefY = GetRefBlock(0, 0);
 			const pixel_t* pRefU = GetRefBlockU(0, 0);
 			const pixel_t* pRefV = GetRefBlockV(0, 0);
@@ -1768,7 +1786,7 @@ public:
         predictors[4] = ClipMV(zeroMV);
 
 				// debug
-				debug = (nCount == 1888 && blkIdx == 2);
+				debug = (p.nBlkY == 134 && blkIdx == 334);
 
         PseudoEPZSearch();
 
@@ -3054,7 +3072,7 @@ public:
     }
 
 		if (misCount > 100) {
-			//env->ThrowError("Motion vector too many miss!!");
+			env->ThrowError("Motion vector too many miss!!");
 		}
 
     return ret;

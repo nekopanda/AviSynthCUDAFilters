@@ -486,28 +486,40 @@ __device__ void MinCost(CostResult& a, CostResult& b) {
 
 // MAX - (MAX/4) <= (結果の個数) <= MAX であること
 // スレッド数は (結果の個数) - MAX/2
-template <int MAX>
+template <int LEN, bool CPU_EMU>
 __device__ void dev_reduce_result(CostResult* tmp, int tid)
 {
-  if(MAX >= 16) MinCost(tmp[tid] , tmp[tid + 8]);
-	MinCost(tmp[tid], tmp[tid + 4]);
-	MinCost(tmp[tid], tmp[tid + 2]);
-	MinCost(tmp[tid], tmp[tid + 1]);
+	if (CPU_EMU) {
+		// 順番をCPU版に合わせる
+		if (tid == 0) {
+			for (int i = 1; i < LEN; ++i) {
+				MinCost(tmp[0], tmp[i]);
+			}
+		}
+	}
+	else {
+		if (LEN > 8) MinCost(tmp[tid], tmp[tid + 8]);
+		MinCost(tmp[tid], tmp[tid + 4]);
+		MinCost(tmp[tid], tmp[tid + 2]);
+		MinCost(tmp[tid], tmp[tid + 1]);
+	}
 }
 
+// 順番はCPU版に合わせる
 __constant__ int2 c_expanding_search_1_area[] = {
-	{ -1, -1 },
 	{ 0, -1 },
-	{ 1, -1 },
+	{ 0, 1 },
 	{ -1, 0 },
 	{ 1, 0 },
+
+	{ -1, -1 },
 	{ -1, 1 },
-	{ 0, 1 },
-	{ 1, 1 }
+	{ 1, -1 },
+	{ 1, 1 },
 };
 
 // __syncthreads()を呼び出しているので全員で呼ぶ
-template <typename pixel_t, int BLK_SIZE, int NPEL>
+template <typename pixel_t, int BLK_SIZE, int NPEL, bool CPU_EMU>
 __device__ void dev_expanding_search_1(
 	int debug,
   int tx, int wi, int bx, int cx, int cy,
@@ -557,7 +569,8 @@ __device__ void dev_expanding_search_1(
 #if 0
 			if (debug) {
 				printf("expand1 bx=%d,sad=%d,cost=%d\n", bx, sad, result[bx].cost);
-				if (bx == 0) {
+				if (bx == 3) {
+				//if(false) {
 					printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
 						pSrcY[0], pSrcY[1], pSrcY[0 + BLK_SIZE], pSrcY[1 + BLK_SIZE],
 						pRefY[bx][0], pRefY[bx][1], pRefY[bx][0 + nPitchY], pRefY[bx][1 + nPitchY]
@@ -580,7 +593,7 @@ __device__ void dev_expanding_search_1(
 
   // 結果集約
   if (tx < 4) { // reduceは8-4=4スレッドで呼ぶ
-    dev_reduce_result<8>(result, tx);
+    dev_reduce_result<8, CPU_EMU>(result, tx);
 
     if (tx == 0) { // tx == 0は最後のデータを書き込んでいるのでアクセスOK
       if (result[0].cost < bestResult.cost) {
@@ -590,12 +603,15 @@ __device__ void dev_expanding_search_1(
   }
 }
 
+// 順番はCPU版に合わせる
 __constant__ int2 c_expanding_search_2_area[] = {
-	{ -2, -2 },
+
 	{ -1, -2 },
+	{ -1, 2 },
 	{ 0, -2 },
+	{ 0, 2 },
 	{ 1, -2 },
-	{ 2, -2 },
+	{ 1, 2 },
 
 	{ -2, -1 },
 	{ 2, -1 },
@@ -604,15 +620,14 @@ __constant__ int2 c_expanding_search_2_area[] = {
 	{ -2, 1 },
 	{ 2, 1 },
 
+	{ -2, -2 },
 	{ -2, 2 },
-	{ -1, 2 },
-	{ 0, 2 },
-	{ 1, 2 },
-	{ 2, 2 }
+	{ 2, -2 },
+	{ 2, 2 },
 };
 
 // __syncthreads()を呼び出しているので全員で呼ぶ
-template <typename pixel_t, int BLK_SIZE, int NPEL>
+template <typename pixel_t, int BLK_SIZE, int NPEL, bool CPU_EMU>
 __device__ void dev_expanding_search_2(
 	int debug,
   int tx, int wi, int bx, int cx, int cy,
@@ -668,7 +683,7 @@ __device__ void dev_expanding_search_2(
 
   // 結果集約
   if (tx < 8) { // reduceは16-8=8スレッドで呼ぶ
-    dev_reduce_result<16>(result, tx);
+    dev_reduce_result<16, CPU_EMU>(result, tx);
 
     if (tx == 0) { // tx == 0は最後のデータを書き込んでいるのでアクセスOK
       if (result[0].cost < bestResult.cost) {
@@ -679,11 +694,11 @@ __device__ void dev_expanding_search_2(
 }
 
 __constant__ int2 c_hex2_search_1_area[] = {
-	{ -1, -2 }, { -2, 0 }, { -1, 2 }, { 1, 2 }, { 2, 0 }, { 1, -2 }, { -1, -2 }, { -2, 0 }
+	{ -2, 0 }, { -1, 2 }, { 1, 2 }, { 2, 0 }, { 1, -2 }, { -1, -2 }
 };
 
 // __syncthreads()を呼び出しているので全員で呼ぶ
-template <typename pixel_t, int BLK_SIZE, int NPEL>
+template <typename pixel_t, int BLK_SIZE, int NPEL, bool CPU_EMU>
 __device__ void dev_hex2_search_1(
 	int debug,
   int tx, int wi, int bx, int cx, int cy,
@@ -700,7 +715,9 @@ __device__ void dev_hex2_search_1(
   __shared__ const pixel_t* pRefU[8];
   __shared__ const pixel_t* pRefV[8];
 
-  isVectorOK[tx] = false;
+	if (tx < 8) {
+		isVectorOK[tx] = false;
+	}
 
   if (tx < 6) {
 		int x = result[tx].xy.x = cx + c_hex2_search_1_area[tx].x;
@@ -734,7 +751,7 @@ __device__ void dev_hex2_search_1(
 
   // 結果集約
   if (tx < 2) { // reduceは6-4=2スレッドで呼ぶ
-    dev_reduce_result<8>(result, tx);
+    dev_reduce_result<6, CPU_EMU>(result, tx);
 
     if (tx == 0) { // tx == 0は最後のデータを書き込んでいるのでアクセスOK
       if (result[0].cost < bestResult.cost) {
@@ -770,7 +787,7 @@ __device__ void dev_read_pixels(int tx, const pixel_t* src, int nPitch, int offx
 // 同期方法 0:同期なし（デバッグ用）, 1:1ずつ同期（高精度）, 2:2ずつ同期（低精度）
 #define ANALYZE_SYNC 1
 
-template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
+template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CPU_EMU>
 __global__ void kl_search(
   int nBlkX, int nBlkY, const SearchBlock* __restrict__ blocks,
   short2* vectors, // [x,y]
@@ -870,19 +887,40 @@ __global__ void kl_search(
 					// zero, global, predictor, predictors[1]～[3]を取得
 					short2 vec = vectors[REF_VECTOR_INDEX[tx]];
 					dev_clip_mv(vec, CLIP_RECT);
-					pred[tx][0] = vec.x;
-					pred[tx][1] = vec.y;
-					// memfence
-					if (tx < 2) {
-						// Median predictor
-						// 計算効率が悪いので消したい・・・
-						int a = pred[3][tx];
-						int b = pred[4][tx];
-						int c = pred[5][tx];
-						int max_ = dev_max(a, b, c);
-						int min_ = dev_min(a, b, c);
-						int med_ = a + b + c - max_ - min_;
-						pred[6][tx] = med_;
+
+					if (CPU_EMU) {
+						// 3はmedianなので空ける（CPU版と合わせる）
+						int dx = (tx < 3) ? tx : (tx + 1);
+						pred[dx][0] = vec.x;
+						pred[dx][1] = vec.y;
+						// memfence
+						if (tx < 2) {
+							// Median predictor
+							// 計算効率が悪いので消したい・・・
+							int a = pred[4][tx];
+							int b = pred[5][tx];
+							int c = pred[6][tx];
+							int max_ = dev_max(a, b, c);
+							int min_ = dev_min(a, b, c);
+							int med_ = a + b + c - max_ - min_;
+							pred[3][tx] = med_;
+						}
+					}
+					else {
+						pred[tx][0] = vec.x;
+						pred[tx][1] = vec.y;
+						// memfence
+						if (tx < 2) {
+							// Median predictor
+							// 計算効率が悪いので消したい・・・
+							int a = pred[3][tx];
+							int b = pred[4][tx];
+							int c = pred[5][tx];
+							int max_ = dev_max(a, b, c);
+							int min_ = dev_min(a, b, c);
+							int med_ = a + b + c - max_ - min_;
+							pred[6][tx] = med_;
+						}
 					}
 				}
         // memfence
@@ -900,6 +938,11 @@ __global__ void kl_search(
       // まずは7箇所を計算
       if (bx < 7) {
 				//bool debug = (blkx == 0 && blky == 0 && bx == 0);
+#if 0
+				if (wi == 0 && nBlkY == 134 && blkx == 95 && blky == 1) {
+					printf("1:[%d]: x=%d,y=%d,cost=%d\n", bx, result[bx].xy.x, result[bx].xy.y, result[bx].cost);
+				}
+#endif
 				sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
 
 #if 0
@@ -925,12 +968,20 @@ __global__ void kl_search(
             result[bx].cost += sad;
 					}
 #if 0
-					if (blkx == 27 && blky == 0) {
+					if (nBlkY == 134 && blkx == 95 && blky == 1) {
 						if (false) {
 							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
 								srcY[0], srcY[1], srcY[0 + BLK_SIZE], srcY[1 + BLK_SIZE],
 								pRefY[0][0], pRefY[0][1], pRefY[0][0 + nPitchY], pRefY[0][1 + nPitchY]
 								);
+							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
+								srcU[0], srcU[1], srcU[0 + BLK_SIZE / 2], srcU[1 + BLK_SIZE / 2],
+								pRefU[0][0], pRefU[0][1], pRefU[0][0 + nPitchUV], pRefU[0][1 + nPitchUV]
+							);
+							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
+								srcV[0], srcV[1], srcV[0 + BLK_SIZE / 2], srcV[1 + BLK_SIZE / 2],
+								pRefV[0][0], pRefV[0][1], pRefV[0][0 + nPitchUV], pRefV[0][1 + nPitchUV]
+							);
 						}
 						printf("bx=%d,sad=%d,cost=%d\n", bx, sad, result[bx].cost);
 					}
@@ -944,38 +995,45 @@ __global__ void kl_search(
 
       // 結果集約
       if (tx < 3) { // 7-4=3スレッドで呼ぶ
-        dev_reduce_result<8>(result, tx);
+        dev_reduce_result<7, CPU_EMU>(result, tx);
       }
+#if 0
+			if (tx == 0 && nBlkY == 134 && blkx == 95 && blky == 1) {
+				printf("1best=(%d,%d,%d)\n", result[0].xy.x, result[0].xy.y, result[0].cost);
+			}
+#endif
 
       __syncthreads();
 
-			bool debug = (blkx == 27 && blky == 0);
+			//bool debug = (nBlkY == 134 && blkx == 95 && blky == 1);
+			bool debug = false;
 
       // Refine
       if (SEARCH == 1) {
         // EXHAUSTIVE
         int bmx = result[0].xy.x;
         int bmy = result[0].xy.y;
-				dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL>(debug,
+				dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL, CPU_EMU>(debug,
           tx, wi, bx, bmx, bmy, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
-				dev_expanding_search_2<pixel_t, BLK_SIZE, NPEL>(debug,
+				dev_expanding_search_2<pixel_t, BLK_SIZE, NPEL, CPU_EMU>(debug,
           tx, wi, bx, bmx, bmy, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
       }
       else if (SEARCH == 2) {
         // HEX2SEARCH
-				dev_hex2_search_1<pixel_t, BLK_SIZE, NPEL>(debug,
+				dev_hex2_search_1<pixel_t, BLK_SIZE, NPEL, CPU_EMU>(debug,
           tx, wi, bx, result[0].xy.x, result[0].xy.y, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
-				dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL>(debug,
+				dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL, CPU_EMU>(debug,
           tx, wi, bx, result[0].xy.x, result[0].xy.y, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
       }
+
 
 			if (tx == 0) {
 				// 結果書き込み
@@ -1531,7 +1589,7 @@ __global__ void kl_init_const_vec(short2* vectors, const short2* globalMV, int n
 	}
 }
 
-template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL>
+template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CPU_EMU>
 void launch_search(
 	int nBlkX, int nBlkY, const SearchBlock* searchblocks,
 	short2* vectors, // [x,y]
@@ -1545,7 +1603,7 @@ void launch_search(
 	dim3 threads(128);
 	// 余分なブロックは仕事せずに終了するので問題ない
 	dim3 blocks(std::min(nBlkX, nBlkY));
-	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL> << <blocks, threads, 0, stream >> >(
+	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CPU_EMU> << <blocks, threads, 0, stream >> >(
 		nBlkX, nBlkY, searchblocks, vectors, prog, next, nPad,
 		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
 		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
@@ -1620,11 +1678,10 @@ void KDeintKernel::Search(
 			int nPitchY, int nPitchUV,
 			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
 		{ // TODO: nPel==1に対応する
-			// デバッグ用にSEARCH=1にしてる
-			launch_search<pixel_t, 16, 1, 1>,
-			launch_search<pixel_t, 16, 2, 2>,
-			launch_search<pixel_t, 32, 1, 1>,
-			launch_search<pixel_t, 32, 2, 2>,
+			launch_search<pixel_t, 16, 1, 1, true>,
+			launch_search<pixel_t, 16, 2, 2, true>,
+			launch_search<pixel_t, 32, 1, 1, true>,
+			launch_search<pixel_t, 32, 2, 2, true>,
 		};
 
 		int fidx = ((nBlkSize == 16) ? 0 : 2) + ((nPel == 1) ? 0 : 1);
