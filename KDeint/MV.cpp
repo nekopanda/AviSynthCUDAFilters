@@ -787,19 +787,22 @@ class KMSuper : public GenericVideoFilter
   std::unique_ptr<KMSuperFrame> pSrcGOF;
 
 public:
-  KMSuper(PClip child, int debug, IScriptEnvironment* env)
+  KMSuper(PClip child, int nPel, IScriptEnvironment* env)
     : GenericVideoFilter(child)
     , params(KMVParam::SUPER_FRAME)
   {
     // 今の所対応しているのコレだけ
     int nHPad = 8;
     int nVPad = 8;
-    int nPel = 2;
     int nLevels = 0;
     bool chroma = true;
     int nSharp = 2;
     int nRfilter = 2;
-    
+
+		if (nPel != 1 && nPel != 2) {
+			env->ThrowError("pel must be 1 or 2");
+		}
+
     params.nWidth = vi.width;
     params.nHeight = vi.height;
     params.nActualWidth = 0;
@@ -870,7 +873,7 @@ public:
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    return new KMSuper(args[0].AsClip(), args[1].AsInt(0), env);
+    return new KMSuper(args[0].AsClip(), args[1].AsInt(2), env);
   }
 };
 
@@ -1451,10 +1454,71 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
+#if 0
+			if (debug && vx == -2 && vy == 1) {
+				const pixel_t* pRefY = GetRefBlock(vx, vy);
+				const pixel_t* pRefU = GetRefBlockU(vx, vy);
+				const pixel_t* pRefV = GetRefBlockV(vx, vy);
+
+				int sum = 0;
+#if 0 // blksize==16用
+				for (int i = 0; i < 16; ++i) {
+					int s = pSrc[0][nSrcPitch[0] * i];
+					int r = pRefY[nRefPitch[0] * i];
+					sum += std::abs(s - r);
+					printf("i=%d,sum=%d\n", i, sum);
+				}
+				for (int i = 0; i < 8; i += 2) {
+					int su = pSrc[1][nSrcPitch[1] * i];
+					int ru = pRefU[nRefPitch[1] * i];
+					int sv = pSrc[2][nSrcPitch[2] * i];
+					int rv = pRefV[nRefPitch[2] * i];
+					sum += std::abs(su - ru);
+					sum += std::abs(sv - rv);
+					printf("i=%d,sum=%d\n", i, sum);
+				}
+#else // blksize==32用
+				for (int i = 0; i < 32; ++i) {
+					int s0 = pSrc[0][nSrcPitch[0] * i];
+					int r0 = pRefY[nRefPitch[0] * i];
+					int s1 = pSrc[0][16 + nSrcPitch[0] * i];
+					int r1 = pRefY[16 + nRefPitch[0] * i];
+					sum += std::abs(s0 - r0);
+					sum += std::abs(s1 - r1);
+					printf("i=%d,sum=%d\n", i, sum);
+				}
+				for (int i = 0; i < 16; ++i) {
+					int su = pSrc[1][nSrcPitch[1] * i];
+					int ru = pRefU[nRefPitch[1] * i];
+					int sv = pSrc[2][nSrcPitch[2] * i];
+					int rv = pRefV[nRefPitch[2] * i];
+					sum += std::abs(su - ru);
+					sum += std::abs(sv - rv);
+					printf("i=%d,sum=%d\n", i, sum);
+				}
+#endif
+
+				printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
+					pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
+					pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
+				);
+				printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
+					pSrc[1][0], pSrc[1][1], pSrc[1][0 + nSrcPitch[1]], pSrc[1][1 + nSrcPitch[1]],
+					pRefU[0], pRefU[1], pRefU[0 + nRefPitch[1]], pRefU[1 + nRefPitch[1]]
+				);
+				printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
+					pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
+					pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
+				);
+			}
+#endif
+
 #if 1 // CUDA版と合わせる
-			int sad = LumaSAD(GetRefBlock(vx, vy))
-				+ SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
-				+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+			int sad = LumaSAD(GetRefBlock(vx, vy));
+			if (p.chroma) {
+				sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
+					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+			}
 			cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
 			int saduv = 0;
 #else
@@ -1467,38 +1531,6 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 			cost += saduv + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)saduv) >> 8));
 #endif
       if (cost >= nMinCost) return;
-#if 0
-			if (debug && vx == 1 && vy == 0) {
-				const pixel_t* pRefY = GetRefBlock(vx, vy);
-				const pixel_t* pRefU = GetRefBlockU(vx, vy);
-				const pixel_t* pRefV = GetRefBlockV(vx, vy);
-
-				for (int y = 0; y < 16; ++y) {
-					for (int x = 0; x < 16; ++x) {
-						printf("Y,%d,%d,%d\n", x, y, std::abs(pSrc[0][x + nSrcPitch[0] * y] - pRefY[x + nRefPitch[0] * y]));
-					}
-				}
-				for (int y = 0; y < 8; ++y) {
-					for (int x = 0; x < 8; ++x) {
-						printf("U,%d,%d,%d\n", x, y, std::abs(pSrc[1][x + nSrcPitch[1] * y] - pRefU[x + nRefPitch[1] * y]));
-						printf("V,%d,%d,%d\n", x, y, std::abs(pSrc[2][x + nSrcPitch[2] * y] - pRefV[x + nRefPitch[2] * y]));
-					}
-				}
-
-				printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
-					pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
-					pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
-					);
-				printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
-					pSrc[1][0], pSrc[1][1], pSrc[1][0 + nSrcPitch[1]], pSrc[1][1 + nSrcPitch[1]],
-					pRefU[0], pRefU[1], pRefU[0 + nRefPitch[1]], pRefU[1 + nRefPitch[1]]
-					);
-				printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
-					pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
-					pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
-					);
-			}
-#endif
 
       bestMV.x = vx;
       bestMV.y = vy;
@@ -1519,9 +1551,11 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
 #if 1 // CUDA版と合わせる
-			int sad = LumaSAD(GetRefBlock(vx, vy))
-				+ SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
-				+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+			int sad = LumaSAD(GetRefBlock(vx, vy));
+			if (p.chroma) {
+				sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
+					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+			}
 			cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
 			int saduv = 0;
 #else
@@ -1554,16 +1588,19 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     // Do we bias zero with not taking into account distorsion ?
     bestMV.x = 0;
     bestMV.y = 0;
-    int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(0, 0), nRefPitch[1])
-      + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(0, 0), nRefPitch[2]);
-    int sad = LumaSAD(GetRefBlock(0, 0));
-    sad += saduv;
+		int sad = LumaSAD(GetRefBlock(0, 0));
+		int saduv;
+		if (p.chroma) {
+			saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(0, 0), nRefPitch[1])
+				+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(0, 0), nRefPitch[2]);
+			sad += saduv;
+		}
     bestMV.sad = sad;
 		nMinCost = sad + ((p.penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
 
 		if (debug) {
-#if 0
 			printf("zero: sad=%d, mincost=%d\n", sad, nMinCost);
+#if 0
 			const pixel_t* pRefY = GetRefBlock(0, 0);
 			const pixel_t* pRefU = GetRefBlockU(0, 0);
 			const pixel_t* pRefV = GetRefBlockV(0, 0);
@@ -1572,6 +1609,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 				pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
 				);
 			int sum = 0;
+#if 0 // blksize==16用
 			for (int i = 0; i < 16; ++i) {
 				int s = pSrc[0][nSrcPitch[0] * i];
 				int r = pRefY[nRefPitch[0] * i];
@@ -1587,16 +1625,38 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 				sum += std::abs(sv - rv);
 				printf("i=%d,sum=%d\n", i, sum);
 			}
+#else // blksize==32用
+			for (int i = 0; i < 32; ++i) {
+				int s0 = pSrc[0][nSrcPitch[0] * i];
+				int r0 = pRefY[nRefPitch[0] * i];
+				int s1 = pSrc[0][16 + nSrcPitch[0] * i];
+				int r1 = pRefY[16 + nRefPitch[0] * i];
+				sum += std::abs(s0 - r0);
+				sum += std::abs(s1 - r1);
+				printf("i=%d,sum=%d\n", i, sum);
+			}
+			for (int i = 0; i < 16; ++i) {
+				int su = pSrc[1][nSrcPitch[1] * i];
+				int ru = pRefU[nRefPitch[1] * i];
+				int sv = pSrc[2][nSrcPitch[2] * i];
+				int rv = pRefV[nRefPitch[2] * i];
+				sum += std::abs(su - ru);
+				sum += std::abs(sv - rv);
+				printf("i=%d,sum=%d\n", i, sum);
+			}
+#endif
 #endif
 		}
                                                                     // Global MV predictor  - added by Fizick
     globalMVPredictor = ClipMV(globalMVPredictor);
     //	if ( IsVectorOK(globalMVPredictor.x, globalMVPredictor.y ) )
     {
-      saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[1])
-        + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[2]);
-      sad = LumaSAD(GetRefBlock(globalMVPredictor.x, globalMVPredictor.y));
-      sad += saduv;
+			sad = LumaSAD(GetRefBlock(globalMVPredictor.x, globalMVPredictor.y));
+			if (p.chroma) {
+				saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[1])
+					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[2]);
+				sad += saduv;
+			}
 			int cost = sad + ((p.pglobal*(safe_sad_t)sad) >> 8);
 
       if (cost < nMinCost)
@@ -1611,10 +1671,12 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       //	if (   (( predictor.x != zeroMVfieldShifted.x ) || ( predictor.y != zeroMVfieldShifted.y ))
       //	    && (( predictor.x != globalMVPredictor.x ) || ( predictor.y != globalMVPredictor.y )))
       //	{
-      saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(predictor.x, predictor.y), nRefPitch[1])
-        + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(predictor.x, predictor.y), nRefPitch[2]);
-      sad = LumaSAD(GetRefBlock(predictor.x, predictor.y));
-      sad += saduv;
+			sad = LumaSAD(GetRefBlock(predictor.x, predictor.y));
+			if (p.chroma) {
+				saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(predictor.x, predictor.y), nRefPitch[1])
+					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(predictor.x, predictor.y), nRefPitch[2]);
+				sad += saduv;
+			}
       cost = sad;
 
       if (cost < nMinCost)
@@ -1786,7 +1848,7 @@ public:
         predictors[4] = ClipMV(zeroMV);
 
 				// debug
-				debug = (p.nBlkY == 134 && blkIdx == 334);
+				debug = (p.nBlkY == 10 && blkIdx == 1);
 
         PseudoEPZSearch();
 
@@ -2152,20 +2214,20 @@ public:
 		int nExtendedHeight = pSrcYPlane->GetExtendedHeight();
 
 		const pixel_t* pSrcY = pSrcYPlane->GetAbsolutePelPointer(0, 0);
-		const pixel_t* pSrcU = pSrcUPlane->GetAbsolutePelPointer(0, 0);
-		const pixel_t* pSrcV = pSrcVPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pSrcU = (p.chroma ? pSrcUPlane->GetAbsolutePelPointer(0, 0) : NULL);
+		const pixel_t* pSrcV = (p.chroma ? pSrcVPlane->GetAbsolutePelPointer(0, 0) : NULL);
 		const pixel_t* pRefY = pRefYPlane->GetAbsolutePelPointer(0, 0);
-		const pixel_t* pRefU = pRefUPlane->GetAbsolutePelPointer(0, 0);
-		const pixel_t* pRefV = pRefVPlane->GetAbsolutePelPointer(0, 0);
+		const pixel_t* pRefU = (p.chroma ? pRefUPlane->GetAbsolutePelPointer(0, 0) : NULL);
+		const pixel_t* pRefV = (p.chroma ? pRefVPlane->GetAbsolutePelPointer(0, 0) : NULL);
 
 		int nSrcPitchY = pSrcYPlane->GetPitch();
-		int nSrcPitchUV = pSrcUPlane->GetPitch();
+		int nSrcPitchUV = (p.chroma ? pSrcUPlane->GetPitch() : 0);
 		int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
-		int nImgPitchUV = nSrcPitchUV * pSrcUPlane->GetExtendedHeight();
+		int nImgPitchUV = (p.chroma ? (nSrcPitchUV * pSrcUPlane->GetExtendedHeight()) : 0);
 
-		kernel->Search(p.nBlkX, p.nBlkY, p.nBlkSizeX, 
+		kernel->Search(p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX, 
 			p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
-			p.pglobal, p.penaltyNew, p.nPel,
+			p.pglobal, p.penaltyNew, p.nPel, p.chroma, 
 			pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
 			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV, 
 			nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV, 
@@ -2420,6 +2482,15 @@ public:
     {
       env->ThrowError("KMAnalyse: Clip must be YUV");
     }
+		if (blksizex != blksizey) {
+			env->ThrowError("KMAnalyse: blksizex != blksizey");
+		}
+		if (overlapx != overlapy) {
+			env->ThrowError("KMAnalyse: overlapx != overlapy");
+		}
+		if (blksizex != overlapx * 2) {
+			env->ThrowError("KMAnalyse: blksizex != overlapx * 2");
+		}
 
     params = *KMVParam::GetParam(vi, env);
 
@@ -2429,7 +2500,8 @@ public:
     params.nBlkSizeY = blksizey;
     params.nOverlapX = overlapx;
     params.nOverlapY = overlapy;
-    params.nDeltaFrame = df;
+		params.nDeltaFrame = df;
+		params.chroma = chroma;
 
     const std::vector< std::pair< int, int > > allowed_blksizes = { { 32,32 },{ 16,16 } };
     bool found = false;
@@ -2459,7 +2531,7 @@ public:
     }
     if (vi.IsY())
     {
-      chroma = false;
+			params.chroma = false;
     }
 
     // Partial Super の場合 nActual~ と異なる場合がある
@@ -2649,9 +2721,9 @@ public:
 			workvi.height = nblocks(work_bytes, vi.width * 4);
 			PVideoFrame work = env->NewVideoFrame(workvi);
 
-			if (kernel.IsEnabled()) {
-				printf("!!!\n");
-			}
+			//if (kernel.IsEnabled()) {
+			//	printf("!!!\n");
+			//}
 
 			pAnalyzer->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst, work->GetWritePtr());
 
@@ -2814,7 +2886,10 @@ public:
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    return new KMPartialSuper(args[0].AsClip(), args[1].AsInt(3), env);
+    return new KMPartialSuper(
+			args[0].AsClip(),
+			args[1].AsInt(3), // drop
+			env);
   }
 };
 
@@ -4586,7 +4661,7 @@ public:
 
 void AddFuncMV(IScriptEnvironment* env)
 {
-  env->AddFunction("KMSuper", "c[debug]i", KMSuper::Create, 0);
+  env->AddFunction("KMSuper", "c[pel]i", KMSuper::Create, 0);
 
   env->AddFunction("KMPartialSuper", "c[drop]i", KMPartialSuper::Create, 0);
 

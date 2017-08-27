@@ -52,9 +52,11 @@ protected:
 
 	std::string modulePath;
 	std::string workDirPath;
+
+	void AnalyzeCUDATest(int blksize, bool chroma, int pel);
 };
 
-TEST_F(TestBase, AnalyzeCUDATest)
+void TestBase::AnalyzeCUDATest(int blksize, bool chroma, int pel)
 {
 	try {
 		IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -63,17 +65,23 @@ TEST_F(TestBase, AnalyzeCUDATest)
 		std::string kdeintPath = modulePath + "\\KDeint.dll";
 		env->LoadPlugin(kdeintPath.c_str(), true, &result);
 
-		std::string script = "LWLibavVideoSource(\"test.ts\")\n"
-			"s = KMSuper()\n"
-			"kap = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, blksize = 16, overlap = 8, lambda = 400, global = true, meander = false)\n"
-			"karef = s.KMAnalyse(isb = true, delta = 1, blksize = 16, overlap = 8, lambda = 400, global = true, meander = false, partial = kap)\n"
-			"kacuda = s.OnCPU(0).KMAnalyse(isb = true, delta = 1, blksize = 16, overlap = 8, lambda = 400, global = true, meander = false, partial = kap.OnCPU(0)).OnCUDA(0)\n"
-			"KMAnalyzeCheck2(karef, kacuda, last)";
-
 		std::string scriptpath = workDirPath + "\\script.avs";
 
 		std::ofstream out(scriptpath);
-		out << script;
+
+		out << "LWLibavVideoSource(\"test.ts\")" << std::endl;
+		out << "s = KMSuper(pel = " << pel << ")" << std::endl;
+		out << "kap = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, chroma = " <<
+			(chroma ? "true" : "false") << ", blksize = " << blksize <<
+			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+		out << "karef = s.KMAnalyse(isb = true, delta = 1, chroma = " <<
+			(chroma ? "true" : "false") << ", blksize = " << blksize <<
+			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = kap)" << std::endl;
+		out << "kacuda = s.OnCPU(0).KMAnalyse(isb = true, delta = 1, chroma = " <<
+			(chroma ? "true" : "false") << ", blksize = " << blksize <<
+			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = kap.OnCPU(0)).OnCUDA(0)" << std::endl;
+		out << "KMAnalyzeCheck2(karef, kacuda, last)" << std::endl;
+
 		out.close();
 
 		{
@@ -89,13 +97,53 @@ TEST_F(TestBase, AnalyzeCUDATest)
 	}
 }
 
+TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel2)
+{
+	AnalyzeCUDATest(16, true, 2);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel1)
+{
+	AnalyzeCUDATest(16, true, 1);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel2)
+{
+	AnalyzeCUDATest(16, false, 2);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel1)
+{
+	AnalyzeCUDATest(16, false, 1);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel2)
+{
+	AnalyzeCUDATest(32, true, 2);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel1)
+{
+	AnalyzeCUDATest(32, true, 1);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel2)
+{
+	AnalyzeCUDATest(32, false, 2);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1)
+{
+	AnalyzeCUDATest(32, false, 1);
+}
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*AnalyzeCUDATest";
+	::testing::GTEST_FLAG(filter) = "*AnalyzeCUDA*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
-	getchar();
+	//getchar();
 
 	return result;
 }
