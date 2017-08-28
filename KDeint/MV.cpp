@@ -972,6 +972,7 @@ struct MVPlaneParam {
 	int nBitsPerPixel;
 	bool _mt_flag;         // Allows multithreading
 	int chromaSADscale;   // PF experimental 2.7.18.22 allow e.g. YV24 chroma to have the same magnitude as for YV12
+	int batch;           // CUDA batch size
 
 	SearchType searchType;
 	int nSearchParam;
@@ -994,7 +995,7 @@ struct MVPlaneParam {
 	MVPlaneParam(int _nBlkX, int _nBlkY, int _nBlkSizeX, int _nBlkSizeY, int nPel, int _nLevel,
 		bool smallestPlane, bool chroma,
 		int _nOverlapX, int _nOverlapY, int _xRatioUV, int _yRatioUV,
-		int nPixelSize, int nBitsPerPixel, bool mt_flag, int chromaSADscale,
+		int nPixelSize, int nBitsPerPixel, bool mt_flag, int chromaSADscale, int batch,
 
 		SearchType searchType, int nSearchParam, int PelSearch, int nLambda,
 		int lsad, int penaltyNew, int plevel, bool global,
@@ -1022,6 +1023,7 @@ struct MVPlaneParam {
 		, nBitsPerPixel(nBitsPerPixel) // PF
 		, _mt_flag(mt_flag)
 		, chromaSADscale(chromaSADscale)
+		, batch(batch)
 		, searchType(searchType)
 		, nSearchParam(nSearchParam)
 		, PelSearch(PelSearch)
@@ -1050,6 +1052,11 @@ struct MVPlaneParam {
 	}
 };
 
+enum {
+	MAX_BATCH = 8,
+};
+
+// 必ずバッチ分まとめて処理する（最後とかでフレームがないときはポインタを複製して渡す）
 class PlaneOfBlocksBase {
 public:
 	virtual ~PlaneOfBlocksBase() { }
@@ -1058,9 +1065,9 @@ public:
 	virtual void InitializeGlobalMV(VECTOR* globalMV) = 0;
   virtual void EstimateGlobalMVDoubled(VECTOR* globalMV) = 0;
   virtual void InterpolatePrediction(const PlaneOfBlocksBase* pob) = 0;
-	virtual void SetMVs(const VECTOR *src, VECTOR *out, int nCount) = 0;
-	virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount) = 0;
-	virtual void WriteDefault(VECTOR *out, int nCount) = 0;
+	virtual void SetMVs(const VECTOR **src, VECTOR **out, int nCount) = 0;
+	virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount) = 0;
+	virtual void WriteDefault(VECTOR **out, int nCount) = 0;
 };
 
 template <typename pixel_t>
@@ -2261,7 +2268,7 @@ public:
 		int nPel, bool chroma,
 		int nOverlapX, int nOverlapY, const std::vector<LevelInfo>& linfo, int xRatioUV, int yRatioUV,
     int divideExtra, int nPixelSize, int nBitsPerPixel,
-    bool mt_flag, int chromaSADScale, 
+    bool mt_flag, int chromaSADScale, int batch,
     
     SearchType searchType, int nSearchParam, int nPelSearch, int nLambda,
     int lsad, int pnew, int plevel, bool global,
@@ -2297,7 +2304,7 @@ public:
 
 			MVPlaneParam p(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
 				i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
-				nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale,
+				nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale, batch,
 
 				searchTypeLevel, nSearchParam, nSearchParamLevel, nLambda, lsad, pnew,
 				plevel, global, penaltyZero, pglobal, badSAD, badrange, meander,
@@ -2464,7 +2471,7 @@ public:
     int overlapx, int overlapy, const char* _outfilename, int dctmode,
     int divide, int sadx264, int badSAD, int badrange, bool isse,
     bool meander, bool temporal_flag, bool tryMany, bool multi_flag,
-    bool mt_flag, int _chromaSADScale, IScriptEnvironment* env)
+    bool mt_flag, int _chromaSADScale, int batch, IScriptEnvironment* env)
     : GenericVideoFilter(child)
     , params(KMVParam::MV_FRAME)
 		, pAnalyzer()
@@ -2648,6 +2655,7 @@ public:
       params.nBitsPerPixel,
       false,
       params.chromaSADScale,
+			batch,
 
       searchType,
       nSearchParam,
@@ -2792,6 +2800,7 @@ public:
       false,  // multi
       false,  // mt
       0,   // scaleCSAD
+			args[12].AsInt(1), // batch
       env
     );
   }
@@ -4666,7 +4675,7 @@ void AddFuncMV(IScriptEnvironment* env)
   env->AddFunction("KMPartialSuper", "c[drop]i", KMPartialSuper::Create, 0);
 
   env->AddFunction("KMAnalyse",
-    "c[blksize]i[overlap]i[search]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b[partial]c",
+    "c[blksize]i[overlap]i[search]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b[partial]c[batch]i",
     KMAnalyse::Create, 0);
 
   env->AddFunction("KMDegrain1",
