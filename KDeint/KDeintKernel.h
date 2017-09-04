@@ -5,6 +5,10 @@
 
 #include "CommonFunctions.h"
 
+enum {
+	ANALYZE_MAX_BATCH = 8
+};
+
 class KDeintKernel
 {
 	bool isEnabled;
@@ -57,11 +61,15 @@ public:
 
 	int GetSearchBlockSize();
 
-	void EstimateGlobalMV(const short2* vectors, int nBlkCount, short2* globalMV);
+	template <typename pixel_t>
+	int GetSearchBatchSize();
+
+	void EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV);
 
 	void InterpolatePrediction(
-		const short2* src_vector, const int* src_sad,
-		short2* dst_vector, int* dst_sad,
+		int batch,
+		const short2* src_vector, int srcVectorPitch, const int* src_sad, int srcSadPitch,
+		short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
 		int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
 		int normFactor, int normov, int atotal, int aodd, int aeven);
 
@@ -73,14 +81,14 @@ public:
 
 	template <typename pixel_t>
 	void Search(
-		int searchType,
-		int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+		int batch, void* _searchbatch, 
+		int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
 		int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
 		int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-		const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-		const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+		const pixel_t** pSrcY, const pixel_t** pSrcU, const pixel_t** pSrcV,
+		const pixel_t** pRefY, const pixel_t** pRefU, const pixel_t** pRefV,
 		int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-		const short2* globalMV, short2* vectors, int* sads, void* blocks, int* prog, int* next);
+		const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* blocks, int* prog, int* next);
 
 	// Degrain //
 

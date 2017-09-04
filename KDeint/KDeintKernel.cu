@@ -850,17 +850,36 @@ __device__ void dev_read_pixels(int tx, const pixel_t* src, int nPitch, int offx
   }
 }
 
+template <typename pixel_t>
+struct SearchBatch {
+	const SearchBlock* __restrict__ blocks;
+	short2* vectors; // [x,y]
+	volatile int* prog;
+	int* next;
+	const pixel_t* __restrict__ pSrcY;
+	const pixel_t* __restrict__ pSrcU;
+	const pixel_t* __restrict__ pSrcV;
+	const pixel_t* __restrict__ pRefY;
+	const pixel_t* __restrict__ pRefU;
+	const pixel_t* __restrict__ pRefV;
+};
+
+template <typename pixel_t>
+union SearchBatchData {
+	enum {
+		LEN = sizeof(SearchBatch<pixel_t>) / sizeof(int)
+	};
+	SearchBatch<pixel_t> d;
+	int data[LEN];
+};
+
 // 同期方法 0:同期なし（デバッグ用）, 1:1ずつ同期（高精度）, 2:2ずつ同期（低精度）
 #define ANALYZE_SYNC 1
 
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
 __global__ void kl_search(
-  int nBlkX, int nBlkY, const SearchBlock* __restrict__ blocks,
-  short2* vectors, // [x,y]
-	volatile int* prog, int* next,
-  int nPad,
-  const pixel_t* __restrict__ pSrcY, const pixel_t* __restrict__ pSrcU, const pixel_t* __restrict__ pSrcV,
-  const pixel_t* __restrict__ pRefY, const pixel_t* __restrict__ pRefU, const pixel_t* __restrict__ pRefV,
+	SearchBatchData<pixel_t> *pdata,
+  int nBlkX, int nBlkY, int nPad,
   int nPitchY, int nPitchUV,
   int nImgPitchY, int nImgPitchUV
 )
@@ -876,12 +895,19 @@ __global__ void kl_search(
   const int wi = tx % 16;
   const int bx = tx / 16;
 
+	__shared__ SearchBatchData<pixel_t> d;
+
+	if (tx < SearchBatchData<pixel_t>::LEN) {
+		d.data[tx] = pdata[blockIdx.y].data[tx];
+	}
+	__syncthreads();
+
 	__shared__ int blkx;
 
 	//for (int blkx = blockIdx.x; blkx < nBlkX; blkx += gridDim.x) {
 	while (true) {
 		if (tx == 0) {
-			blkx = atomicAdd(next, 1);
+			blkx = atomicAdd(d.d.next, 1);
 		}
 		__syncthreads();
 
@@ -899,10 +925,10 @@ __global__ void kl_search(
       __shared__ pixel_t srcU[BLK_SIZE_UV * BLK_SIZE_UV];
       __shared__ pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
 
-      dev_read_pixels<pixel_t, BLK_SIZE>(tx, pSrcY, nPitchY, offx, offy, srcY);
+      dev_read_pixels<pixel_t, BLK_SIZE>(tx, d.d.pSrcY, nPitchY, offx, offy, srcY);
 			if (CHROMA) {
-				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, pSrcU, nPitchUV, offx >> 1, offy >> 1, srcU);
-				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, pSrcV, nPitchUV, offx >> 1, offy >> 1, srcV);
+				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, d.d.pSrcU, nPitchUV, offx >> 1, offy >> 1, srcU);
+				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, d.d.pSrcV, nPitchUV, offx >> 1, offy >> 1, srcV);
 			}
 
       __shared__ const pixel_t* pRefBY;
@@ -910,10 +936,10 @@ __global__ void kl_search(
       __shared__ const pixel_t* pRefBV;
 
       if (tx == 0) {
-        pRefBY = &pRefY[offx + offy * nPitchY];
+        pRefBY = &d.d.pRefY[offx + offy * nPitchY];
 				if (CHROMA) {
-					pRefBU = &pRefU[(offx >> 1) + (offy >> 1) * nPitchUV];
-					pRefBV = &pRefV[(offx >> 1) + (offy >> 1) * nPitchUV];
+					pRefBU = &d.d.pRefU[(offx >> 1) + (offy >> 1) * nPitchUV];
+					pRefBV = &d.d.pRefV[(offx >> 1) + (offy >> 1) * nPitchUV];
 				}
       }
 
@@ -923,9 +949,9 @@ __global__ void kl_search(
 
       if (tx < 12) {
         int blkIdx = blky*nBlkX + blkx;
-        data[tx] = blocks[blkIdx].data[tx];
+        data[tx] = d.d.blocks[blkIdx].data[tx];
         if (tx < 5) {
-          dataf[tx] = blocks[blkIdx].dataf[tx];
+          dataf[tx] = d.d.blocks[blkIdx].dataf[tx];
         }
       }
 
@@ -933,12 +959,12 @@ __global__ void kl_search(
 #if ANALYZE_SYNC == 1
 			if (tx == 0 && blkx > 0)
 			{
-				while (prog[blkx - 1] < blky) ;
+				while (d.d.prog[blkx - 1] < blky) ;
 			}
 #elif ANALYZE_SYNC == 2
 			if (tx == 0 && blkx >= 2)
 			{
-				while (prog[blkx - (1 + (blkx & 1))] < blky);
+				while (d.d.prog[blkx - (1 + (blkx & 1))] < blky);
 			}
 #endif
 
@@ -955,7 +981,7 @@ __global__ void kl_search(
 
 				if (tx < 6) {
 					// zero, global, predictor, predictors[1]～[3]を取得
-					short2 vec = vectors[REF_VECTOR_INDEX[tx]];
+					short2 vec = d.d.vectors[REF_VECTOR_INDEX[tx]];
 					dev_clip_mv(vec, CLIP_RECT);
 
 					if (CPU_EMU) {
@@ -1109,13 +1135,13 @@ __global__ void kl_search(
 
 			if (tx == 0) {
 				// 結果書き込み
-        vectors[blky*nBlkX + blkx] = result[0].xy;
+				d.d.vectors[blky*nBlkX + blkx] = result[0].xy;
 
 				// 結果の書き込みが終わるのを待つ
 				__threadfence();
 				
 				// 完了を書き込み
-				prog[blkx] = blky;
+				d.d.prog[blkx] = blky;
 			}
 
       // 共有メモリ保護
@@ -1266,10 +1292,18 @@ __global__ void kl_prepare_search(
 	sad_t nLambdaLevel, sad_t lsad,
   sad_t penaltyZero, sad_t penaltyGlobal, sad_t penaltyNew,
   int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const short2* vectors, const int* sads, short2* vectors_copy, SearchBlock* dst_blocks, int* prog, int* next)
+	const short2* vectors, int vectorsPitch, const int* sads, int sadPitch, short2* vectors_copy, SearchBlock* dst_blocks, int* prog, int* next)
 {
   int bx = threadIdx.x + blockIdx.x * blockDim.x;
   int by = threadIdx.y + blockIdx.y * blockDim.y;
+	int batchid = blockIdx.y;
+
+	vectors += batchid * vectorsPitch;
+	sads += batchid * sadPitch;
+	vectors_copy += batchid * vectorsPitch;
+	dst_blocks += batchid * nBlkX * nBlkY;
+	prog += batchid * nBlkX;
+	next += batchid;
 
   if (bx < nBlkX && by < nBlkY) {
     //
@@ -1368,8 +1402,8 @@ __global__ void kl_prepare_search(
   }
 }
 
-// threads=(1024), blocks=(2)
-__global__ void kl_most_freq_mv(const short2* vectors, int nVec, short2* globalMVec)
+// threads=(1024), blocks=(2,batch)
+__global__ void kl_most_freq_mv(const short2* vectors, int vectorsPitch, int nVec, short2* globalMVec)
 {
   enum {
     DIMX = 1024,
@@ -1394,6 +1428,7 @@ __global__ void kl_most_freq_mv(const short2* vectors, int nVec, short2* globalM
   }
   __syncthreads();
 
+	vectors += blockIdx.y * vectorsPitch;
   if (blockIdx.x == 0) {
     // x
     for (int i = tid; i < nVec; i += DIMX) {
@@ -1423,29 +1458,30 @@ __global__ void kl_most_freq_mv(const short2* vectors, int nVec, short2* globalM
   if (tid == 0) {
     if (blockIdx.x == 0) {
       // x
-      globalMVec->x = index - HALF_SIZE;
+			globalMVec[blockIdx.y].x = index - HALF_SIZE;
     }
     else {
       // y
-      globalMVec->y = index - HALF_SIZE;
+			globalMVec[blockIdx.y].y = index - HALF_SIZE;
     }
   }
 }
 
-__global__ void kl_mean_global_mv(const short2* vectors, int nVec, short2* globalMVec)
+__global__ void kl_mean_global_mv(const short2* vectors, int vectorsPitch, int nVec, short2* globalMVec)
 {
   enum {
     DIMX = 1024,
   };
 
   int tid = threadIdx.x;
-  int medianx = globalMVec->x;
-  int mediany = globalMVec->y;
+  int medianx = globalMVec[blockIdx.y].x;
+  int mediany = globalMVec[blockIdx.y].y;
 
   int meanvx = 0;
   int meanvy = 0;
   int num = 0;
 
+	vectors += blockIdx.y * vectorsPitch;
   for (int i = tid; i < nVec; i += DIMX) {
     if (__sad(vectors[i].x, medianx, 0) < 6
       && __sad(vectors[i].y, mediany, 0) < 6)
@@ -1516,8 +1552,8 @@ __global__ void kl_mean_global_mv(const short2* vectors, int nVec, short2* globa
     num += __shfl_down(num, 1);
 
     if (tid == 0) {
-      globalMVec->x = 2 * meanvx / num;
-      globalMVec->y = 2 * meanvy / num;
+			globalMVec[blockIdx.y].x = 2 * meanvx / num;
+			globalMVec[blockIdx.y].y = 2 * meanvy / num;
     }
   }
 }
@@ -1531,13 +1567,20 @@ __global__ void kl_mean_global_mv(const short2* vectors, int nVec, short2* globa
 // atotalx = (nBlkSizeX - nOverlapX) * 4
 // atotaly = (nBlkSizeY - nOverlapY) * 4
 __global__ void kl_interpolate_prediction(
-  const short2* src_vector, const int* src_sad,
-  short2* dst_vector, int* dst_sad,
+  const short2* src_vector, int srcVectorPitcch, const int* src_sad, int srcSadPitch,
+  short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
   int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
   int normFactor, int normov, int atotal, int aodd, int aeven)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+	int batchid = blockIdx.z;
+
+	// バッチ分進める
+	src_vector += batchid * srcVectorPitcch;
+	dst_vector += batchid * dstVectorPitch;
+	src_sad += batchid * srcSadPitch;
+	dst_sad += batchid * dstSadPitch;
 
   if (x < nDstBlkX && y < nDstBlkY) {
     short2 v1, v2, v3, v4;
@@ -1659,8 +1702,9 @@ __global__ void kl_write_default_mv(VECTOR* dst, int nBlkCount, int verybigSAD)
   }
 }
 
-__global__ void kl_init_const_vec(short2* vectors, const short2* globalMV, short nPel)
+__global__ void kl_init_const_vec(short2* vectors, int vectorsPitch, const short2* globalMV, short nPel)
 {
+	vectors += blockIdx.y * vectorsPitch;
 	if (blockIdx.x == 0) {
 		vectors[-2] = short2();
 	}
@@ -1673,12 +1717,8 @@ __global__ void kl_init_const_vec(short2* vectors, const short2* globalMV, short
 
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
 void launch_search(
-	int nBlkX, int nBlkY, const SearchBlock* searchblocks,
-	short2* vectors, // [x,y]
-	int* prog, int* next,
-	int nPad,
-	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+	SearchBatchData<pixel_t> *pdata,
+	int nBlkX, int nBlkY, int nPad,
 	int nPitchY, int nPitchUV,
 	int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
 {
@@ -1686,8 +1726,7 @@ void launch_search(
 	// 余分なブロックは仕事せずに終了するので問題ない
 	dim3 blocks(std::min(nBlkX, nBlkY));
 	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> >(
-		nBlkX, nBlkY, searchblocks, vectors, prog, next, nPad,
-		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+		pdata, nBlkX, nBlkY, nPad,
 		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
 }
 
@@ -1715,32 +1754,45 @@ int KDeintKernel::GetSearchBlockSize()
 }
 
 template <typename pixel_t>
+int KDeintKernel::GetSearchBatchSize()
+{
+	return sizeof(SearchBatchData<pixel_t>);
+}
+
+template int KDeintKernel::GetSearchBatchSize<uint8_t>();
+template int KDeintKernel::GetSearchBatchSize<uint16_t>();
+
+template <typename pixel_t>
 void KDeintKernel::Search(
-	int searchType, 
-	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+	int batch, void* _searchbatch,
+	int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
 	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
 	int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+	const pixel_t** pSrcY, const pixel_t** pSrcU, const pixel_t** pSrcV,
+	const pixel_t** pRefY, const pixel_t** pRefU, const pixel_t** pRefV,
 	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int* sads, void* _searchblocks, int* prog, int* next)
+	const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next)
 {
+	assert(batch <= ANALYZE_MAX_BATCH);
+
 	SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
+	SearchBatchData<pixel_t>* searchbatch = (SearchBatchData<pixel_t>*)_searchbatch;
+	SearchBatchData<pixel_t> hsearchbatch[ANALYZE_MAX_BATCH];
 
 	{
 		// set zeroMV and globalMV
-		kl_init_const_vec << <2, 1, 0, stream >> >(vectors, globalMV, nPel);
+		kl_init_const_vec << <dim3(2, batch), 1, 0, stream >> >(vectors, vectorsPitch, globalMV, nPel);
 		DebugSync();
 	}
 
 	{ // prepare
 		dim3 threads(32, 8);
-		dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
+		dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y), batch);
 		kl_prepare_search << <blocks, threads, 0, stream >> >(
 			nBlkX, nBlkY, nBlkSize, nLogScale, nLambdaLevel, lsad,
 			penaltyZero, penaltyGlobal, penaltyNew,
 			nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
-			vectors, sads, &vectors[nBlkX*nBlkY], searchblocks, prog, next);
+			vectors, vectorsPitch, sads, sadPitch, &vectors[nBlkX*nBlkY], searchblocks, prog, next);
 		DebugSync();
 
 		//DataDebug<short2> v(vectors - 2, 2, env);
@@ -1756,24 +1808,20 @@ void KDeintKernel::Search(
 		// デバッグ用
 #define CPU_EMU true
 		void(*table[2][8])(
-			int nBlkX, int nBlkY, const SearchBlock* searchblocks,
-			short2* vectors, // [x,y]
-			int* prog, int* next,
-			int nPad,
-			const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-			const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+			SearchBatchData<pixel_t> *pdata,
+			int nBlkX, int nBlkY, int nPad,
 			int nPitchY, int nPitchUV,
 			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
-		{ // TODO: nPel==1に対応する
+		{
 			{ // exhaustive
 				launch_search<pixel_t, 16, 1, 1, true, CPU_EMU>,
 				launch_search<pixel_t, 16, 1, 1, false, CPU_EMU>,
-				NULL, //launch_search<pixel_t, 16, 1, 2, true, CPU_EMU>,
-				NULL, //launch_search<pixel_t, 16, 1, 2, false, CPU_EMU>,
+				NULL,
+				NULL,
 				launch_search<pixel_t, 32, 1, 1, true, CPU_EMU>,
 				launch_search<pixel_t, 32, 1, 1, false, CPU_EMU>,
-				NULL, //launch_search<pixel_t, 32, 1, 2, true, CPU_EMU>,
-				NULL, //launch_search<pixel_t, 32, 1, 2, false, CPU_EMU>,
+				NULL,
+				NULL,
 			},
 			{ // hex
 				launch_search<pixel_t, 16, 2, 1, true, CPU_EMU>,
@@ -1788,12 +1836,28 @@ void KDeintKernel::Search(
 		};
 #undef CPU_EMU
 
+		// パラメータを作る
+		for (int i = 0; i < batch; ++i) {
+			hsearchbatch[i].d.blocks = searchblocks + nBlkX * nBlkY * i;
+			hsearchbatch[i].d.vectors = vectors + vectorsPitch * i;
+			hsearchbatch[i].d.prog = prog + nBlkX * i;
+			hsearchbatch[i].d.next = next + i;
+			hsearchbatch[i].d.pSrcY = pSrcY[i];
+			hsearchbatch[i].d.pSrcU = pSrcU[i];
+			hsearchbatch[i].d.pSrcV = pSrcV[i];
+			hsearchbatch[i].d.pRefY = pRefY[i];
+			hsearchbatch[i].d.pRefU = pRefU[i];
+			hsearchbatch[i].d.pRefV = pRefV[i];
+		}
+
+		// 64KBより小さいのでasync転送になる
+		CUDA_CHECK(cudaMemcpy(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice));
+
 		auto analyzef = table[(searchType == 8) ? 0 : 1][fidx];
 		if (analyzef == NULL) {
 			env->ThrowError("Unsupported search param combination");
 		}
-		analyzef(nBlkX, nBlkY, searchblocks, vectors, prog, next, nPad,
-			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+		analyzef(searchbatch, nBlkX, nBlkY, nPad,
 			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
 		DebugSync();
 
@@ -1821,10 +1885,14 @@ void KDeintKernel::Search(
 			launch_calc_all_sad<pixel_t, 32, 2, false>,
 		};
 
-		table[fidx](nBlkX, nBlkY, vectors, sads, nPad,
-			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
-			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
-		DebugSync();
+		// calc_all_sadは十分な並列性があるのでバッチ分はループで回す
+		for (int i = 0; i < batch; ++i) {
+			table[fidx](nBlkX, nBlkY,
+				vectors + vectorsPitch * i, sads + sadPitch * i, nPad,
+				pSrcY[i], pSrcU[i], pSrcV[i], pRefY[i], pRefU[i], pRefV[i],
+				nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
+			DebugSync();
+		}
 
 		//DataDebug<int> d(sads, nBlkX*nBlkY, env);
 		//d.Show();
@@ -1832,46 +1900,48 @@ void KDeintKernel::Search(
 }
 
 template void KDeintKernel::Search<uint8_t>(
-	int searchType,
-	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+	int batch, void* _searchbatch,
+	int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
 	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
 	int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const uint8_t* pSrcY, const uint8_t* pSrcU, const uint8_t* pSrcV,
-	const uint8_t* pRefY, const uint8_t* pRefU, const uint8_t* pRefV,
+	const uint8_t** pSrcY, const uint8_t** pSrcU, const uint8_t** pSrcV,
+	const uint8_t** pRefY, const uint8_t** pRefU, const uint8_t** pRefV,
 	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int* sads, void* searchblocks, int* prog, int* next);
+	const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next);
 template void KDeintKernel::Search<uint16_t>(
-	int searchType,
-	int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+	int batch, void* _searchbatch,
+	int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
 	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
 	int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const uint16_t* pSrcY, const uint16_t* pSrcU, const uint16_t* pSrcV,
-	const uint16_t* pRefY, const uint16_t* pRefU, const uint16_t* pRefV,
+	const uint16_t** pSrcY, const uint16_t** pSrcU, const uint16_t** pSrcV,
+	const uint16_t** pRefY, const uint16_t** pRefU, const uint16_t** pRefV,
 	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int* sads, void* searchblocks, int* prog, int* next);
+	const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next);
 
-void KDeintKernel::EstimateGlobalMV(const short2* vectors, int nBlkCount, short2* globalMV)
+void KDeintKernel::EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV)
 {
-	kl_most_freq_mv << <2, 1024, 0, stream >> >(vectors, nBlkCount, globalMV);
+	kl_most_freq_mv << <dim3(2, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
 	DebugSync();
 	//DataDebug<short2> v1(globalMV, 1, env);
 	//v1.Show();
-	kl_mean_global_mv << <1, 1024, 0, stream >> >(vectors, nBlkCount, globalMV);
+	kl_mean_global_mv << <dim3(1, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
 	DebugSync();
 	//DataDebug<short2> v2(globalMV, 1, env);
 	//v2.Show();
 }
 
 void KDeintKernel::InterpolatePrediction(
-	const short2* src_vector, const int* src_sad,
-	short2* dst_vector, int* dst_sad,
+	int batch,
+	const short2* src_vector, int srcVectorPitch, const int* src_sad, int srcSadPitch,
+	short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
 	int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
 	int normFactor, int normov, int atotal, int aodd, int aeven)
 {
 	dim3 threads(32, 8);
-	dim3 blocks(nblocks(nDstBlkX, threads.x), nblocks(nDstBlkY, threads.y));
+	dim3 blocks(nblocks(nDstBlkX, threads.x), nblocks(nDstBlkY, threads.y), batch);
 	kl_interpolate_prediction << <blocks, threads, 0, stream >> >(
-		src_vector, src_sad, dst_vector, dst_sad,
+		src_vector, srcVectorPitch, src_sad, srcSadPitch,
+		dst_vector, dstVectorPitch, dst_sad, dstSadPitch,
 		nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
 		normFactor, normov, atotal, aodd, aeven);
 	DebugSync();

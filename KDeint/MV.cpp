@@ -1062,12 +1062,12 @@ public:
 	virtual ~PlaneOfBlocksBase() { }
 	virtual int GetWorkSize() = 0;
 	virtual void SetWorkMemory(uint8_t* work) = 0;
-	virtual void InitializeGlobalMV(VECTOR* globalMV) = 0;
-  virtual void EstimateGlobalMVDoubled(VECTOR* globalMV) = 0;
-  virtual void InterpolatePrediction(const PlaneOfBlocksBase* pob) = 0;
-	virtual void SetMVs(const VECTOR **src, VECTOR **out, int nCount) = 0;
-	virtual void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount) = 0;
-	virtual void WriteDefault(VECTOR **out, int nCount) = 0;
+	virtual void InitializeGlobalMV(int batch, VECTOR* globalMV) = 0;
+  virtual void EstimateGlobalMVDoubled(int batch, VECTOR* globalMV) = 0;
+  virtual void InterpolatePrediction(int batch, const PlaneOfBlocksBase* pob) = 0;
+	virtual void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount) = 0;
+	virtual void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount) = 0;
+	virtual void WriteDefault(VECTOR *out, int nCount) = 0;
 };
 
 template <typename pixel_t>
@@ -1079,10 +1079,9 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   unsigned int (* const SAD)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
   unsigned int (* const SADCHROMA)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
 
-  std::vector <VECTOR>              /* motion vectors of the blocks */
-    vectors;           /* before the search, contains the hierachal predictor */
-                       /* after the search, contains the best motion vector */
+	std::vector<VECTOR> batchVectors[ANALYZE_MAX_BATCH];
 
+	VECTOR* vectors;
   KMPlane<pixel_t> *pSrcYPlane, *pSrcUPlane, *pSrcVPlane;
   KMPlane<pixel_t> *pRefYPlane, *pRefUPlane, *pRefVPlane;
 
@@ -1713,7 +1712,6 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 public:
 	PlaneOfBlocks(MVPlaneParam p, IScriptEnvironment* env)
 		: p(p)
-		, vectors(p.nBlkCount) // TODO: 実際に呼ばれるまで確保しないようにする
 		, SAD(get_sad_function<pixel_t>(p.nBlkSizeX, p.nBlkSizeY, env))
 		, SADCHROMA(get_sad_function<pixel_t>(p.nBlkSizeX / p.xRatioUV, p.nBlkSizeY / p.yRatioUV, env))
 	{ }
@@ -1725,19 +1723,37 @@ public:
 
 	void SetWorkMemory(uint8_t* work) { }
 
-	void InitializeGlobalMV(VECTOR* globalMV)
+	void InitializeGlobalMV(int batch, VECTOR* globalMV)
 	{
-		globalMV->x = globalMV->y = 0;
-		globalMV->sad = -1;
+		for (int b = 0; b < batch; ++b) {
+			globalMV[b].x = globalMV[b].y = 0;
+			globalMV[b].sad = -1;
+		}
 	}
 
-	void SetMVs(const VECTOR *src, VECTOR *out, int nCount)
+	void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount)
   {
 		assert(nCount == p.nBlkCount);
-		for (int i = 0; i < p.nBlkCount; ++i) {
-			out[i] = vectors[i] = src[i];
-    }
+		for (int b = 0; b < batch; ++b) {
+			const VECTOR *psrc = src[b];
+			VECTOR *pout = out[b];
+			std::vector<VECTOR>& dst_vectors = batchVectors[b];
+			dst_vectors.resize(p.nBlkCount);
+
+			for (int i = 0; i < p.nBlkCount; ++i) {
+				pout[i] = dst_vectors[i] = psrc[i];
+			}
+		}
   }
+
+	void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount)
+	{
+		for (int b = 0; b < batch; ++b) {
+			batchVectors[b].resize(p.nBlkCount);
+			vectors = batchVectors[b].data();
+			SearchMVs(pSrcFrame[b], pRefFrame[b], &_globalMV[b], out[b], nCount);
+		}
+	}
 
   /* search the vectors for the whole plane */
 	void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount)
@@ -1881,126 +1897,130 @@ public:
     // -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
   }
 
-  void EstimateGlobalMVDoubled(VECTOR *globalMVec)
+  void EstimateGlobalMVDoubled(int batch, VECTOR *globalMVec)
   {
 		std::vector<int> freq_arr(8192 * p.nPel * 2);
 
-    for (int y = 0; y < 2; ++y)
-    {
-      const int      freqSize = int(freq_arr.size());
-      memset(&freq_arr[0], 0, freqSize * sizeof(freq_arr[0])); // reset
+		for (int b = 0; b < batch; ++b) {
+			std::vector<VECTOR>& src_vectors = batchVectors[b];
 
-      int            indmin = freqSize - 1;
-      int            indmax = 0;
+			for (int y = 0; y < 2; ++y)
+			{
+				const int      freqSize = int(freq_arr.size());
+				memset(&freq_arr[0], 0, freqSize * sizeof(freq_arr[0])); // reset
 
-      // find most frequent x
-      if (y == 0)
-      {
-				for (int i = 0; i < p.nBlkCount; i++)
-        {
-          int ind = (freqSize >> 1) + vectors[i].x;
-          if (ind >= 0 && ind < freqSize)
-          {
-            ++freq_arr[ind];
-            if (ind > indmax)
-            {
-              indmax = ind;
-            }
-            if (ind < indmin)
-            {
-              indmin = ind;
-            }
-          }
-        }
-      }
+				int            indmin = freqSize - 1;
+				int            indmax = 0;
 
-      // find most frequent y
-      else
-      {
-				for (int i = 0; i < p.nBlkCount; i++)
-        {
-          int ind = (freqSize >> 1) + vectors[i].y;
-          if (ind >= 0 && ind < freqSize)
-          {
-            ++freq_arr[ind];
-            if (ind > indmax)
-            {
-              indmax = ind;
-            }
-            if (ind < indmin)
-            {
-              indmin = ind;
-            }
-          }
-        }	// i < nBlkCount
-      }
-
-      int count = freq_arr[indmin];
-      int index = indmin;
-      for (int i = indmin + 1; i <= indmax; i++)
-      {
-        if (freq_arr[i] > count)
-        {
-          count = freq_arr[i];
-          index = i;
-        }
-      }
-
-      // most frequent value
-      int result = index - (freqSize >> 1);
-      if (y == 0) {
-        globalMVec->x = result;
-#if 0
-				if (p.nBlkCount < 1888) {
-					printf("Most frequenct X: %d\n", result);
+				// find most frequent x
+				if (y == 0)
+				{
+					for (int i = 0; i < p.nBlkCount; i++)
+					{
+						int ind = (freqSize >> 1) + src_vectors[i].x;
+						if (ind >= 0 && ind < freqSize)
+						{
+							++freq_arr[ind];
+							if (ind > indmax)
+							{
+								indmax = ind;
+							}
+							if (ind < indmin)
+							{
+								indmin = ind;
+							}
+						}
+					}
 				}
-#endif
-      }
-      else {
-				globalMVec->y = result;
-#if 0
-				if (p.nBlkCount < 1888) {
-					printf("Most frequenct Y: %d\n", result);
+
+				// find most frequent y
+				else
+				{
+					for (int i = 0; i < p.nBlkCount; i++)
+					{
+						int ind = (freqSize >> 1) + src_vectors[i].y;
+						if (ind >= 0 && ind < freqSize)
+						{
+							++freq_arr[ind];
+							if (ind > indmax)
+							{
+								indmax = ind;
+							}
+							if (ind < indmin)
+							{
+								indmin = ind;
+							}
+						}
+					}	// i < nBlkCount
 				}
-#endif
-      }
-    }
 
-    int medianx = globalMVec->x;
-    int mediany = globalMVec->y;
-    int meanvx = 0;
-    int meanvy = 0;
-    int num = 0;
-		for (int i = 0; i < p.nBlkCount; i++)
-    {
-      if (abs(vectors[i].x - medianx) < 6
-        && abs(vectors[i].y - mediany) < 6)
-      {
-        meanvx += vectors[i].x;
-        meanvy += vectors[i].y;
-        num += 1;
-      }
-    }
+				int count = freq_arr[indmin];
+				int index = indmin;
+				for (int i = indmin + 1; i <= indmax; i++)
+				{
+					if (freq_arr[i] > count)
+					{
+						count = freq_arr[i];
+						index = i;
+					}
+				}
 
-    // output vectors must be doubled for next (finer) scale level
-    if (num > 0)
-    {
-      globalMVec->x = 2 * meanvx / num;
-      globalMVec->y = 2 * meanvy / num;
-    }
-    else
-    {
-      globalMVec->x = 2 * medianx;
-      globalMVec->y = 2 * mediany;
-		}
+				// most frequent value
+				int result = index - (freqSize >> 1);
+				if (y == 0) {
+					globalMVec[b].x = result;
 #if 0
-		if (p.nBlkCount < 1888) {
-			printf("mean: (%d, %d)\n", globalMVec->x, globalMVec->y);
-		}
+					if (p.nBlkCount < 1888) {
+						printf("Most frequenct X: %d\n", result);
+					}
 #endif
+				}
+				else {
+					globalMVec[b].y = result;
+#if 0
+					if (p.nBlkCount < 1888) {
+						printf("Most frequenct Y: %d\n", result);
+					}
+#endif
+				}
+			}
+
+			int medianx = globalMVec[b].x;
+			int mediany = globalMVec[b].y;
+			int meanvx = 0;
+			int meanvy = 0;
+			int num = 0;
+			for (int i = 0; i < p.nBlkCount; i++)
+			{
+				if (abs(src_vectors[i].x - medianx) < 6
+					&& abs(src_vectors[i].y - mediany) < 6)
+				{
+					meanvx += src_vectors[i].x;
+					meanvy += src_vectors[i].y;
+					num += 1;
+				}
+			}
+
+			// output vectors must be doubled for next (finer) scale level
+			if (num > 0)
+			{
+				globalMVec[b].x = 2 * meanvx / num;
+				globalMVec[b].y = 2 * meanvy / num;
+			}
+			else
+			{
+				globalMVec[b].x = 2 * medianx;
+				globalMVec[b].y = 2 * mediany;
+			}
+#if 0
+			if (p.nBlkCount < 1888) {
+				printf("mean: (%d, %d)\n", globalMVec[b].x, globalMVec[b].y);
+			}
+#endif
+		}
   }
 
-  void InterpolatePrediction(const PlaneOfBlocksBase* _pob)
+  void InterpolatePrediction(int batch, const PlaneOfBlocksBase* _pob)
   {
     const PlaneOfBlocks<pixel_t>& pob = *static_cast<const PlaneOfBlocks<pixel_t>*>(_pob);
 
@@ -2020,96 +2040,102 @@ public:
 		bool isSafeBlkSizeFor8bits = (p.nBlkSizeX*p.nBlkSizeY) < 1675;
 		bool bSmallOverlap = p.nOverlapX <= (p.nBlkSizeX >> 1) && p.nOverlapY <= (p.nBlkSizeY >> 1);
 
-		for (int l = 0, index = 0; l < p.nBlkY; l++)
-    {
-			for (int k = 0; k < p.nBlkX; k++, index++)
-      {
-        VECTOR v1, v2, v3, v4;
-        int i = k;
-        int j = l;
-				if (i >= 2 * pob.p.nBlkX)
-        {
-					i = 2 * pob.p.nBlkX - 1;
-        }
-				if (j >= 2 * pob.p.nBlkY)
-        {
-					j = 2 * pob.p.nBlkY - 1;
-        }
-        int offy = -1 + 2 * (j % 2);
-        int offx = -1 + 2 * (i % 2);
-        int iper2 = i / 2;
-        int jper2 = j / 2;
+		for (int b = 0; b < batch; ++b) {
+			const std::vector<VECTOR>& src_vectors = pob.batchVectors[b];
+			std::vector<VECTOR>& dst_vectors = batchVectors[b];
+			dst_vectors.resize(p.nBlkCount);
 
-				if ((i == 0) || (i >= 2 * pob.p.nBlkX - 1))
-        {
-					if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
-          {
-						v1 = v2 = v3 = v4 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
-          }
-          else
-          {
-						v1 = v2 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
-						v3 = v4 = pob.vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
-          }
-        }
-        else if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
-        {
-					v1 = v2 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
-					v3 = v4 = pob.vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
-        }
-        else
-        {
-					v1 = pob.vectors[iper2 + (jper2)* pob.p.nBlkX];
-					v2 = pob.vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
-					v3 = pob.vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
-					v4 = pob.vectors[iper2 + offx + (jper2 + offy) * pob.p.nBlkX];
-        }
-        typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
-        safe_sad_t tmp_sad; // 16 bit worst case: 16 * sad_max: 16 * 3x32x32x65536 = 4+5+5+16 > 2^31 over limit
-                            // in case of BlockSize > 32, e.g. 128x128x65536 is even more: 7+7+16=30 bits
+			for (int l = 0, index = 0; l < p.nBlkY; l++)
+			{
+				for (int k = 0; k < p.nBlkX; k++, index++)
+				{
+					VECTOR v1, v2, v3, v4;
+					int i = k;
+					int j = l;
+					if (i >= 2 * pob.p.nBlkX)
+					{
+						i = 2 * pob.p.nBlkX - 1;
+					}
+					if (j >= 2 * pob.p.nBlkY)
+					{
+						j = 2 * pob.p.nBlkY - 1;
+					}
+					int offy = -1 + 2 * (j % 2);
+					int offx = -1 + 2 * (i % 2);
+					int iper2 = i / 2;
+					int jper2 = j / 2;
 
-        if (bNoOverlap)
-        {
-          vectors[index].x = 9 * v1.x + 3 * v2.x + 3 * v3.x + v4.x;
-          vectors[index].y = 9 * v1.y + 3 * v2.y + 3 * v3.y + v4.y;
-          tmp_sad = 9 * (safe_sad_t)v1.sad + 3 * (safe_sad_t)v2.sad + 3 * (safe_sad_t)v3.sad + (safe_sad_t)v4.sad + 8;
+					if ((i == 0) || (i >= 2 * pob.p.nBlkX - 1))
+					{
+						if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
+						{
+							v1 = v2 = v3 = v4 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+						}
+						else
+						{
+							v1 = v2 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+							v3 = v4 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
+						}
+					}
+					else if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
+					{
+						v1 = v2 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+						v3 = v4 = src_vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
+					}
+					else
+					{
+						v1 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+						v2 = src_vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
+						v3 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
+						v4 = src_vectors[iper2 + offx + (jper2 + offy) * pob.p.nBlkX];
+					}
+					typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+					safe_sad_t tmp_sad; // 16 bit worst case: 16 * sad_max: 16 * 3x32x32x65536 = 4+5+5+16 > 2^31 over limit
+															// in case of BlockSize > 32, e.g. 128x128x65536 is even more: 7+7+16=30 bits
 
-        }
-        else if (bSmallOverlap) // corrected in v1.4.11
-        {
-          int	ax1 = (offx > 0) ? aoddx : aevenx;
-					int ax2 = (p.nBlkSizeX - p.nOverlapX) * 4 - ax1;
-          int ay1 = (offy > 0) ? aoddy : aeveny;
-					int ay2 = (p.nBlkSizeY - p.nOverlapY) * 4 - ay1;
-          int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
-          vectors[index].x = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
-          vectors[index].y = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
-          if (isSafeBlkSizeFor8bits && sizeof(pixel_t) == 1) {
-            // old max blkSize==32 worst case: 
-            //   normov = (32-2)*(32-2) 
-            //   sad = 32x32x255 *3 (3 planes) // 705,024,000 < 2^31 OK
-            // blkSize == 48 worst case:
-            //   normov = (48-2)*(48-2) = 2116
-            //   sad = 48x48x255 * 3 // 3,729,576,960 not OK, already fails in 8 bits
-            // max safe: BlkX*BlkY: sqrt(0x7FFFFFF / 3 / 255) = 1675
-            tmp_sad = ((safe_sad_t)a11*v1.sad + (safe_sad_t)a21*v2.sad + (safe_sad_t)a12*v3.sad + (safe_sad_t)a22*v4.sad) / normov;
-          }
-          else {
-            // safe multiplication
-            tmp_sad = ((__int64)a11*v1.sad + (__int64)a21*v2.sad + (__int64)a12*v3.sad + (__int64)a22*v4.sad) / normov;
-          }
-        }
-        else // large overlap. Weights are not quite correct but let it be
-        {
-          vectors[index].x = (v1.x + v2.x + v3.x + v4.x) << 2;
-          vectors[index].y = (v1.y + v2.y + v3.y + v4.y) << 2;
-          tmp_sad = ((safe_sad_t)v1.sad + v2.sad + v3.sad + v4.sad + 2) << 2;
-        }
-        vectors[index].x = (vectors[index].x >> normFactor) << mulFactor;
-        vectors[index].y = (vectors[index].y >> normFactor) << mulFactor;
-        vectors[index].sad = (int)(tmp_sad >> 4);
-      }	// for k < nBlkX
-    }	// for l < nBlkY
+					if (bNoOverlap)
+					{
+						dst_vectors[index].x = 9 * v1.x + 3 * v2.x + 3 * v3.x + v4.x;
+						dst_vectors[index].y = 9 * v1.y + 3 * v2.y + 3 * v3.y + v4.y;
+						tmp_sad = 9 * (safe_sad_t)v1.sad + 3 * (safe_sad_t)v2.sad + 3 * (safe_sad_t)v3.sad + (safe_sad_t)v4.sad + 8;
+
+					}
+					else if (bSmallOverlap) // corrected in v1.4.11
+					{
+						int	ax1 = (offx > 0) ? aoddx : aevenx;
+						int ax2 = (p.nBlkSizeX - p.nOverlapX) * 4 - ax1;
+						int ay1 = (offy > 0) ? aoddy : aeveny;
+						int ay2 = (p.nBlkSizeY - p.nOverlapY) * 4 - ay1;
+						int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
+						dst_vectors[index].x = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
+						dst_vectors[index].y = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
+						if (isSafeBlkSizeFor8bits && sizeof(pixel_t) == 1) {
+							// old max blkSize==32 worst case: 
+							//   normov = (32-2)*(32-2) 
+							//   sad = 32x32x255 *3 (3 planes) // 705,024,000 < 2^31 OK
+							// blkSize == 48 worst case:
+							//   normov = (48-2)*(48-2) = 2116
+							//   sad = 48x48x255 * 3 // 3,729,576,960 not OK, already fails in 8 bits
+							// max safe: BlkX*BlkY: sqrt(0x7FFFFFF / 3 / 255) = 1675
+							tmp_sad = ((safe_sad_t)a11*v1.sad + (safe_sad_t)a21*v2.sad + (safe_sad_t)a12*v3.sad + (safe_sad_t)a22*v4.sad) / normov;
+						}
+						else {
+							// safe multiplication
+							tmp_sad = ((__int64)a11*v1.sad + (__int64)a21*v2.sad + (__int64)a12*v3.sad + (__int64)a22*v4.sad) / normov;
+						}
+					}
+					else // large overlap. Weights are not quite correct but let it be
+					{
+						dst_vectors[index].x = (v1.x + v2.x + v3.x + v4.x) << 2;
+						dst_vectors[index].y = (v1.y + v2.y + v3.y + v4.y) << 2;
+						tmp_sad = ((safe_sad_t)v1.sad + v2.sad + v3.sad + v4.sad + 2) << 2;
+					}
+					dst_vectors[index].x = (dst_vectors[index].x >> normFactor) << mulFactor;
+					dst_vectors[index].y = (dst_vectors[index].y >> normFactor) << mulFactor;
+					dst_vectors[index].sad = (int)(tmp_sad >> 4);
+				}	// for k < nBlkX
+			}	// for l < nBlkY
+		}
   }
 
 	void WriteDefault(VECTOR *out, int nCount)
@@ -2135,8 +2161,17 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
 	int* prog;
 	int* next;
 	void* blocks;
+	void* batchdata;
 
 	enum { N_CONST_VEC = 4 };
+
+	int GetVectorsPitch() const {
+		return N_CONST_VEC + p.nBlkCount * 2;
+	}
+
+	int GetSadsPitch() const {
+		return N_CONST_VEC + p.nBlkCount;
+	}
 
 public:
 	PlaneOfBlocksCUDA(MVPlaneParam p, KDeintKernel* kernel, IScriptEnvironment* env)
@@ -2148,32 +2183,42 @@ public:
 
 	int GetWorkSize()
 	{
-		return (N_CONST_VEC + p.nBlkCount * 2) * sizeof(short2) +
-			(N_CONST_VEC + p.nBlkCount + 1 + p.nBlkX) * sizeof(int) +
-			p.nBlkCount * kernel->GetSearchBlockSize();
+		return GetVectorsPitch() * p.batch * sizeof(short2) +
+			(GetSadsPitch() + 1 + p.nBlkX) * p.batch * sizeof(int) +
+			p.nBlkCount * p.batch * kernel->GetSearchBlockSize() +
+			p.batch * kernel->GetSearchBatchSize<pixel_t>();
 	}
 
 	void SetWorkMemory(uint8_t* work)
 	{
-		vectors = (short2*)work + N_CONST_VEC;
-		sads = (int*)&vectors[p.nBlkCount * 2] + N_CONST_VEC;
-		prog = &sads[p.nBlkCount];
-		next = &prog[p.nBlkX];
-		blocks = (void*)&next[1];
+		vectors = (short2*)work;
+		sads = (int*)&vectors[GetVectorsPitch() * p.batch];
+		prog = &sads[GetSadsPitch() * p.batch];
+		next = &prog[p.nBlkX * p.batch];
+		blocks = (void*)&next[1 * p.batch];
+		batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * kernel->GetSearchBlockSize() * p.batch];
+
+		// オフセットしておく
+		vectors += N_CONST_VEC;
+		sads += N_CONST_VEC;
 	}
 
-	void InitializeGlobalMV(VECTOR* globalMV)
+	void InitializeGlobalMV(int batch, VECTOR* globalMV)
 	{
 		// do nothing
 	}
 
-	void EstimateGlobalMVDoubled(VECTOR* globalMV)
+	void EstimateGlobalMVDoubled(int batch, VECTOR* globalMV)
 	{
-		kernel->EstimateGlobalMV(vectors, p.nBlkCount, (short2*)globalMV);
+		assert(batch <= ANALYZE_MAX_BATCH);
+
+		kernel->EstimateGlobalMV(batch, vectors, GetVectorsPitch(), p.nBlkCount, (short2*)globalMV);
 	}
 
-	void InterpolatePrediction(const PlaneOfBlocksBase* _pob)
+	void InterpolatePrediction(int batch, const PlaneOfBlocksBase* _pob)
 	{
+		assert(batch <= ANALYZE_MAX_BATCH);
+
 		const PlaneOfBlocksCUDA& pob = *static_cast<const PlaneOfBlocksCUDA*>(_pob);
 
 		// normFactor = 3 - nLogPel + pob.nLogPel
@@ -2195,57 +2240,86 @@ public:
 		//int atotaly = (p.nBlkSizeY - p.nOverlapY) * 4;
 
 		kernel->InterpolatePrediction(
-			pob.vectors, pob.sads, vectors, sads,
+			batch,
+			pob.vectors, pob.GetVectorsPitch(), pob.sads, pob.GetSadsPitch(),
+			vectors, GetVectorsPitch(), sads, GetSadsPitch(),
 			pob.p.nBlkX, pob.p.nBlkY, p.nBlkX, p.nBlkY,
 			normFactor, normov, atotalx, aoddx, aevenx);
 	}
 
-	void SetMVs(const VECTOR *src, VECTOR *out, int nCount)
+	void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount)
 	{
+		assert(batch <= ANALYZE_MAX_BATCH);
 		assert(nCount == p.nBlkCount);
-		kernel->MemCpy(out, src, nCount * sizeof(VECTOR));
-		kernel->LoadMV(src, vectors, sads, nCount);
+
+		int vecPitch = GetVectorsPitch();
+		int sadPitch = GetSadsPitch();
+
+		for (int i = 0; i < batch; ++i) {
+			kernel->MemCpy(out[i], src[i], nCount * sizeof(VECTOR));
+			kernel->LoadMV(src[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
+		}
 	}
 
-	void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *globalMV, VECTOR *out, int nCount)
+	void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *globalMV, VECTOR **out, int nCount)
 	{
-		KMPlane<pixel_t> *pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetYPlane());
-		KMPlane<pixel_t> *pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetUPlane());
-		KMPlane<pixel_t> *pSrcVPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetVPlane());
-		KMPlane<pixel_t> *pRefYPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetYPlane());
-		KMPlane<pixel_t> *pRefUPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetUPlane());
-		KMPlane<pixel_t> *pRefVPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetVPlane());
+		assert(batch <= ANALYZE_MAX_BATCH);
+
+		auto GetPointers = [](int batch, bool chroma, KMFrame** frame, const pixel_t** pY, const pixel_t** pU, const pixel_t** pV) {
+			for (int i = 0; i < batch; ++i) {
+				KMPlane<pixel_t> *pYPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetYPlane());
+				pY[i] = pYPlane->GetAbsolutePelPointer(0, 0);
+				if (chroma) {
+					KMPlane<pixel_t> *pUPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetUPlane());
+					KMPlane<pixel_t> *pVPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetVPlane());
+					pU[i] = pUPlane->GetAbsolutePelPointer(0, 0);
+					pV[i] = pVPlane->GetAbsolutePelPointer(0, 0);
+				}
+			}
+		};
+
+		const pixel_t* pSrcY[ANALYZE_MAX_BATCH] = { 0 };
+		const pixel_t* pSrcU[ANALYZE_MAX_BATCH] = { 0 };
+		const pixel_t* pSrcV[ANALYZE_MAX_BATCH] = { 0 };
+		const pixel_t* pRefY[ANALYZE_MAX_BATCH] = { 0 };
+		const pixel_t* pRefU[ANALYZE_MAX_BATCH] = { 0 };
+		const pixel_t* pRefV[ANALYZE_MAX_BATCH] = { 0 };
+
+		GetPointers(batch, p.chroma, pSrcFrame, pSrcY, pSrcU, pSrcV);
+		GetPointers(batch, p.chroma, pRefFrame, pRefY, pRefU, pRefV);
+
+		KMPlane<pixel_t> *pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame[0]->GetYPlane());
+		KMPlane<pixel_t> *pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame[0]->GetUPlane());
 
 		int nBlkSizeX = (p.nBlkSizeX - p.nOverlapX);
 		int nExtendedWidth = pSrcYPlane->GetExtendedWidth();
 		int nExtendedHeight = pSrcYPlane->GetExtendedHeight();
 
-		const pixel_t* pSrcY = pSrcYPlane->GetAbsolutePelPointer(0, 0);
-		const pixel_t* pSrcU = (p.chroma ? pSrcUPlane->GetAbsolutePelPointer(0, 0) : NULL);
-		const pixel_t* pSrcV = (p.chroma ? pSrcVPlane->GetAbsolutePelPointer(0, 0) : NULL);
-		const pixel_t* pRefY = pRefYPlane->GetAbsolutePelPointer(0, 0);
-		const pixel_t* pRefU = (p.chroma ? pRefUPlane->GetAbsolutePelPointer(0, 0) : NULL);
-		const pixel_t* pRefV = (p.chroma ? pRefVPlane->GetAbsolutePelPointer(0, 0) : NULL);
+		int vecPitch = GetVectorsPitch();
+		int sadPitch = GetSadsPitch();
 
 		int nSrcPitchY = pSrcYPlane->GetPitch();
 		int nSrcPitchUV = (p.chroma ? pSrcUPlane->GetPitch() : 0);
 		int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
 		int nImgPitchUV = (p.chroma ? (nSrcPitchUV * pSrcUPlane->GetExtendedHeight()) : 0);
 
-		kernel->Search(p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX, 
+		kernel->Search(batch, batchdata, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
 			p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
 			p.pglobal, p.penaltyNew, p.nPel, p.chroma, 
 			pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
 			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV, 
 			nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV, 
-			(const short2*)globalMV, vectors, sads, blocks, prog, next);
+			(const short2*)globalMV, vectors, GetVectorsPitch(), sads, GetSadsPitch(), blocks, prog, next);
 
-		kernel->StoreMV(out, vectors, sads, nCount);
+		for (int i = 0; i < batch; ++i) {
+			kernel->StoreMV(out[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
+		}
 	}
 
 	void WriteDefault(VECTOR *out, int nCount)
 	{
 		assert(nCount == p.nBlkCount);
+
 		kernel->WriteDefaultMV(out, nCount, p.verybigSAD);
 	}
 };
@@ -2258,6 +2332,7 @@ class GroupOfPlanes
   const int nLevelCount;
   const int nPreAnalyzedCount;
   const bool global;
+	const int maxBatch;
 
 	std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cpuplanes;
 	std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cudaplanes;
@@ -2282,6 +2357,7 @@ public:
 		, nLevelCount(nLevelCount)
     , nPreAnalyzedCount(nPreAnalyzedCount)
     , global(global)
+		, maxBatch(batch)
 		, cpuplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
 		, cudaplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
   {
@@ -2326,7 +2402,7 @@ public:
   }
 
 	int GetWorkSize() const {
-		int size = sizeof(VECTOR); // globalMV
+		int size = sizeof(VECTOR) * maxBatch; // globalMV
 		int nLevelFrom = nLevelCount - 1;
 		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
 		for (int i = nLevelFrom; i >= 0; i--) {
@@ -2335,16 +2411,17 @@ public:
 		return size;
 	}
 
-	void SearchMVs(KMSuperFrame *pSrcGOF, KMSuperFrame *pRefGOF, const VECTOR* pre, VECTOR *out, uint8_t* work)
+	void SearchMVs(int batch, KMSuperFrame **pSrcGOF, KMSuperFrame **pRefGOF, const VECTOR **pre, VECTOR **out, uint8_t* work)
   {
     //out->isValid = true;
 
 		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
 
-		VECTOR* outptr = out;
+		VECTOR* outptr[ANALYZE_MAX_BATCH];
+		std::copy(out, out + batch, outptr);
 
 		VECTOR* globalMV = (VECTOR*)work;
-		uint8_t* planework = (uint8_t*)&globalMV[1];
+		uint8_t* planework = (uint8_t*)&globalMV[maxBatch];
 
     int nLevelFrom = nLevelCount - 1;
 
@@ -2354,18 +2431,22 @@ public:
 			planework += planes[i]->GetWorkSize();
 		}
 
-		planes[0]->InitializeGlobalMV(globalMV);
+		planes[0]->InitializeGlobalMV(batch, globalMV);
 
     // preがあればoutにコピーしてレベルを進めておく
     if (pre) {
-			const VECTOR* preptr = pre;
+			const VECTOR* preptr[ANALYZE_MAX_BATCH];
+			std::copy(pre, pre + batch, preptr);
       nLevelFrom -= nPreAnalyzedCount;
       for (int i = nLevelCount - 1; i > nLevelFrom; i--)
       {
 				int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
-				planes[i]->SetMVs(preptr, outptr, nBlks);
-				preptr += nBlks;
-				outptr += nBlks;
+				planes[i]->SetMVs(batch, preptr, outptr, nBlks);
+
+				for (int b = 0; b < batch; ++b) {
+					preptr[b] += nBlks;
+					outptr[b] += nBlks;
+				}
       }
     }
 
@@ -2377,17 +2458,21 @@ public:
         if (global)
         {
           // get updated global MV (doubled)
-					planes[i + 1]->EstimateGlobalMVDoubled(globalMV);
+					planes[i + 1]->EstimateGlobalMVDoubled(batch, globalMV);
         }
 
-				planes[i]->InterpolatePrediction(planes[i + 1].get());
+				planes[i]->InterpolatePrediction(batch, planes[i + 1].get());
       }
 
       //		DebugPrintf("SearchMV level %i", i);
-			planes[i]->SearchMVs(
-        pSrcGOF->GetFrame(i),
-        pRefGOF->GetFrame(i),
-        globalMV, outptr, nBlks);
+			KMFrame* pSrcFrame[ANALYZE_MAX_BATCH];
+			KMFrame* pRefFrame[ANALYZE_MAX_BATCH];
+			for (int b = 0; b < batch; ++b) {
+				pSrcFrame[b] = pSrcGOF[b]->GetFrame(i);
+				pRefFrame[b] = pRefGOF[b]->GetFrame(i);
+			}
+
+			planes[i]->SearchMVs(batch,  pSrcFrame, pRefFrame, globalMV, outptr, nBlks);
 
 			// デバッグ用
 			//if (i == 1 && kernel->IsEnabled() == false) {
@@ -2396,7 +2481,9 @@ public:
 			//	fclose(fp);
 			//}
 
-			outptr += nBlks;
+			for (int b = 0; b < batch; ++b) {
+				outptr[b] += nBlks;
+			}
     }
   }
 
@@ -2437,7 +2524,12 @@ private:
   KMVParam params;
 	KDeintKernel kernel;
   std::unique_ptr<GroupOfPlanes> pAnalyzer;
-  std::unique_ptr<KMSuperFrame> pSrcSF, pRefSF;
+	std::unique_ptr<KMSuperFrame> pSrcSF[ANALYZE_MAX_BATCH];
+	std::unique_ptr<KMSuperFrame> pRefSF[ANALYZE_MAX_BATCH];
+
+	int maxBatch;
+	int curBatch;
+	PVideoFrame batchFrames[ANALYZE_MAX_BATCH];
 
   PClip partial;
   const KMVParam* partialParams;
@@ -2475,6 +2567,8 @@ public:
     : GenericVideoFilter(child)
     , params(KMVParam::MV_FRAME)
 		, pAnalyzer()
+		, maxBatch(batch)
+		, curBatch(-1)
     , partial(partial)
     , partialParams(partial ? KMVParam::GetParam(partial->GetVideoInfo(), env) : nullptr)
   {
@@ -2634,8 +2728,10 @@ public:
       nSearchParam = (stp < 1) ? 1 : stp;
     }
 
-    pSrcSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
-    pRefSF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
+		for (int i = 0; i < ANALYZE_MAX_BATCH; ++i) {
+			pSrcSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
+			pRefSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
+		}
 
 		pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
@@ -2684,63 +2780,86 @@ public:
 
   PVideoFrame __stdcall	GetFrame(int n, ::IScriptEnvironment* env)
   {
-    const int nsrc = n;
-    const int nbr_src_frames = child->GetVideoInfo().num_frames;
-    const int offset = (params.isBackward) ? params.nDeltaFrame : -params.nDeltaFrame;
-    const int minframe = std::max(-offset, 0);
-    const int maxframe = nbr_src_frames + std::min(-offset, 0);
-    const int nref = nsrc + offset;
+		const int nbr_src_frames = child->GetVideoInfo().num_frames;
+		const int offset = (params.isBackward) ? params.nDeltaFrame : -params.nDeltaFrame;
+		const int minframe = std::max(-offset, 0);
+		const int maxframe = nbr_src_frames + std::min(-offset, 0);
 
-    PVideoFrame dst = env->NewVideoFrame(vi);
-		VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
-		bool isValid = false;
+		if (n < minframe || n >= maxframe)
+		{
+			PVideoFrame dst = env->NewVideoFrame(vi);
+			kernel.SetEnv(dst->IsCUDA(), nullptr, env);
 
-		kernel.SetEnv(dst->IsCUDA(), nullptr, env);
+			VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
 
-    // 0: 2_size_validity+(foreachblock(1_validity+blockCount*3))
-
-    if (nsrc < minframe || nsrc >= maxframe)
-    {
-      // fill all vectors with invalid data
+			// fill all vectors with invalid data
 			pAnalyzer->WriteDefault(pDst);
-    }
-    else
-    {
-      //		DebugPrintf ("MVAnalyse: Get src frame %d",nsrc);
-      ::PVideoFrame	src = child->GetFrame(nsrc, env); // v2.0
-      LoadSourceFrame(pSrcSF.get(), src);
 
-      //		DebugPrintf ("MVAnalyse: Get ref frame %d", nref);
-      //		DebugPrintf ("MVAnalyse frame %i backward=%i", nsrc, srd._analysis_data.isBackward);
-      ::PVideoFrame	ref = child->GetFrame(nref, env); // v2.0
-      LoadSourceFrame(pRefSF.get(), ref);
+			dst->SetProps(GetAnalyzeValidPropName(), false);
 
-      PVideoFrame pre;
-			const VECTOR* pPre = nullptr;
-      if (partialParams) {
-        pre = partial->GetFrame(n, env);
-				pPre = reinterpret_cast<const VECTOR*>(pre->GetReadPtr());
-      }
+			return dst;
+		}
 
-			int work_bytes = pAnalyzer->GetWorkSize();
-			VideoInfo workvi = VideoInfo();
-			workvi.pixel_type = VideoInfo::CS_BGR32;
-			workvi.width = 2048;
-			workvi.height = nblocks(work_bytes, vi.width * 4);
-			PVideoFrame work = env->NewVideoFrame(workvi);
+		int requested = n - minframe;
+		int requestedBatch = requested / maxBatch;
+		if (requestedBatch == curBatch) {
+			// 既に計算済み
+			return batchFrames[requested % maxBatch];
+		}
 
-			//if (kernel.IsEnabled()) {
-			//	printf("!!!\n");
-			//}
+		// 異なるバッチなので再計算
+		int numBatch = std::min(maxframe - minframe - requestedBatch * maxBatch, maxBatch);
 
-			pAnalyzer->SearchMVs(pSrcSF.get(), pRefSF.get(), pPre, pDst, work->GetWritePtr());
+		KMSuperFrame *ppSrcSF[ANALYZE_MAX_BATCH];
+		KMSuperFrame *ppRefSF[ANALYZE_MAX_BATCH];
+		VECTOR *ppOut[ANALYZE_MAX_BATCH];
+		const VECTOR *ppPre[ANALYZE_MAX_BATCH];
+		PVideoFrame preFrames[ANALYZE_MAX_BATCH];
 
-			isValid = true;
-    }
+		for (int b = 0; b < numBatch; ++b) {
+			// フレーム確保
+			batchFrames[b] = env->NewVideoFrame(vi);
+			batchFrames[b]->SetProps(GetAnalyzeValidPropName(), true);
+			ppOut[b] = reinterpret_cast<VECTOR*>(batchFrames[b]->GetWritePtr());
 
-		dst->SetProps(GetAnalyzeValidPropName(), isValid);
+			const int nsrc = requestedBatch * maxBatch + minframe + b;
+			const int nref = nsrc + offset;
 
-    return dst;
+			//		DebugPrintf ("MVAnalyse: Get src frame %d",nsrc);
+			::PVideoFrame	src = child->GetFrame(nsrc, env); // v2.0
+			LoadSourceFrame(pSrcSF[b].get(), src);
+			ppSrcSF[b] = pSrcSF[b].get();
+
+			//		DebugPrintf ("MVAnalyse: Get ref frame %d", nref);
+			//		DebugPrintf ("MVAnalyse frame %i backward=%i", nsrc, srd._analysis_data.isBackward);
+			::PVideoFrame	ref = child->GetFrame(nref, env); // v2.0
+			LoadSourceFrame(pRefSF[b].get(), ref);
+			ppRefSF[b] = pRefSF[b].get();
+
+			if (partialParams) {
+				preFrames[b] = partial->GetFrame(nsrc, env);
+				ppPre[b] = reinterpret_cast<const VECTOR*>(preFrames[b]->GetReadPtr());
+			}
+		}
+
+		kernel.SetEnv(batchFrames[0]->IsCUDA(), nullptr, env);
+
+		PVideoFrame work;
+		int work_bytes = pAnalyzer->GetWorkSize();
+		VideoInfo workvi = VideoInfo();
+		workvi.pixel_type = VideoInfo::CS_BGR32;
+		workvi.width = 2048;
+		workvi.height = nblocks(work_bytes, vi.width * 4);
+		work = env->NewVideoFrame(workvi);
+
+		//if (kernel.IsEnabled()) {
+		//	printf("!!!\n");
+		//}
+
+		pAnalyzer->SearchMVs(numBatch, ppSrcSF, ppRefSF, partialParams ? ppPre : nullptr, ppOut, work->GetWritePtr());
+
+		curBatch = requestedBatch;
+		return batchFrames[requested % maxBatch];
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
@@ -2800,7 +2919,7 @@ public:
       false,  // multi
       false,  // mt
       0,   // scaleCSAD
-			args[12].AsInt(1), // batch
+			args[12].AsInt(4), // batch
       env
     );
   }
