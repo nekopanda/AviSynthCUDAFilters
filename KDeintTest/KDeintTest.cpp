@@ -53,10 +53,10 @@ protected:
 	std::string modulePath;
 	std::string workDirPath;
 
-	void AnalyzeCUDATest(int blksize, bool chroma, int pel);
+	void AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch);
 };
 
-void TestBase::AnalyzeCUDATest(int blksize, bool chroma, int pel)
+void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch)
 {
 	try {
 		IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -76,17 +76,22 @@ void TestBase::AnalyzeCUDATest(int blksize, bool chroma, int pel)
 			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
 		out << "karef = s.KMAnalyse(isb = true, delta = 1, chroma = " <<
 			(chroma ? "true" : "false") << ", blksize = " << blksize <<
-			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = kap)" << std::endl;
-		out << "kacuda = s.OnCPU(0).KMAnalyse(isb = true, delta = 1, chroma = " <<
+			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+		out << "kacuda = s." << (cuda ? "OnCPU(0)." : "") << "KMAnalyse(isb = true, delta = 1, chroma = " <<
 			(chroma ? "true" : "false") << ", blksize = " << blksize <<
-			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = kap.OnCPU(0)).OnCUDA(0)" << std::endl;
+			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, batch = " << batch << ", partial = kap" <<
+      (cuda ? ".OnCPU(0)" : "") << ")" << (cuda ? ".OnCUDA(0)" : "") << std::endl;
 		out << "KMAnalyzeCheck2(karef, kacuda, last)" << std::endl;
 
 		out.close();
 
 		{
 			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-			clip->GetFrame(100, env);
+      // バッチ分は全て確認する
+      //for (int i = 0; i < batch; ++i) {
+      for (int i = 0; i < 1; ++i) {
+        clip->GetFrame(100 + i, env);
+      }
 		}
 
 		env->DeleteScriptEnvironment();
@@ -97,49 +102,74 @@ void TestBase::AnalyzeCUDATest(int blksize, bool chroma, int pel)
 	}
 }
 
+TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch1)
+{
+  AnalyzeCUDATest(true, 32, false, 1, 1);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch2)
+{
+  AnalyzeCUDATest(true, 32, false, 1, 2);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch3)
+{
+  AnalyzeCUDATest(true, 32, false, 1, 3);
+}
+
+TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch8)
+{
+  AnalyzeCUDATest(true, 32, false, 1, 8);
+}
+
 TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel2)
 {
-	AnalyzeCUDATest(16, true, 2);
+	AnalyzeCUDATest(true, 16, true, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel1)
 {
-	AnalyzeCUDATest(16, true, 1);
+	AnalyzeCUDATest(true, 16, true, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel2)
 {
-	AnalyzeCUDATest(16, false, 2);
+	AnalyzeCUDATest(true, 16, false, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel1)
 {
-	AnalyzeCUDATest(16, false, 1);
+	AnalyzeCUDATest(true, 16, false, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel2)
 {
-	AnalyzeCUDATest(32, true, 2);
+	AnalyzeCUDATest(true, 32, true, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel1)
 {
-	AnalyzeCUDATest(32, true, 1);
+	AnalyzeCUDATest(true, 32, true, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel2)
 {
-	AnalyzeCUDATest(32, false, 2);
+	AnalyzeCUDATest(true, 32, false, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1)
 {
-	AnalyzeCUDATest(32, false, 1);
+	AnalyzeCUDATest(true, 32, false, 1, 4);
+}
+
+TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
+{
+  AnalyzeCUDATest(false, 16, true, 2, 4);
 }
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*AnalyzeCUDA*";
+	::testing::GTEST_FLAG(filter) = "*AnalyzeCUDA_Blk16WithCPel2*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

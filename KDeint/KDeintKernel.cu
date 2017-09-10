@@ -898,7 +898,7 @@ __global__ void kl_search(
 	__shared__ SearchBatchData<pixel_t> d;
 
 	if (tx < SearchBatchData<pixel_t>::LEN) {
-		d.data[tx] = pdata[blockIdx.y].data[tx];
+		d.data[tx] = pdata[blockIdx.x].data[tx];
 	}
 	__syncthreads();
 
@@ -1069,8 +1069,8 @@ __global__ void kl_search(
             result[bx].cost += sad;
 					}
 #if 0
-					if (nBlkY == 10 && blkx == 1 && blky == 0) {
-						if (bx == 3) {
+					if (blockIdx.y == 1 && nBlkY == 32 && blkx == 0 && blky == 0) {
+						if (bx == 0) {
 							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
 								srcY[0], srcY[1], srcY[0 + BLK_SIZE], srcY[1 + BLK_SIZE],
 								pRefY[0][0], pRefY[0][1], pRefY[0][0 + nPitchY], pRefY[0][1 + nPitchY]
@@ -1296,7 +1296,7 @@ __global__ void kl_prepare_search(
 {
   int bx = threadIdx.x + blockIdx.x * blockDim.x;
   int by = threadIdx.y + blockIdx.y * blockDim.y;
-	int batchid = blockIdx.y;
+	int batchid = blockIdx.z;
 
 	vectors += batchid * vectorsPitch;
 	sads += batchid * sadPitch;
@@ -1717,6 +1717,7 @@ __global__ void kl_init_const_vec(short2* vectors, int vectorsPitch, const short
 
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
 void launch_search(
+  int batch,
 	SearchBatchData<pixel_t> *pdata,
 	int nBlkX, int nBlkY, int nPad,
 	int nPitchY, int nPitchUV,
@@ -1724,7 +1725,7 @@ void launch_search(
 {
 	dim3 threads(128);
 	// 余分なブロックは仕事せずに終了するので問題ない
-	dim3 blocks(std::min(nBlkX, nBlkY));
+	dim3 blocks(batch, std::min(nBlkX, nBlkY));
 	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> >(
 		pdata, nBlkX, nBlkY, nPad,
 		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
@@ -1808,6 +1809,7 @@ void KDeintKernel::Search(
 		// デバッグ用
 #define CPU_EMU true
 		void(*table[2][8])(
+      int batch,
 			SearchBatchData<pixel_t> *pdata,
 			int nBlkX, int nBlkY, int nPad,
 			int nPitchY, int nPitchUV,
@@ -1857,7 +1859,7 @@ void KDeintKernel::Search(
 		if (analyzef == NULL) {
 			env->ThrowError("Unsupported search param combination");
 		}
-		analyzef(searchbatch, nBlkX, nBlkY, nPad,
+		analyzef(batch, searchbatch, nBlkX, nBlkY, nPad,
 			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
 		DebugSync();
 

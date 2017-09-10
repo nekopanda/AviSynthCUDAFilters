@@ -169,6 +169,7 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="DebugWriter.cpp" />
     <ClCompile Include="KDeint.cpp" />
     <ClCompile Include="MV.cpp" />
   </ItemGroup>
@@ -179,6 +180,7 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="DebugWriter.h" />
     <ClInclude Include="KDeintKernel.h" />
     <ClInclude Include="ReduceKernel.cuh" />
   </ItemGroup>

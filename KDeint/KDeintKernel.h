@@ -35,6 +35,17 @@ public:
 #endif
   }
 
+  void VerifyCUDAPointer(void* ptr)
+  {
+#ifndef NDEBUG
+    cudaPointerAttributes attr;
+    CUDA_CHECK(cudaPointerGetAttributes(&attr, ptr));
+    if (attr.memoryType != cudaMemoryTypeDevice) {
+      env->ThrowError("[CUDA Error] Not valid devicce pointer");
+    }
+#endif
+  }
+
 	void MemCpy(void* dst, const void* src, int nbytes);
 
   template <typename pixel_t>

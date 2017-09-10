@@ -13,6 +13,10 @@
 #include "CommonFunctions.h"
 #include "KDeintKernel.h"
 
+#if 1
+#include "DebugWriter.h"
+#endif
+
 enum MVPlaneSet
 {
   YPLANE = 1,
@@ -1610,10 +1614,18 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 			const pixel_t* pRefY = GetRefBlock(0, 0);
 			const pixel_t* pRefU = GetRefBlockU(0, 0);
 			const pixel_t* pRefV = GetRefBlockV(0, 0);
-			printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
-				pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
-				pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
-				);
+      printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
+        pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
+        pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
+      );
+      printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
+        pSrc[1][0], pSrc[1][1], pSrc[1][0 + nSrcPitch[1]], pSrc[1][1 + nSrcPitch[1]],
+        pRefU[0], pRefU[1], pRefU[0 + nRefPitch[1]], pRefU[1 + nRefPitch[1]]
+      );
+      printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
+        pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
+        pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
+      );
 			int sum = 0;
 #if 0 // blksize==16用
 			for (int i = 0; i < 16; ++i) {
@@ -1631,7 +1643,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 				sum += std::abs(sv - rv);
 				printf("i=%d,sum=%d\n", i, sum);
 			}
-#else // blksize==32用
+#elif 0 // blksize==32用
 			for (int i = 0; i < 32; ++i) {
 				int s0 = pSrc[0][nSrcPitch[0] * i];
 				int r0 = pRefY[nRefPitch[0] * i];
@@ -1651,6 +1663,8 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 				printf("i=%d,sum=%d\n", i, sum);
 			}
 #endif
+      //DebugWriteBitmap("analyze-srcblockY-%d.bmp", (const uint8_t*)pSrc[0], p.nBlkSizeX, p.nBlkSizeY, nSrcPitch[0], 1);
+      //DebugWriteBitmap("analyze-refblockY-%d.bmp", (const uint8_t*)pRefY, p.nBlkSizeX, p.nBlkSizeY, nRefPitch[0], 1);
 #endif
 		}
                                                                     // Global MV predictor  - added by Fizick
@@ -1871,7 +1885,8 @@ public:
         predictors[4] = ClipMV(zeroMV);
 
 				// debug
-				debug = (p.nBlkY == 10 && blkIdx == 1);
+				//debug = (p.nBlkY == 32 && blkIdx == 0);
+        debug = false;
 
         PseudoEPZSearch();
 
@@ -2810,6 +2825,8 @@ public:
 		// 異なるバッチなので再計算
 		int numBatch = std::min(maxframe - minframe - requestedBatch * maxBatch, maxBatch);
 
+    PVideoFrame srcFrames[ANALYZE_MAX_BATCH];
+    PVideoFrame refFrames[ANALYZE_MAX_BATCH];
 		KMSuperFrame *ppSrcSF[ANALYZE_MAX_BATCH];
 		KMSuperFrame *ppRefSF[ANALYZE_MAX_BATCH];
 		VECTOR *ppOut[ANALYZE_MAX_BATCH];
@@ -2826,20 +2843,25 @@ public:
 			const int nref = nsrc + offset;
 
 			//		DebugPrintf ("MVAnalyse: Get src frame %d",nsrc);
-			::PVideoFrame	src = child->GetFrame(nsrc, env); // v2.0
-			LoadSourceFrame(pSrcSF[b].get(), src);
+      srcFrames[b] = child->GetFrame(nsrc, env); // v2.0
+			LoadSourceFrame(pSrcSF[b].get(), srcFrames[b]);
 			ppSrcSF[b] = pSrcSF[b].get();
 
 			//		DebugPrintf ("MVAnalyse: Get ref frame %d", nref);
 			//		DebugPrintf ("MVAnalyse frame %i backward=%i", nsrc, srd._analysis_data.isBackward);
-			::PVideoFrame	ref = child->GetFrame(nref, env); // v2.0
-			LoadSourceFrame(pRefSF[b].get(), ref);
+      refFrames[b] = child->GetFrame(nref, env); // v2.0
+			LoadSourceFrame(pRefSF[b].get(), refFrames[b]);
 			ppRefSF[b] = pRefSF[b].get();
 
 			if (partialParams) {
 				preFrames[b] = partial->GetFrame(nsrc, env);
 				ppPre[b] = reinterpret_cast<const VECTOR*>(preFrames[b]->GetReadPtr());
 			}
+
+#if 0
+      auto supervi = child->GetVideoInfo();
+      DebugWriteBitmap("analyze-src-%d.bmp", src->GetReadPtr(), supervi.width, supervi.height, src->GetPitch(), 1);
+#endif
 		}
 
 		kernel.SetEnv(batchFrames[0]->IsCUDA(), nullptr, env);
@@ -2919,7 +2941,7 @@ public:
       false,  // multi
       false,  // mt
       0,   // scaleCSAD
-			args[12].AsInt(4), // batch
+			args[12].AsInt(1), // batch
       env
     );
   }
@@ -3265,6 +3287,7 @@ public:
 				VECTOR kmv1 = kdata1[v];
 				VECTOR kmv2 = kdata2[v];
         if (kmv1.x != kmv2.x || kmv1.y != kmv2.y || kmv1.sad != kmv2.sad) {
+          //printf("i=%d,v=%d,nBlks=%d(%dx%d)\n", i, v, nBlks, linfo[i].nBlkX, linfo[i].nBlkY);
 					++misCount;
           //env->ThrowError("Motion vector missmatch");
         }
