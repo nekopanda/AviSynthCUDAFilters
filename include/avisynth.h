@@ -1180,7 +1180,7 @@ public:
   AVSMapValue(const char* pdata, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR5)(pdata, size))
   AVSMapValue(const AVSMapValue& other) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR6)(other))
   ~AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_DESTRUCTOR)())
-  AVSMapValue operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
+  AVSMapValue& operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
 
   bool IsInt() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsInt)())
   bool IsIntArray() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsIntArray)())
@@ -1400,9 +1400,9 @@ public:
     int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV, int rel_offsetA) = 0;
 
   // CUDA Support
-  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
-
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst) = 0;
+  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
+  virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
 }; // end class IScriptEnvironment2
 

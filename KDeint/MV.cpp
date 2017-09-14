@@ -445,7 +445,7 @@ public:
 template <typename pixel_t>
 class KMPlane : public KMPlaneBase
 {
-	KDeintKernel* kernel;
+	IKDeintKernel<pixel_t>* kernel;
   std::unique_ptr<pixel_t*[]> pPlane;
   int nPel;
   int nWidth;
@@ -461,8 +461,8 @@ class KMPlane : public KMPlaneBase
 	int nBitsPerPixel;
 public:
 
-	KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, KDeintKernel* kernel)
-		: kernel(kernel)
+	KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, IKDeintCUDA* cuda)
+		: kernel(cuda->get(pixel_t()))
 		, pPlane(new pixel_t*[nPel * nPel])
     , nPel(nPel)
     , nWidth(nWidth)
@@ -624,7 +624,7 @@ public:
 class KMFrame
 {
 	const KMVParam* param;
-	KDeintKernel* kernel;
+	IKDeintCUDA* cuda;
 
   std::unique_ptr<KMPlaneBase> pYPlane;
   std::unique_ptr<KMPlaneBase> pUPlane;
@@ -634,21 +634,21 @@ class KMFrame
   void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad)
   {
     pYPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
-			nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, kernel));
+			nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, cuda));
     if (param->chroma) {
       pUPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, kernel));
+				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, cuda));
       pVPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, kernel));
+				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, cuda));
     }
   }
 
 public:
-	KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, KDeintKernel* kernel)
+	KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, IKDeintCUDA* cuda)
     : param(param)
-		, kernel(kernel)
+		, cuda(cuda)
   {
     if (param->nPixelSize == 1) {
       CreatePlanes<uint8_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad);
@@ -721,21 +721,21 @@ class KMSuperFrame
 {
   const KMVParam* param;
   std::unique_ptr<std::unique_ptr<KMFrame>[]> pFrames;
-	KDeintKernel* kernel;
+	IKDeintCUDA* cuda;
 
 public:
   // xRatioUV PF 160729
-	KMSuperFrame(const KMVParam* param, KDeintKernel* kernel)
+	KMSuperFrame(const KMVParam* param, IKDeintCUDA* cuda)
     : param(param)
     , pFrames(new std::unique_ptr<KMFrame>[param->nLevels])
-		, kernel(kernel)
+		, cuda(cuda)
   {
-		pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param, kernel));
+		pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param, cuda));
     for (int i = 1; i < param->nLevels; i++)
     {
       int nWidthi = PlaneWidthLuma(param->nWidth, i, param->xRatioUV, param->nHPad);
       int nHeighti = PlaneHeightLuma(param->nHeight, i, param->yRatioUV, param->nVPad);
-			pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param, kernel));
+			pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param, cuda));
     }
   }
 
@@ -786,7 +786,7 @@ class KMSuper : public GenericVideoFilter
 {
   KMVParam params;
 
-  KDeintKernel kernel;
+  std::unique_ptr<IKDeintCUDA> cuda;
 
   std::unique_ptr<KMSuperFrame> pSrcGOF;
 
@@ -794,6 +794,7 @@ public:
   KMSuper(PClip child, int nPel, IScriptEnvironment* env)
     : GenericVideoFilter(child)
     , params(KMVParam::SUPER_FRAME)
+    , cuda(CreateKDeintCUDA())
   {
     // 今の所対応しているのコレだけ
     int nHPad = 8;
@@ -846,7 +847,7 @@ public:
 
     KMVParam::SetParam(vi, &params);
 
-    pSrcGOF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
+    pSrcGOF = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
 
     //pSrcGOF->SetInterp(nRfilter, nSharp);
   }
@@ -856,7 +857,7 @@ public:
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame	dst = env->NewVideoFrame(vi);
 
-		kernel.SetEnv(src->IsCUDA(), nullptr, env);
+    cuda->SetEnv(src->IsCUDA(), nullptr, env);
 
     const BYTE* pSrcY = src->GetReadPtr(PLANAR_Y);
     const BYTE* pSrcU = src->GetReadPtr(PLANAR_U);
@@ -2169,7 +2170,7 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
 	typedef uint8_t pixel_t;
 
 	const MVPlaneParam p;
-	KDeintKernel* kernel;
+	IKDeintKernel<pixel_t>* kernel;
 
 	short2* vectors;
 	int* sads;
@@ -2189,9 +2190,9 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
 	}
 
 public:
-	PlaneOfBlocksCUDA(MVPlaneParam p, KDeintKernel* kernel, IScriptEnvironment* env)
+	PlaneOfBlocksCUDA(MVPlaneParam p, IKDeintCUDA* cuda, IScriptEnvironment* env)
 		: p(p)
-		, kernel(kernel)
+		, kernel(cuda->get(pixel_t()))
 	{ }
 
 	~PlaneOfBlocksCUDA() { }
@@ -2201,7 +2202,7 @@ public:
 		return GetVectorsPitch() * p.batch * sizeof(short2) +
 			(GetSadsPitch() + 1 + p.nBlkX) * p.batch * sizeof(int) +
 			p.nBlkCount * p.batch * kernel->GetSearchBlockSize() +
-			p.batch * kernel->GetSearchBatchSize<pixel_t>();
+			p.batch * kernel->GetSearchBatchSize();
 	}
 
 	void SetWorkMemory(uint8_t* work)
@@ -2341,7 +2342,7 @@ public:
 
 class GroupOfPlanes
 {
-	KDeintKernel* kernel;
+	IKDeintCUDA* cuda;
 
 	const std::vector<LevelInfo> linfo;
   const int nLevelCount;
@@ -2365,9 +2366,9 @@ public:
     int penaltyZero, int pglobal, int badSAD,
     int badrange, bool meander, bool tryMany,
 
-		KDeintKernel* kernel,
+    IKDeintCUDA* cuda,
     IScriptEnvironment *env)
-		: kernel(kernel)
+		: cuda(cuda)
 		, linfo(linfo)
 		, nLevelCount(nLevelCount)
     , nPreAnalyzedCount(nPreAnalyzedCount)
@@ -2405,13 +2406,13 @@ public:
 				cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
 					new PlaneOfBlocks<uint8_t>(p, env));
 				cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-					new PlaneOfBlocksCUDA(p, kernel, env));
+					new PlaneOfBlocksCUDA(p, cuda, env));
       }
       else {
 				cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
 					new PlaneOfBlocks<uint16_t>(p, env));
 				cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-					new PlaneOfBlocksCUDA(p, kernel, env));
+					new PlaneOfBlocksCUDA(p, cuda, env));
       }
     }
   }
@@ -2419,7 +2420,7 @@ public:
 	int GetWorkSize() const {
 		int size = sizeof(VECTOR) * maxBatch; // globalMV
 		int nLevelFrom = nLevelCount - 1;
-		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
+		auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
 		for (int i = nLevelFrom; i >= 0; i--) {
 			size += planes[i]->GetWorkSize();
 		}
@@ -2430,7 +2431,7 @@ public:
   {
     //out->isValid = true;
 
-		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
+		auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
 
 		VECTOR* outptr[ANALYZE_MAX_BATCH];
 		std::copy(out, out + batch, outptr);
@@ -2490,7 +2491,7 @@ public:
 			planes[i]->SearchMVs(batch,  pSrcFrame, pRefFrame, globalMV, outptr, nBlks);
 
 			// デバッグ用
-			//if (i == 1 && kernel->IsEnabled() == false) {
+			//if (i == 1 && cuda->IsEnabled() == false) {
 			//	FILE *fp = fopen("vector-1.txt", "w");
 			//	for (int i = 0; i < nBlks; ++i) fprintf(fp, "%d,%d,%d,%d\n", i, outptr[i].x, outptr[i].y, outptr[i].sad);
 			//	fclose(fp);
@@ -2509,7 +2510,7 @@ public:
 		VECTOR* ptr = out;
 
     // write planes
-		auto& planes = kernel->IsEnabled() ? cudaplanes : cpuplanes;
+		auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
     for (int i = nLevelCount - 1; i >= 0; i--)
 		{
 			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
@@ -2537,7 +2538,7 @@ class KMAnalyse : public GenericVideoFilter
 {
 private:
   KMVParam params;
-	KDeintKernel kernel;
+	std::unique_ptr<IKDeintCUDA> cuda;
   std::unique_ptr<GroupOfPlanes> pAnalyzer;
 	std::unique_ptr<KMSuperFrame> pSrcSF[ANALYZE_MAX_BATCH];
 	std::unique_ptr<KMSuperFrame> pRefSF[ANALYZE_MAX_BATCH];
@@ -2581,6 +2582,7 @@ public:
     bool mt_flag, int _chromaSADScale, int batch, IScriptEnvironment* env)
     : GenericVideoFilter(child)
     , params(KMVParam::MV_FRAME)
+    , cuda(CreateKDeintCUDA())
 		, pAnalyzer()
 		, maxBatch(batch)
 		, curBatch(-1)
@@ -2744,8 +2746,8 @@ public:
     }
 
 		for (int i = 0; i < ANALYZE_MAX_BATCH; ++i) {
-			pSrcSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
-			pRefSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, &kernel));
+			pSrcSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
+			pRefSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
 		}
 
 		pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
@@ -2782,7 +2784,7 @@ public:
       meander,
       tryMany,
 
-			&kernel,
+      cuda.get(),
 			env
     ));
 
@@ -2803,7 +2805,7 @@ public:
 		if (n < minframe || n >= maxframe)
 		{
 			PVideoFrame dst = env->NewVideoFrame(vi);
-			kernel.SetEnv(dst->IsCUDA(), nullptr, env);
+			cuda->SetEnv(dst->IsCUDA(), nullptr, env);
 
 			VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
 
@@ -2864,7 +2866,7 @@ public:
 #endif
 		}
 
-		kernel.SetEnv(batchFrames[0]->IsCUDA(), nullptr, env);
+    cuda->SetEnv(batchFrames[0]->IsCUDA(), nullptr, env);
 
 		PVideoFrame work;
 		int work_bytes = pAnalyzer->GetWorkSize();
@@ -2874,7 +2876,7 @@ public:
 		workvi.height = nblocks(work_bytes, vi.width * 4);
 		work = env->NewVideoFrame(workvi);
 
-		//if (kernel.IsEnabled()) {
+		//if (cuda->IsEnabled()) {
 		//	printf("!!!\n");
 		//}
 
@@ -2951,7 +2953,7 @@ class KMPartialSuper : public GenericVideoFilter
 {
   const KMVParam* superParams;
   KMVParam params;
-  KDeintKernel kernel;
+  std::unique_ptr<IKDeintCUDA> cuda;
 
   template <typename pixel_t>
   PVideoFrame Proc(int n, IScriptEnvironment* env)
@@ -2988,9 +2990,10 @@ class KMPartialSuper : public GenericVideoFilter
       true, superParams->nHeight / yRatioUV, nDropLevels, superParams->nPel, nVPad / yRatioUV, nSrcPitchUV, yRatioUV);
 
     if (src->IsCUDA()) {
-      kernel.Copy(pDstY, nDstPitchY, pSrcY + offY, nSrcPitchY, nWidth, nHeight);
-      kernel.Copy(pDstU, nDstPitchUV, pSrcU + offU, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
-      kernel.Copy(pDstV, nDstPitchUV, pSrcV + offV, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
+      auto kernel = cuda->get(pixel_t());
+      kernel->Copy(pDstY, nDstPitchY, pSrcY + offY, nSrcPitchY, nWidth, nHeight);
+      kernel->Copy(pDstU, nDstPitchUV, pSrcU + offU, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
+      kernel->Copy(pDstV, nDstPitchUV, pSrcV + offV, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
     }
     else {
       Copy(pDstY, nDstPitchY, pSrcY + offY, nSrcPitchY, nWidth, nHeight);
@@ -3005,6 +3008,7 @@ public:
     : GenericVideoFilter(child)
     , superParams(KMVParam::GetParam(vi, env))
     , params(*superParams)
+    , cuda(CreateKDeintCUDA())
   {
     params.nWidth = PlaneWidthLuma(superParams->nWidth, nDropLevels, superParams->xRatioUV, superParams->nHPad);
     params.nHeight = PlaneHeightLuma(superParams->nHeight, nDropLevels, superParams->yRatioUV, superParams->nVPad);

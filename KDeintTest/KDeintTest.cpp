@@ -169,7 +169,7 @@ TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*AnalyzeCUDA_Blk16WithCPel2*";
+	::testing::GTEST_FLAG(filter) = "*Analyze*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

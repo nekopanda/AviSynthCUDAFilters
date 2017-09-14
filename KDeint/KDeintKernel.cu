@@ -10,8 +10,10 @@
 
 #include "CommonFunctions.h"
 #include "KDeintKernel.h"
+#include "CudaKernelBase.h"
 
 #include "ReduceKernel.cuh"
+#include "VectorFunctions.cuh"
 
 template <typename T>
 class DataDebug
@@ -34,23 +36,103 @@ public:
 	T* host;
 };
 
+
+/////////////////////////////////////////////////////////////////////////////
+// Elementwise
+/////////////////////////////////////////////////////////////////////////////
+
+template <typename pixel_t, typename F>
+__global__ void kl_elementwise(
+  pixel_t* dst, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    F f;
+    f(dst[x + y * pitch]);
+  }
+}
+
+template <typename pixel_t, typename F>
+void launch_elementwise(
+  pixel_t* dst, int width, int height, int pitch)
+{
+  dim3 threads(32, 16);
+  dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+  kl_elementwise<pixel_t, F> << <blocks, threads >> > (
+    dst, width, height, pitch);
+}
+
+template <typename d_type, typename s_type, typename F>
+__global__ void kl_elementwise(
+  d_type* dst, const s_type* src, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    F f;
+    f(dst[x + y * pitch], src[x + y * pitch]);
+  }
+}
+
+template <typename d_type, typename s_type, typename F>
+void launch_elementwise(
+  d_type* dst, const s_type* src, int width, int height, int pitch)
+{
+  dim3 threads(32, 16);
+  dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+  kl_elementwise<d_type, s_type, F> << <blocks, threads >> > (
+    dst, src, width, height, pitch);
+}
+
+template <typename pixel_t, typename F>
+__global__ void kl_elementwise(
+  pixel_t* dst, const pixel_t* src0, const pixel_t* src1, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    F f;
+    f(dst[x + y * pitch], src0[x + y * pitch], src1[x + y * pitch]);
+  }
+}
+
+template <typename pixel_t, typename F>
+void launch_elementwise(
+  pixel_t* dst, const pixel_t* src0, const pixel_t* src1, int width, int height, int pitch)
+{
+  dim3 threads(32, 16);
+  dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+  kl_elementwise<pixel_t, F> << <blocks, threads >> > (
+    dst, src0, src1, width, height, pitch);
+}
+
+template <typename T>
+struct SetZeroFunction {
+  __device__ void operator()(T& a) {
+    a = VHelper<T>::make(0);
+  }
+};
+
+template <typename T>
+struct CopyFunction {
+  __device__ void operator()(T& a, T b) {
+    a = b;
+  }
+};
+
 /////////////////////////////////////////////////////////////////////////////
 // MEMCPY
 /////////////////////////////////////////////////////////////////////////////
 
 __global__ void memcpy_kernel(uint8_t* dst, const uint8_t* src, int nbytes) {
-	int x = threadIdx.x + blockIdx.x * blockDim.x;
-	if (x < nbytes) {
-		dst[x] = src[x];
-	}
-}
-
-void KDeintKernel::MemCpy(void* dst, const void* src, int nbytes)
-{
-	dim3 threads(256);
-	dim3 blocks(nblocks(nbytes, threads.x));
-	memcpy_kernel << <blocks, threads, 0, stream >> > ((uint8_t*)dst, (uint8_t*)src, nbytes);
-	DebugSync();
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  if (x < nbytes) {
+    dst[x] = src[x];
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -68,27 +150,6 @@ __global__ void kl_copy(
     dst[x + y * dst_pitch] = src[x + y * src_pitch];
   }
 }
-
-template <typename pixel_t>
-void KDeintKernel::Copy(
-  pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height)
-{
-  dim3 threads(32, 16);
-  dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_copy<pixel_t> << <blocks, threads, 0, stream >> > (
-    dst, dst_pitch, src, src_pitch, width, height);
-  DebugSync();
-}
-
-template void KDeintKernel::Copy<uint8_t>(
-  uint8_t* dst, int dst_pitch, const uint8_t* src, int src_pitch, int width, int height);
-template void KDeintKernel::Copy<uint16_t>(
-  uint16_t* dst, int dst_pitch, const uint16_t* src, int src_pitch, int width, int height);
-template void KDeintKernel::Copy<int16_t>(
-  int16_t* dst, int dst_pitch, const int16_t* src, int src_pitch, int width, int height);
-template void KDeintKernel::Copy<int32_t>(
-  int32_t* dst, int dst_pitch, const int32_t* src, int src_pitch, int width, int height);
-
 
 /////////////////////////////////////////////////////////////////////////////
 // PadFrame
@@ -132,38 +193,13 @@ __global__ void kl_pad_frame_v(pixel_t* ptr, int pitch, int vPad, int width, int
   }
 }
 
-template<typename pixel_t>
-void KDeintKernel::PadFrame(pixel_t *ptr, int pitch, int hPad, int vPad, int width, int height)
-{
-  { // H方向
-    dim3 threads(hPad, 32);
-    dim3 blocks(2, nblocks(height, threads.y));
-    kl_pad_frame_h<pixel_t> << <blocks, threads, 0, stream >> > (
-      ptr + vPad * pitch, pitch, hPad, width, height);
-    DebugSync();
-  }
-  { // V方向（すでにPadされたH方向分も含む）
-    dim3 threads(32, vPad);
-    dim3 blocks(nblocks(width + hPad * 2, threads.x), 2);
-    kl_pad_frame_v<pixel_t> << <blocks, threads, 0, stream >> > (
-      ptr, pitch, vPad, width + hPad * 2, height);
-    DebugSync();
-  }
-}
-
-template void KDeintKernel::PadFrame<uint8_t>(
-  uint8_t *ptr, int pitch, int hPad, int vPad, int width, int height);
-template void KDeintKernel::PadFrame<uint16_t>(
-  uint16_t *ptr, int pitch, int hPad, int vPad, int width, int height);
-
-
 /////////////////////////////////////////////////////////////////////////////
 // Wiener
 /////////////////////////////////////////////////////////////////////////////
 
 // so called Wiener interpolation. (sharp, similar to Lanczos ?)
 // invarint simplified, 6 taps. Weights: (1, -5, 20, 20, -5, 1)/32 - added by Fizick
-template<typename pixel_t>
+template <typename pixel_t>
 __global__ void kl_vertical_wiener(pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
   int nSrcPitch, int nWidth, int nHeight, int max_pixel_value)
 {
@@ -191,21 +227,7 @@ __global__ void kl_vertical_wiener(pixel_t *pDst, const pixel_t *pSrc, int nDstP
   }
 }
 
-template<typename pixel_t>
-void KDeintKernel::VerticalWiener(
-  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
-  int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
-{
-  const int max_pixel_value = sizeof(pixel_t) == 1 ? 255 : (1 << bits_per_pixel) - 1;
-
-  dim3 threads(32, 16);
-  dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
-  kl_vertical_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
-    pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
-  DebugSync();
-}
-
-template<typename pixel_t>
+template <typename pixel_t>
 __global__ void kl_horizontal_wiener(pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
   int nSrcPitch, int nWidth, int nHeight, int max_pixel_value)
 {
@@ -233,35 +255,6 @@ __global__ void kl_horizontal_wiener(pixel_t *pDst, const pixel_t *pSrc, int nDs
   }
 }
 
-template<typename pixel_t>
-void KDeintKernel::HorizontalWiener(
-  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
-  int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
-{
-  const int max_pixel_value = sizeof(pixel_t) == 1 ? 255 : (1 << bits_per_pixel) - 1;
-
-  dim3 threads(32, 16);
-  dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
-  kl_horizontal_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
-    pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
-  DebugSync();
-}
-
-
-template void KDeintKernel::VerticalWiener<uint8_t>(
-  uint8_t *pDst, const uint8_t *pSrc, int nDstPitch,
-  int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel);
-template void KDeintKernel::VerticalWiener<uint16_t>(
-  uint16_t *pDst, const uint16_t *pSrc, int nDstPitch,
-  int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel);
-template void KDeintKernel::HorizontalWiener<uint8_t>(
-  uint8_t *pDst, const uint8_t *pSrc, int nDstPitch,
-  int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel);
-template void KDeintKernel::HorizontalWiener<uint16_t>(
-  uint16_t *pDst, const uint16_t *pSrc, int nDstPitch,
-  int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel);
-
-
 /////////////////////////////////////////////////////////////////////////////
 // RB2BilinearFilter
 /////////////////////////////////////////////////////////////////////////////
@@ -274,7 +267,7 @@ enum {
 // BilinearFiltered with 1/8, 3/8, 3/8, 1/8 filter for smoothing and anti-aliasing - Fizick
 // threads=(RB2B_BILINEAR_W,RB2B_BILINEAR_H)
 // nblocks=(nblocks(nWidth*2, RB2B_BILINEAR_W - 2),nblocks(nHeight,RB2B_BILINEAR_H))
-template<typename pixel_t>
+template <typename pixel_t>
 __global__ void kl_RB2B_bilinear_filtered(
   pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight)
 {
@@ -326,24 +319,6 @@ __global__ void kl_RB2B_bilinear_filtered(
     }
   }
 }
-
-template<typename pixel_t>
-void KDeintKernel::RB2BilinearFiltered(
-  pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight)
-{
-  dim3 threads(RB2B_BILINEAR_W, RB2B_BILINEAR_H);
-  dim3 blocks(nblocks(nWidth*2, RB2B_BILINEAR_W - 2), nblocks(nHeight, RB2B_BILINEAR_H));
-  kl_RB2B_bilinear_filtered<pixel_t> << <blocks, threads, 0, stream >> > (
-    pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight);
-  DebugSync();
-}
-
-template void KDeintKernel::RB2BilinearFiltered<uint8_t>(
-  uint8_t *pDst, const uint8_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight);
-template void KDeintKernel::RB2BilinearFiltered<uint16_t>(
-  uint16_t *pDst, const uint16_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight);
-
-
 
 /////////////////////////////////////////////////////////////////////////////
 // SearchMV
@@ -412,24 +387,24 @@ __device__ int dev_sq_norm(int ax, int ay, int bx, int by) {
 template <typename pixel_t, int NPEL>
 __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int nImgPitch, int vx, int vy)
 {
-	if (NPEL == 1) {
-		return &pRef[vx + vy * nPitch];
-	}
-	else if (NPEL == 2) {
-		int sx = vx & 1;
-		int sy = vy & 1;
-		int si = sx + sy * 2;
-		int x = vx >> 1;
-		int y = vy >> 1;
-		return &pRef[x + y * nPitch + si * nImgPitch];
-	}
-	else { // NPEL == 4
-		int sx = vx & 3;
-		int sy = vy & 3;
-		int si = sx + sy * 4;
-		int x = vx >> 2;
-		int y = vy >> 2;
-		return &pRef[x + y * nPitch + si * nImgPitch];
+  if (NPEL == 1) {
+    return &pRef[vx + vy * nPitch];
+  }
+  else if (NPEL == 2) {
+    int sx = vx & 1;
+    int sy = vy & 1;
+    int si = sx + sy * 2;
+    int x = vx >> 1;
+    int y = vy >> 1;
+    return &pRef[x + y * nPitch + si * nImgPitch];
+  }
+  else { // NPEL == 4
+    int sx = vx & 3;
+    int sy = vy & 3;
+    int si = sx + sy * 4;
+    int x = vx >> 2;
+    int y = vy >> 2;
+    return &pRef[x + y * nPitch + si * nImgPitch];
   }
 }
 
@@ -440,9 +415,9 @@ __device__ sad_t dev_calc_sad(
   const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
   int nPitchY, int nPitchU, int nPitchV)
 {
-	enum {
-		BLK_SIZE_UV = BLK_SIZE / 2,
-	};
+  enum {
+    BLK_SIZE_UV = BLK_SIZE / 2,
+  };
   int sad = 0;
   if (BLK_SIZE == 16) {
     // ブロックサイズがスレッド数と一致
@@ -450,15 +425,15 @@ __device__ sad_t dev_calc_sad(
     for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
       sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
     }
-		if (CHROMA) {
-			// UVは8x8
-			int uvx = wi % 8;
-			int uvy = wi / 8;
-			for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
-				sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-				sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-			}
-		}
+    if (CHROMA) {
+      // UVは8x8
+      int uvx = wi % 8;
+      int uvy = wi / 8;
+      for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
+        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+      }
+    }
   }
   else if (BLK_SIZE == 32) {
     // 32x32
@@ -467,81 +442,81 @@ __device__ sad_t dev_calc_sad(
       sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
       sad = __sad(pSrcY[yx + 16 + yy * BLK_SIZE], pRefY[yx + 16 + yy * nPitchY], sad);
     }
-		if (CHROMA) {
-			// ブロックサイズがスレッド数と一致
-			int uvx = wi;
-			for (int uvy = 0; uvy < BLK_SIZE_UV; ++uvy) { // 16回ループ
-				sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-				sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-			}
-		}
+    if (CHROMA) {
+      // ブロックサイズがスレッド数と一致
+      int uvx = wi;
+      for (int uvy = 0; uvy < BLK_SIZE_UV; ++uvy) { // 16回ループ
+        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+      }
+    }
   }
-	dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
-	return sad;
+  dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
+  return sad;
 }
 
 #if 0
 template <typename pixel_t, int BLK_SIZE, bool CHROMA>
 __device__ sad_t dev_calc_sad_debug(
-	bool debug,
-	int wi,
-	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
-	int nPitchY, int nPitchU, int nPitchV)
+  bool debug,
+  int wi,
+  const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+  const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+  int nPitchY, int nPitchU, int nPitchV)
 {
-	enum {
-		BLK_SIZE_UV = BLK_SIZE / 2,
-	};
-	int sad = 0;
-	if (BLK_SIZE == 16) {
-		// ブロックサイズがスレッド数と一致
-		int yx = wi;
-		for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
-			sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-		}
-		if (CHROMA) {
-			// UVは8x8
-			int uvx = wi % 8;
-			int uvy = wi / 8;
-			for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
-				sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-				sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-			}
-		}
-	}
-	else if (BLK_SIZE == 32) {
-		// 32x32
-		int yx = wi;
-		for (int yy = 0; yy < BLK_SIZE; ++yy) { // 32回ループ
-			sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-			sad = __sad(pSrcY[yx + 16 + yy * BLK_SIZE], pRefY[yx + 16 + yy * nPitchY], sad);
-			if (debug && wi == 0) {
-				printf("i=%d,sum=%d\n", yy, sad);
-			}
-		}
-		if (CHROMA) {
-			// ブロックサイズがスレッド数と一致
-			int uvx = wi;
-			for (int uvy = 0; uvy < BLK_SIZE_UV; ++uvy) { // 16回ループ
-				sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-				sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-				if (debug && wi == 0) {
-					printf("i=%d,sum=%d\n", uvy, sad);
-				}
-			}
-		}
-	}
-	dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
-	return sad;
+  enum {
+    BLK_SIZE_UV = BLK_SIZE / 2,
+  };
+  int sad = 0;
+  if (BLK_SIZE == 16) {
+    // ブロックサイズがスレッド数と一致
+    int yx = wi;
+    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
+      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+    }
+    if (CHROMA) {
+      // UVは8x8
+      int uvx = wi % 8;
+      int uvy = wi / 8;
+      for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
+        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+      }
+    }
+  }
+  else if (BLK_SIZE == 32) {
+    // 32x32
+    int yx = wi;
+    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 32回ループ
+      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+      sad = __sad(pSrcY[yx + 16 + yy * BLK_SIZE], pRefY[yx + 16 + yy * nPitchY], sad);
+      if (debug && wi == 0) {
+        printf("i=%d,sum=%d\n", yy, sad);
+      }
+    }
+    if (CHROMA) {
+      // ブロックサイズがスレッド数と一致
+      int uvx = wi;
+      for (int uvy = 0; uvy < BLK_SIZE_UV; ++uvy) { // 16回ループ
+        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+        if (debug && wi == 0) {
+          printf("i=%d,sum=%d\n", uvy, sad);
+        }
+      }
+    }
+  }
+  dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
+  return sad;
 }
 #endif
 
 __device__ void MinCost(CostResult& a, CostResult& b) {
-	if (*(volatile sad_t*)&a.cost > *(volatile sad_t*)&b.cost) {
-		*(volatile sad_t*)&a.cost = *(volatile sad_t*)&b.cost;
-		*(volatile short*)&a.xy.x = *(volatile short*)&b.xy.x;
-		*(volatile short*)&a.xy.y = *(volatile short*)&b.xy.y;
-	}
+  if (*(volatile sad_t*)&a.cost > *(volatile sad_t*)&b.cost) {
+    *(volatile sad_t*)&a.cost = *(volatile sad_t*)&b.cost;
+    *(volatile short*)&a.xy.x = *(volatile short*)&b.xy.x;
+    *(volatile short*)&a.xy.y = *(volatile short*)&b.xy.y;
+  }
 }
 
 // MAX - (MAX/4) <= (結果の個数) <= MAX であること
@@ -549,20 +524,20 @@ __device__ void MinCost(CostResult& a, CostResult& b) {
 template <int LEN, bool CPU_EMU>
 __device__ void dev_reduce_result(CostResult* tmp, int tid)
 {
-	if (CPU_EMU) {
-		// 順番をCPU版に合わせる
-		if (tid == 0) {
-			for (int i = 1; i < LEN; ++i) {
-				MinCost(tmp[0], tmp[i]);
-			}
-		}
-	}
-	else {
-		if (LEN > 8) MinCost(tmp[tid], tmp[tid + 8]);
-		MinCost(tmp[tid], tmp[tid + 4]);
-		MinCost(tmp[tid], tmp[tid + 2]);
-		MinCost(tmp[tid], tmp[tid + 1]);
-	}
+  if (CPU_EMU) {
+    // 順番をCPU版に合わせる
+    if (tid == 0) {
+      for (int i = 1; i < LEN; ++i) {
+        MinCost(tmp[0], tmp[i]);
+      }
+    }
+  }
+  else {
+    if (LEN > 8) MinCost(tmp[tid], tmp[tid + 8]);
+    MinCost(tmp[tid], tmp[tid + 4]);
+    MinCost(tmp[tid], tmp[tid + 2]);
+    MinCost(tmp[tid], tmp[tid + 1]);
+  }
 }
 
 // 順番はCPU版に合わせる
@@ -581,7 +556,7 @@ __constant__ int2 c_expanding_search_1_area[] = {
 // __syncthreads()を呼び出しているので全員で呼ぶ
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA, bool CPU_EMU>
 __device__ void dev_expanding_search_1(
-	int debug,
+  int debug,
   int tx, int wi, int bx, int cx, int cy,
   const int* data, const sad_t* dataf,
   CostResult& bestResult,
@@ -597,8 +572,8 @@ __device__ void dev_expanding_search_1(
   __shared__ const pixel_t* pRefV[8];
 
   if (tx < 8) {
-		int x = result[tx].xy.x = cx + c_expanding_search_1_area[tx].x;
-		int y = result[tx].xy.y = cy + c_expanding_search_1_area[tx].y;
+    int x = result[tx].xy.x = cx + c_expanding_search_1_area[tx].x;
+    int y = result[tx].xy.y = cy + c_expanding_search_1_area[tx].y;
     bool ok = dev_check_mv(x, y, CLIP_RECT);
     int cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
@@ -607,19 +582,19 @@ __device__ void dev_expanding_search_1(
       ok = false;
     }
 #if 0
-		if (debug) {
-			if(wi == 0) printf("expand1 cx=%d,cy=%d\n", cx, cy);
-			printf("expand1 bx=%d,cost=%d,ok=%d\n", tx, cost, ok);
-		}
+    if (debug) {
+      if (wi == 0) printf("expand1 cx=%d,cy=%d\n", cx, cy);
+      printf("expand1 bx=%d,cost=%d,ok=%d\n", tx, cost, ok);
+    }
 #endif
     isVectorOK[tx] = ok;
     result[tx].cost = ok ? cost : LARGE_COST;
 
     pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
-		if (CHROMA) {
+    if (CHROMA) {
 			pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
 			pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
-		}
+    }
   }
 
   __syncthreads();
@@ -627,26 +602,26 @@ __device__ void dev_expanding_search_1(
   if (isVectorOK[bx]) {
     sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV);
     if (wi == 0) {
-			result[bx].cost += sad + ((sad * PENALTY_NEW) >> 8);
+      result[bx].cost += sad + ((sad * PENALTY_NEW) >> 8);
 #if 0
-			if (debug) {
-				printf("expand1 bx=%d,sad=%d,cost=%d\n", bx, sad, result[bx].cost);
-				if (bx == 3) {
-				//if(false) {
-					printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
-						pSrcY[0], pSrcY[1], pSrcY[0 + BLK_SIZE], pSrcY[1 + BLK_SIZE],
-						pRefY[bx][0], pRefY[bx][1], pRefY[bx][0 + nPitchY], pRefY[bx][1 + nPitchY]
-						);
-					printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
-						pSrcU[0], pSrcU[1], pSrcU[0 + BLK_SIZE / 2], pSrcU[1 + BLK_SIZE / 2],
-						pRefU[bx][0], pRefU[0][1], pRefU[bx][0 + nPitchU], pRefU[bx][1 + nPitchU]
-						);
-					printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
-						pSrcV[0], pSrcV[1], pSrcV[0 + BLK_SIZE / 2], pSrcV[1 + BLK_SIZE / 2],
-						pRefV[bx][0], pRefV[bx][1], pRefV[bx][0 + nPitchV], pRefV[bx][1 + nPitchV]
-						);
-				}
-			}
+      if (debug) {
+        printf("expand1 bx=%d,sad=%d,cost=%d\n", bx, sad, result[bx].cost);
+        if (bx == 3) {
+          //if(false) {
+          printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
+            pSrcY[0], pSrcY[1], pSrcY[0 + BLK_SIZE], pSrcY[1 + BLK_SIZE],
+            pRefY[bx][0], pRefY[bx][1], pRefY[bx][0 + nPitchY], pRefY[bx][1 + nPitchY]
+          );
+          printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
+            pSrcU[0], pSrcU[1], pSrcU[0 + BLK_SIZE / 2], pSrcU[1 + BLK_SIZE / 2],
+            pRefU[bx][0], pRefU[0][1], pRefU[bx][0 + nPitchU], pRefU[bx][1 + nPitchU]
+          );
+          printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
+            pSrcV[0], pSrcV[1], pSrcV[0 + BLK_SIZE / 2], pSrcV[1 + BLK_SIZE / 2],
+            pRefV[bx][0], pRefV[bx][1], pRefV[bx][0 + nPitchV], pRefV[bx][1 + nPitchV]
+          );
+        }
+      }
 #endif
     }
   }
@@ -691,7 +666,7 @@ __constant__ int2 c_expanding_search_2_area[] = {
 // __syncthreads()を呼び出しているので全員で呼ぶ
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA, bool CPU_EMU>
 __device__ void dev_expanding_search_2(
-	int debug,
+  int debug,
   int tx, int wi, int bx, int cx, int cy,
   const int* data, const sad_t* dataf,
   CostResult& bestResult,
@@ -707,8 +682,8 @@ __device__ void dev_expanding_search_2(
   __shared__ const pixel_t* pRefV[16];
 
   if (tx < 16) {
-		int x = result[tx].xy.x = cx + c_expanding_search_2_area[tx].x;
-		int y = result[tx].xy.y = cy + c_expanding_search_2_area[tx].y;
+    int x = result[tx].xy.x = cx + c_expanding_search_2_area[tx].x;
+    int y = result[tx].xy.y = cy + c_expanding_search_2_area[tx].y;
     bool ok = dev_check_mv(x, y, CLIP_RECT);
     int cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
@@ -721,10 +696,10 @@ __device__ void dev_expanding_search_2(
     result[tx].cost = ok ? cost : LARGE_COST;
 
     pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
-		if (CHROMA) {
+    if (CHROMA) {
 			pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
 			pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
-		}
+    }
   }
 
   __syncthreads();
@@ -764,7 +739,7 @@ __constant__ int2 c_hex2_search_1_area[] = {
 // __syncthreads()を呼び出しているので全員で呼ぶ
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA, bool CPU_EMU>
 __device__ void dev_hex2_search_1(
-	int debug,
+  int debug,
   int tx, int wi, int bx, int cx, int cy,
   const int* data, const sad_t* dataf,
   CostResult& bestResult,
@@ -779,13 +754,13 @@ __device__ void dev_hex2_search_1(
   __shared__ const pixel_t* pRefU[8];
   __shared__ const pixel_t* pRefV[8];
 
-	if (tx < 8) {
-		isVectorOK[tx] = false;
-	}
+  if (tx < 8) {
+    isVectorOK[tx] = false;
+  }
 
   if (tx < 6) {
-		int x = result[tx].xy.x = cx + c_hex2_search_1_area[tx].x;
-		int y = result[tx].xy.y = cy + c_hex2_search_1_area[tx].y;
+    int x = result[tx].xy.x = cx + c_hex2_search_1_area[tx].x;
+    int y = result[tx].xy.y = cy + c_hex2_search_1_area[tx].y;
     bool ok = dev_check_mv(x, y, CLIP_RECT);
     int cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
@@ -798,10 +773,10 @@ __device__ void dev_hex2_search_1(
     result[tx].cost = ok ? cost : LARGE_COST;
 
     pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
-		if (CHROMA) {
+    if (CHROMA) {
 			pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
 			pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
-		}
+    }
   }
 
   __syncthreads();
@@ -852,25 +827,25 @@ __device__ void dev_read_pixels(int tx, const pixel_t* src, int nPitch, int offx
 
 template <typename pixel_t>
 struct SearchBatch {
-	const SearchBlock* __restrict__ blocks;
-	short2* vectors; // [x,y]
-	volatile int* prog;
-	int* next;
-	const pixel_t* __restrict__ pSrcY;
-	const pixel_t* __restrict__ pSrcU;
-	const pixel_t* __restrict__ pSrcV;
-	const pixel_t* __restrict__ pRefY;
-	const pixel_t* __restrict__ pRefU;
-	const pixel_t* __restrict__ pRefV;
+  const SearchBlock* __restrict__ blocks;
+  short2* vectors; // [x,y]
+  volatile int* prog;
+  int* next;
+  const pixel_t* __restrict__ pSrcY;
+  const pixel_t* __restrict__ pSrcU;
+  const pixel_t* __restrict__ pSrcV;
+  const pixel_t* __restrict__ pRefY;
+  const pixel_t* __restrict__ pRefU;
+  const pixel_t* __restrict__ pRefV;
 };
 
 template <typename pixel_t>
 union SearchBatchData {
-	enum {
-		LEN = sizeof(SearchBatch<pixel_t>) / sizeof(int)
-	};
-	SearchBatch<pixel_t> d;
-	int data[LEN];
+  enum {
+    LEN = sizeof(SearchBatch<pixel_t>) / sizeof(int)
+  };
+  SearchBatch<pixel_t> d;
+  int data[LEN];
 };
 
 // 同期方法 0:同期なし（デバッグ用）, 1:1ずつ同期（高精度）, 2:2ずつ同期（低精度）
@@ -884,7 +859,7 @@ __global__ void kl_search(
   int nImgPitchY, int nImgPitchUV
 )
 {
-	// threads=128
+  // threads=128
 
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
@@ -898,22 +873,22 @@ __global__ void kl_search(
 	__shared__ SearchBatchData<pixel_t> d;
 
 	if (tx < SearchBatchData<pixel_t>::LEN) {
-		d.data[tx] = pdata[blockIdx.x].data[tx];
-	}
-	__syncthreads();
+    d.data[tx] = pdata[blockIdx.x].data[tx];
+  }
+  __syncthreads();
 
-	__shared__ int blkx;
+  __shared__ int blkx;
 
-	//for (int blkx = blockIdx.x; blkx < nBlkX; blkx += gridDim.x) {
-	while (true) {
-		if (tx == 0) {
-			blkx = atomicAdd(d.d.next, 1);
-		}
-		__syncthreads();
+  //for (int blkx = blockIdx.x; blkx < nBlkX; blkx += gridDim.x) {
+  while (true) {
+    if (tx == 0) {
+      blkx = atomicAdd(d.d.next, 1);
+    }
+    __syncthreads();
 
-		if (blkx >= nBlkX) {
-			break;
-		}
+    if (blkx >= nBlkX) {
+      break;
+    }
 
     for (int blky = 0; blky < nBlkY; ++blky) {
 
@@ -926,10 +901,10 @@ __global__ void kl_search(
       __shared__ pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
 
       dev_read_pixels<pixel_t, BLK_SIZE>(tx, d.d.pSrcY, nPitchY, offx, offy, srcY);
-			if (CHROMA) {
+      if (CHROMA) {
 				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, d.d.pSrcU, nPitchUV, offx >> 1, offy >> 1, srcU);
 				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, d.d.pSrcV, nPitchUV, offx >> 1, offy >> 1, srcV);
-			}
+      }
 
       __shared__ const pixel_t* pRefBY;
       __shared__ const pixel_t* pRefBU;
@@ -937,10 +912,10 @@ __global__ void kl_search(
 
       if (tx == 0) {
         pRefBY = &d.d.pRefY[offx + offy * nPitchY];
-				if (CHROMA) {
-					pRefBU = &d.d.pRefU[(offx >> 1) + (offy >> 1) * nPitchUV];
-					pRefBV = &d.d.pRefV[(offx >> 1) + (offy >> 1) * nPitchUV];
-				}
+        if (CHROMA) {
+          pRefBU = &d.d.pRefU[(offx >> 1) + (offy >> 1) * nPitchUV];
+          pRefBV = &d.d.pRefV[(offx >> 1) + (offy >> 1) * nPitchUV];
+        }
       }
 
       // パラメータなどのデータをshared memoryに格納
@@ -955,17 +930,17 @@ __global__ void kl_search(
         }
       }
 
-			// !!!!! 依存ブロックの計算が終わるのを待つ !!!!!!
+      // !!!!! 依存ブロックの計算が終わるのを待つ !!!!!!
 #if ANALYZE_SYNC == 1
-			if (tx == 0 && blkx > 0)
-			{
-				while (d.d.prog[blkx - 1] < blky) ;
-			}
+      if (tx == 0 && blkx > 0)
+      {
+        while (d.d.prog[blkx - 1] < blky);
+      }
 #elif ANALYZE_SYNC == 2
-			if (tx == 0 && blkx >= 2)
-			{
-				while (d.d.prog[blkx - (1 + (blkx & 1))] < blky);
-			}
+      if (tx == 0 && blkx >= 2)
+      {
+        while (d.d.prog[blkx - (1 + (blkx & 1))] < blky);
+      }
 #endif
 
       __syncthreads();
@@ -979,85 +954,85 @@ __global__ void kl_search(
       if (tx < 7) {
         __shared__ volatile short pred[7][2]; // x, y
 
-				if (tx < 6) {
-					// zero, global, predictor, predictors[1]～[3]を取得
-					short2 vec = d.d.vectors[REF_VECTOR_INDEX[tx]];
-					dev_clip_mv(vec, CLIP_RECT);
+        if (tx < 6) {
+          // zero, global, predictor, predictors[1]～[3]を取得
+          short2 vec = d.d.vectors[REF_VECTOR_INDEX[tx]];
+          dev_clip_mv(vec, CLIP_RECT);
 
-					if (CPU_EMU) {
-						// 3はmedianなので空ける（CPU版と合わせる）
-						int dx = (tx < 3) ? tx : (tx + 1);
-						pred[dx][0] = vec.x;
-						pred[dx][1] = vec.y;
-						// memfence
-						if (tx < 2) {
-							// Median predictor
-							// 計算効率が悪いので消したい・・・
-							int a = pred[4][tx];
-							int b = pred[5][tx];
-							int c = pred[6][tx];
-							int max_ = dev_max(a, b, c);
-							int min_ = dev_min(a, b, c);
-							int med_ = a + b + c - max_ - min_;
-							pred[3][tx] = med_;
-						}
-					}
-					else {
-						pred[tx][0] = vec.x;
-						pred[tx][1] = vec.y;
-						// memfence
-						if (tx < 2) {
-							// Median predictor
-							// 計算効率が悪いので消したい・・・
-							int a = pred[3][tx];
-							int b = pred[4][tx];
-							int c = pred[5][tx];
-							int max_ = dev_max(a, b, c);
-							int min_ = dev_min(a, b, c);
-							int med_ = a + b + c - max_ - min_;
-							pred[6][tx] = med_;
-						}
-					}
-				}
+          if (CPU_EMU) {
+            // 3はmedianなので空ける（CPU版と合わせる）
+            int dx = (tx < 3) ? tx : (tx + 1);
+            pred[dx][0] = vec.x;
+            pred[dx][1] = vec.y;
+            // memfence
+            if (tx < 2) {
+              // Median predictor
+              // 計算効率が悪いので消したい・・・
+              int a = pred[4][tx];
+              int b = pred[5][tx];
+              int c = pred[6][tx];
+              int max_ = dev_max(a, b, c);
+              int min_ = dev_min(a, b, c);
+              int med_ = a + b + c - max_ - min_;
+              pred[3][tx] = med_;
+            }
+          }
+          else {
+            pred[tx][0] = vec.x;
+            pred[tx][1] = vec.y;
+            // memfence
+            if (tx < 2) {
+              // Median predictor
+              // 計算効率が悪いので消したい・・・
+              int a = pred[3][tx];
+              int b = pred[4][tx];
+              int c = pred[5][tx];
+              int max_ = dev_max(a, b, c);
+              int min_ = dev_min(a, b, c);
+              int med_ = a + b + c - max_ - min_;
+              pred[6][tx] = med_;
+            }
+          }
+        }
         // memfence
         int x = result[tx].xy.x = pred[tx][0];
         int y = result[tx].xy.y = pred[tx][1];
         result[tx].cost = (LAMBDA * dev_sq_norm(x, y, PRED_X, PRED_Y)) >> 8;
 
         pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
-				if (CHROMA) {
+        if (CHROMA) {
 					pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, x >> 1, y >> 1);
 					pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, x >> 1, y >> 1);
-				}
+        }
       }
 
       __syncthreads();
 
-			bool debug = (nBlkY == 10 && blkx == 1 && blky == 0);
-			//bool debug = false;
+      bool debug = (nBlkY == 10 && blkx == 1 && blky == 0);
+      //bool debug = false;
 
       // まずは7箇所を計算
       if (bx < 7) {
 #if 0
-				if (wi == 0 && nBlkY == 10 && blkx == 1 && blky == 0) {
-					printf("1:[%d]: x=%d,y=%d,cost=%d\n", bx, result[bx].xy.x, result[bx].xy.y, result[bx].cost);
-				}
+        if (wi == 0 && nBlkY == 10 && blkx == 1 && blky == 0) {
+          printf("1:[%d]: x=%d,y=%d,cost=%d\n", bx, result[bx].xy.x, result[bx].xy.y, result[bx].cost);
+        }
 #endif
 				sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
 				//sad_t sad = dev_calc_sad_debug<pixel_t, BLK_SIZE, CHROMA>(debug && bx == 3, wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
 
 #if 0
-				if (blkx == 0 && blky == 0) {
-					if (bx == 0) {
-						printf("[SAD] wi=%d, sad=%d\n", wi, sad);
-					}
+        if (blkx == 0 && blky == 0) {
+          if (bx == 0) {
+            printf("[SAD] wi=%d, sad=%d\n", wi, sad);
+          }
 
-					dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
+          dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
 
-					if (bx == 0 && wi == 0) {
-						printf("[SAD] reduced sad=%d\n", sad);
-					}
-				}
+          if (bx == 0 && wi == 0) {
+            printf("[SAD] reduced sad=%d\n", sad);
+          }
+        }
 #endif
 
         if (wi == 0) {
@@ -1067,41 +1042,41 @@ __global__ void kl_search(
           }
           else {
             result[bx].cost += sad;
-					}
+          }
 #if 0
-					if (blockIdx.y == 1 && nBlkY == 32 && blkx == 0 && blky == 0) {
-						if (bx == 0) {
-							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
-								srcY[0], srcY[1], srcY[0 + BLK_SIZE], srcY[1 + BLK_SIZE],
-								pRefY[0][0], pRefY[0][1], pRefY[0][0 + nPitchY], pRefY[0][1 + nPitchY]
-								);
-							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
-								srcU[0], srcU[1], srcU[0 + BLK_SIZE / 2], srcU[1 + BLK_SIZE / 2],
-								pRefU[0][0], pRefU[0][1], pRefU[0][0 + nPitchUV], pRefU[0][1 + nPitchUV]
-							);
-							printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
-								srcV[0], srcV[1], srcV[0 + BLK_SIZE / 2], srcV[1 + BLK_SIZE / 2],
-								pRefV[0][0], pRefV[0][1], pRefV[0][0 + nPitchUV], pRefV[0][1 + nPitchUV]
-							);
-						}
-						printf("bx=%d,sad=%d,cost=%d\n", bx, sad, result[bx].cost);
-					}
+          if (blockIdx.y == 1 && nBlkY == 32 && blkx == 0 && blky == 0) {
+            if (bx == 0) {
+              printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
+                srcY[0], srcY[1], srcY[0 + BLK_SIZE], srcY[1 + BLK_SIZE],
+                pRefY[0][0], pRefY[0][1], pRefY[0][0 + nPitchY], pRefY[0][1 + nPitchY]
+              );
+              printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
+                srcU[0], srcU[1], srcU[0 + BLK_SIZE / 2], srcU[1 + BLK_SIZE / 2],
+                pRefU[0][0], pRefU[0][1], pRefU[0][0 + nPitchUV], pRefU[0][1 + nPitchUV]
+              );
+              printf("src: %d,%d,...,%d,%d,... ref: %d,%d,...,%d,%d,... \n",
+                srcV[0], srcV[1], srcV[0 + BLK_SIZE / 2], srcV[1 + BLK_SIZE / 2],
+                pRefV[0][0], pRefV[0][1], pRefV[0][0 + nPitchUV], pRefV[0][1 + nPitchUV]
+              );
+            }
+            printf("bx=%d,sad=%d,cost=%d\n", bx, sad, result[bx].cost);
+          }
 #endif
-				}
+        }
         // とりあえず比較はcostだけでやるのでSADは要らない
         // SADは探索が終わったら再計算する
-			}
+      }
 
-			__syncthreads();
+      __syncthreads();
 
       // 結果集約
       if (tx < 3) { // 7-4=3スレッドで呼ぶ
         dev_reduce_result<7, CPU_EMU>(result, tx);
       }
 #if 0
-			if (tx == 0 && nBlkY == 10 && blkx == 1 && blky == 0) {
-				printf("1best=(%d,%d,%d)\n", result[0].xy.x, result[0].xy.y, result[0].cost);
-			}
+      if (tx == 0 && nBlkY == 10 && blkx == 1 && blky == 0) {
+        printf("1best=(%d,%d,%d)\n", result[0].xy.x, result[0].xy.y, result[0].cost);
+      }
 #endif
 
       __syncthreads();
@@ -1133,16 +1108,16 @@ __global__ void kl_search(
       }
 
 
-			if (tx == 0) {
-				// 結果書き込み
-				d.d.vectors[blky*nBlkX + blkx] = result[0].xy;
+      if (tx == 0) {
+        // 結果書き込み
+        d.d.vectors[blky*nBlkX + blkx] = result[0].xy;
 
-				// 結果の書き込みが終わるのを待つ
-				__threadfence();
-				
-				// 完了を書き込み
-				d.d.prog[blkx] = blky;
-			}
+        // 結果の書き込みが終わるのを待つ
+        __threadfence();
+
+        // 完了を書き込み
+        d.d.prog[blkx] = blky;
+      }
 
       // 共有メモリ保護
       __syncthreads();
@@ -1183,39 +1158,39 @@ __global__ void kl_calc_all_sad(
 
   if (tid == 0) {
     pRefBY = &pRefY[offx + offy * nPitchY];
-		if (CHROMA) {
-			pRefBU = &pRefU[(offx >> 1) + (offy >> 1) * nPitchUV];
-			pRefBV = &pRefV[(offx >> 1) + (offy >> 1) * nPitchUV];
-		}
+    if (CHROMA) {
+      pRefBU = &pRefU[(offx >> 1) + (offy >> 1) * nPitchUV];
+      pRefBV = &pRefV[(offx >> 1) + (offy >> 1) * nPitchUV];
+    }
     pSrcBY = &pSrcY[offx + offy * nPitchY];
-		if (CHROMA) {
-			pSrcBU = &pSrcU[(offx >> 1) + (offy >> 1) * nPitchUV];
-			pSrcBV = &pSrcV[(offx >> 1) + (offy >> 1) * nPitchUV];
-		}
+    if (CHROMA) {
+      pSrcBU = &pSrcU[(offx >> 1) + (offy >> 1) * nPitchUV];
+      pSrcBV = &pSrcV[(offx >> 1) + (offy >> 1) * nPitchUV];
+    }
 
     short2 xy = vectors[bx + by * nBlkX];
 
     pRefBY = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, xy.x, xy.y);
-		if (CHROMA) {
+    if (CHROMA) {
 			pRefBU = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, xy.x >> 1, xy.y >> 1);
 			pRefBV = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, xy.x >> 1, xy.y >> 1);
-		}
+    }
 
 #if 0
-		if (bx == 2 && by == 0) {
-			printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
-				pSrcBY[0], pSrcBY[1], pSrcBY[0 + nPitchY], pSrcBY[1 + nPitchY],
-				pRefBY[0], pRefBY[1], pRefBY[0 + nPitchY], pRefBY[1 + nPitchY]
-				);
-			printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
-				pSrcBU[0], pSrcBU[1], pSrcBU[0 + nPitchUV], pSrcBU[1 + nPitchUV],
-				pRefBU[0], pRefBU[1], pRefBU[0 + nPitchUV], pRefBU[1 + nPitchUV]
-				);
-			printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
-				pSrcBV[0], pSrcBV[1], pSrcBV[0 + nPitchUV], pSrcBV[1 + nPitchUV],
-				pRefBV[0], pRefBV[1], pRefBV[0 + nPitchUV], pRefBV[1 + nPitchUV]
-				);
-		}
+    if (bx == 2 && by == 0) {
+      printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
+        pSrcBY[0], pSrcBY[1], pSrcBY[0 + nPitchY], pSrcBY[1 + nPitchY],
+        pRefBY[0], pRefBY[1], pRefBY[0 + nPitchY], pRefBY[1 + nPitchY]
+      );
+      printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
+        pSrcBU[0], pSrcBU[1], pSrcBU[0 + nPitchUV], pSrcBU[1 + nPitchUV],
+        pRefBU[0], pRefBU[1], pRefBU[0 + nPitchUV], pRefBU[1 + nPitchUV]
+      );
+      printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
+        pSrcBV[0], pSrcBV[1], pSrcBV[0 + nPitchUV], pSrcBV[1 + nPitchUV],
+        pRefBV[0], pRefBV[1], pRefBV[0 + nPitchUV], pRefBV[1 + nPitchUV]
+      );
+    }
 #endif
   }
 
@@ -1227,35 +1202,35 @@ __global__ void kl_calc_all_sad(
     int yx = tid % 16;
     int yy = tid / 16;
     for (int t = 0; t < 2; ++t, yy += 8) { // 2回ループ
-			sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
+      sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
 #if 0
-			if (bx == 2 && by == 0) {
-				printf("Y,%d,%d,%d\n", yx, yy, __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], 0));
-			}
+      if (bx == 2 && by == 0) {
+        printf("Y,%d,%d,%d\n", yx, yy, __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], 0));
+      }
 #endif
     }
-		if (CHROMA) {
-			// UVは8x8
-			int uvx = tid % 8;
-			int uvy = tid / 8;
-			if (uvy >= 8) {
-				uvy -= 8;
-				sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
+    if (CHROMA) {
+      // UVは8x8
+      int uvx = tid % 8;
+      int uvy = tid / 8;
+      if (uvy >= 8) {
+        uvy -= 8;
+        sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
 #if 0
-				if (bx == 2 && by == 0) {
-					printf("U,%d,%d,%d\n", uvx, uvy, __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], 0));
-				}
+        if (bx == 2 && by == 0) {
+          printf("U,%d,%d,%d\n", uvx, uvy, __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], 0));
+        }
 #endif
-			}
-			else {
-				sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
+      }
+      else {
+        sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
 #if 0
-				if (bx == 2 && by == 0) {
-					printf("V,%d,%d,%d\n", uvx, uvy, __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], 0));
-				}
+        if (bx == 2 && by == 0) {
+          printf("V,%d,%d,%d\n", uvx, uvy, __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], 0));
+        }
 #endif
-			}
-		}
+      }
+    }
   }
   else if (BLK_SIZE == 32) {
     // 32x32
@@ -1264,46 +1239,46 @@ __global__ void kl_calc_all_sad(
     for (int t = 0; t < 8; ++t, yy += 4) { // 8回ループ
       sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
     }
-		if (CHROMA) {
-			// ブロックサイズがスレッド数と一致
-			int uvx = tid % 16;
-			int uvy = tid / 16;
-			for (int t = 0; t < 2; ++t, uvy += 8) { // 2回ループ
-				sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
-				sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
-			}
-		}
+    if (CHROMA) {
+      // ブロックサイズがスレッド数と一致
+      int uvx = tid % 16;
+      int uvy = tid / 16;
+      for (int t = 0; t < 2; ++t, uvy += 8) { // 2回ループ
+        sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
+        sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
+      }
+    }
   }
 #if 0
-	if (bx == 2 && by == 0) {
-		printf("tid=%d,sad=%d\n", tid, sad);
-	}
+  if (bx == 2 && by == 0) {
+    printf("tid=%d,sad=%d\n", tid, sad);
+  }
 #endif
-	__shared__ int buf[128];
-	dev_reduce<int, 128, AddReducer<int>>(tid, sad, buf);
-  
-	if (tid == 0) {
+  __shared__ int buf[128];
+  dev_reduce<int, 128, AddReducer<int>>(tid, sad, buf);
+
+  if (tid == 0) {
     dst_sad[bx + by * nBlkX] = sad;
   }
 }
 
 __global__ void kl_prepare_search(
   int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
-	sad_t nLambdaLevel, sad_t lsad,
+  sad_t nLambdaLevel, sad_t lsad,
   sad_t penaltyZero, sad_t penaltyGlobal, sad_t penaltyNew,
   int nPel, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const short2* vectors, int vectorsPitch, const int* sads, int sadPitch, short2* vectors_copy, SearchBlock* dst_blocks, int* prog, int* next)
+  const short2* vectors, int vectorsPitch, const int* sads, int sadPitch, short2* vectors_copy, SearchBlock* dst_blocks, int* prog, int* next)
 {
   int bx = threadIdx.x + blockIdx.x * blockDim.x;
   int by = threadIdx.y + blockIdx.y * blockDim.y;
-	int batchid = blockIdx.z;
+  int batchid = blockIdx.z;
 
-	vectors += batchid * vectorsPitch;
-	sads += batchid * sadPitch;
-	vectors_copy += batchid * vectorsPitch;
-	dst_blocks += batchid * nBlkX * nBlkY;
-	prog += batchid * nBlkX;
-	next += batchid;
+  vectors += batchid * vectorsPitch;
+  sads += batchid * sadPitch;
+  vectors_copy += batchid * vectorsPitch;
+  dst_blocks += batchid * nBlkX * nBlkY;
+  prog += batchid * nBlkX;
+  next += batchid;
 
   if (bx < nBlkX && by < nBlkY) {
     //
@@ -1311,15 +1286,15 @@ __global__ void kl_prepare_search(
     int sad = sads[blkIdx];
     SearchBlock *data = &dst_blocks[blkIdx];
 
-		// 進捗は-1に初期化しておく
-		if (by == 0) {
-			prog[bx] = -1;
+    // 進捗は-1に初期化しておく
+    if (by == 0) {
+      prog[bx] = -1;
 
-			// カウンタを0にしておく
-			if (bx == 0) {
-				*next = 0;
-			}
-		}
+      // カウンタを0にしておく
+      if (bx == 0) {
+        *next = 0;
+      }
+    }
 
     int x = nPad + nBlkSizeOvr * bx;
     int y = nPad + nBlkSizeOvr * by;
@@ -1337,27 +1312,27 @@ __global__ void kl_prepare_search(
     data->data[3] = nDyMin;
 
     int p1 = -2; // -2はzeroベクタ
-    // Left (or right) predictor
+                 // Left (or right) predictor
 #if ANALYZE_SYNC == 0
-		if (bx > 0)
+    if (bx > 0)
     {
       p1 = blkIdx - 1 + nBlkX * nBlkY;
     }
 #elif ANALYZE_SYNC == 1
-		if (bx > 0)
-		{
-			p1 = blkIdx - 1;
-		}
+    if (bx > 0)
+    {
+      p1 = blkIdx - 1;
+    }
 #else // ANALYZE_SYNC == 2
-		if (bx >= 2)
-		{
-			p1 = blkIdx - (1 + (bx & 1));
-		}
+    if (bx >= 2)
+    {
+      p1 = blkIdx - (1 + (bx & 1));
+    }
 #endif
 
     int p2 = -2;
     // Up predictor
-		if (by > 0)
+    if (by > 0)
     {
       p2 = blkIdx - nBlkX;
     }
@@ -1368,12 +1343,12 @@ __global__ void kl_prepare_search(
 
     int p3 = -2;
     // bottom-right pridictor (from coarse level)
-		if ((by < nBlkY - 1) && (bx < nBlkX - 1))
+    if ((by < nBlkY - 1) && (bx < nBlkX - 1))
     {
-			// すでに書き換わっている可能性がありそれでも計算は可能だが、
-			// デバッグのため非決定動作は避けたいので
-			// コピーしてある後ろのデータを使う
-			p3 = blkIdx + nBlkX + 1 + nBlkX * nBlkY;
+      // すでに書き換わっている可能性がありそれでも計算は可能だが、
+      // デバッグのため非決定動作は避けたいので
+      // コピーしてある後ろのデータを使う
+      p3 = blkIdx + nBlkX + 1 + nBlkX * nBlkY;
     }
 
     data->data[4] = -2;    // zero
@@ -1383,21 +1358,21 @@ __global__ void kl_prepare_search(
     data->data[8] = p2;    //  predictors[2]
     data->data[9] = p3;    //  predictors[3]
 
-		short2 pred = vectors[blkIdx];
+    short2 pred = vectors[blkIdx];
 
-		// 計算中に前のレベルから求めたベクタを保持したいのでコピーしておく
-		vectors_copy[blkIdx] = pred;
+    // 計算中に前のレベルから求めたベクタを保持したいのでコピーしておく
+    vectors_copy[blkIdx] = pred;
 
-		data->data[10] = pred.x;
-		data->data[11] = pred.y;
+    data->data[10] = pred.x;
+    data->data[11] = pred.y;
 
     data->dataf[0] = penaltyZero;
     data->dataf[1] = penaltyGlobal;
     data->dataf[2] = 0;
     data->dataf[3] = penaltyNew;
 
-		sad_t lambda = nLambdaLevel * lsad / (lsad + (sad >> 1)) * lsad / (lsad + (sad >> 1));
-		if (by == 0) lambda = 0;
+    sad_t lambda = nLambdaLevel * lsad / (lsad + (sad >> 1)) * lsad / (lsad + (sad >> 1));
+    if (by == 0) lambda = 0;
     data->dataf[4] = lambda;
   }
 }
@@ -1408,7 +1383,7 @@ __global__ void kl_most_freq_mv(const short2* vectors, int vectorsPitch, int nVe
   enum {
     DIMX = 1024,
     // level==1が最大なので、このサイズで8Kくらいまで対応
-    FREQ_SIZE = DIMX*8,
+    FREQ_SIZE = DIMX * 8,
     HALF_SIZE = FREQ_SIZE / 2
   };
 
@@ -1423,12 +1398,12 @@ __global__ void kl_most_freq_mv(const short2* vectors, int vectorsPitch, int nVe
   };
   __shared__ SharedBuffer b;
 
-  for (int i = 0; i < FREQ_SIZE/ DIMX; ++i) {
+  for (int i = 0; i < FREQ_SIZE / DIMX; ++i) {
     b.freq_arr[tid + i * DIMX] = 0;
   }
   __syncthreads();
 
-	vectors += blockIdx.y * vectorsPitch;
+  vectors += blockIdx.y * vectorsPitch;
   if (blockIdx.x == 0) {
     // x
     for (int i = tid; i < nVec; i += DIMX) {
@@ -1444,8 +1419,8 @@ __global__ void kl_most_freq_mv(const short2* vectors, int vectorsPitch, int nVe
   __syncthreads();
 
   int maxcnt = 0;
-	int index = 0;
-	for (int i = 0; i < FREQ_SIZE / DIMX; ++i) {
+  int index = 0;
+  for (int i = 0; i < FREQ_SIZE / DIMX; ++i) {
     if (b.freq_arr[tid + i * DIMX] > maxcnt) {
       maxcnt = b.freq_arr[tid + i * DIMX];
       index = tid + i * DIMX;
@@ -1453,16 +1428,16 @@ __global__ void kl_most_freq_mv(const short2* vectors, int vectorsPitch, int nVe
   }
   __syncthreads();
 
-	dev_reduce2<int, int, DIMX, MaxIndexReducer<int>>(tid, maxcnt, index, b.red_cnt, b.red_idx);
+  dev_reduce2<int, int, DIMX, MaxIndexReducer<int>>(tid, maxcnt, index, b.red_cnt, b.red_idx);
 
   if (tid == 0) {
     if (blockIdx.x == 0) {
       // x
-			globalMVec[blockIdx.y].x = index - HALF_SIZE;
+      globalMVec[blockIdx.y].x = index - HALF_SIZE;
     }
     else {
       // y
-			globalMVec[blockIdx.y].y = index - HALF_SIZE;
+      globalMVec[blockIdx.y].y = index - HALF_SIZE;
     }
   }
 }
@@ -1481,7 +1456,7 @@ __global__ void kl_mean_global_mv(const short2* vectors, int vectorsPitch, int n
   int meanvy = 0;
   int num = 0;
 
-	vectors += blockIdx.y * vectorsPitch;
+  vectors += blockIdx.y * vectorsPitch;
   for (int i = tid; i < nVec; i += DIMX) {
     if (__sad(vectors[i].x, medianx, 0) < 6
       && __sad(vectors[i].y, mediany, 0) < 6)
@@ -1552,8 +1527,8 @@ __global__ void kl_mean_global_mv(const short2* vectors, int vectorsPitch, int n
     num += __shfl_down(num, 1);
 
     if (tid == 0) {
-			globalMVec[blockIdx.y].x = 2 * meanvx / num;
-			globalMVec[blockIdx.y].y = 2 * meanvy / num;
+      globalMVec[blockIdx.y].x = 2 * meanvx / num;
+      globalMVec[blockIdx.y].y = 2 * meanvy / num;
     }
   }
 }
@@ -1574,13 +1549,13 @@ __global__ void kl_interpolate_prediction(
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
-	int batchid = blockIdx.z;
+  int batchid = blockIdx.z;
 
-	// バッチ分進める
-	src_vector += batchid * srcVectorPitcch;
-	dst_vector += batchid * dstVectorPitch;
-	src_sad += batchid * srcSadPitch;
-	dst_sad += batchid * dstSadPitch;
+  // バッチ分進める
+  src_vector += batchid * srcVectorPitcch;
+  dst_vector += batchid * dstVectorPitch;
+  src_sad += batchid * srcSadPitch;
+  dst_sad += batchid * dstSadPitch;
 
   if (x < nDstBlkX && y < nDstBlkY) {
     short2 v1, v2, v3, v4;
@@ -1641,7 +1616,7 @@ __global__ void kl_interpolate_prediction(
     int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
     int vx = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
     int vy = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
-    
+
     sad_t tmp_sad = ((sad_t)a11*sad1 + (sad_t)a21*sad2 + (sad_t)a12*sad3 + (sad_t)a22*sad4) / normov;
 
     if (normFactor > 0) {
@@ -1661,34 +1636,34 @@ __global__ void kl_interpolate_prediction(
 }
 
 __global__ void kl_load_mv(
-	const VECTOR* in,
-	short2* vectors, // [x,y]
-	int* sads,
-	int nBlk)
+  const VECTOR* in,
+  short2* vectors, // [x,y]
+  int* sads,
+  int nBlk)
 {
-	int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
 
-	if (x < nBlk) {
-		VECTOR vin = in[x];
-		short2 v = { (short)vin.x, (short)vin.y };
-		vectors[x] = v;
-		sads[x] = vin.sad;
-	}
+  if (x < nBlk) {
+    VECTOR vin = in[x];
+    short2 v = { (short)vin.x, (short)vin.y };
+    vectors[x] = v;
+    sads[x] = vin.sad;
+  }
 }
 
 __global__ void kl_store_mv(
-	VECTOR* dst,
-	const short2* vectors, // [x,y]
-	const int* sads,
-	int nBlk)
+  VECTOR* dst,
+  const short2* vectors, // [x,y]
+  const int* sads,
+  int nBlk)
 {
-	int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
 
-	if (x < nBlk) {
-		short2 v = vectors[x];
-		VECTOR vout = { v.x, v.y, sads[x] };
-		dst[x] = vout;
-	}
+  if (x < nBlk) {
+    short2 v = vectors[x];
+    VECTOR vout = { v.x, v.y, sads[x] };
+    dst[x] = vout;
+  }
 }
 
 __global__ void kl_write_default_mv(VECTOR* dst, int nBlkCount, int verybigSAD)
@@ -1696,383 +1671,971 @@ __global__ void kl_write_default_mv(VECTOR* dst, int nBlkCount, int verybigSAD)
   int x = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (x < nBlkCount) {
-		dst[x].x = 0;
-		dst[x].y = 0;
-		dst[x].x = verybigSAD;
+    dst[x].x = 0;
+    dst[x].y = 0;
+    dst[x].x = verybigSAD;
   }
 }
 
 __global__ void kl_init_const_vec(short2* vectors, int vectorsPitch, const short2* globalMV, short nPel)
 {
-	vectors += blockIdx.y * vectorsPitch;
-	if (blockIdx.x == 0) {
-		vectors[-2] = short2();
-	}
-	else {
-		short2 g = *globalMV;
-		short2 c = { short(g.x * nPel), short(g.y * nPel) };
-		vectors[-1] = c;
-	}
-}
-
-template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
-void launch_search(
-  int batch,
-	SearchBatchData<pixel_t> *pdata,
-	int nBlkX, int nBlkY, int nPad,
-	int nPitchY, int nPitchUV,
-	int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
-{
-	dim3 threads(128);
-	// 余分なブロックは仕事せずに終了するので問題ない
-	dim3 blocks(batch, std::min(nBlkX, nBlkY));
-	kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> >(
-		pdata, nBlkX, nBlkY, nPad,
-		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
-}
-
-template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA>
-void launch_calc_all_sad(
-	int nBlkX, int nBlkY,
-	const short2* vectors, // [x,y]
-	int* dst_sad, int nPad,
-	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-	const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
-	int nPitchY, int nPitchUV,
-	int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
-{
-	dim3 threads(128);
-	dim3 blocks(nBlkX, nBlkY);
-	kl_calc_all_sad <pixel_t, BLK_SIZE, NPEL, CHROMA> << <blocks, threads, 0, stream >> >(
-		nBlkX, nBlkY, vectors, dst_sad, nPad,
-		pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
-		nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
-}
-
-int KDeintKernel::GetSearchBlockSize()
-{
-	return sizeof(SearchBlock);
-}
-
-template <typename pixel_t>
-int KDeintKernel::GetSearchBatchSize()
-{
-	return sizeof(SearchBatchData<pixel_t>);
-}
-
-template int KDeintKernel::GetSearchBatchSize<uint8_t>();
-template int KDeintKernel::GetSearchBatchSize<uint16_t>();
-
-template <typename pixel_t>
-void KDeintKernel::Search(
-	int batch, void* _searchbatch,
-	int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
-	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
-	int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const pixel_t** pSrcY, const pixel_t** pSrcU, const pixel_t** pSrcV,
-	const pixel_t** pRefY, const pixel_t** pRefU, const pixel_t** pRefV,
-	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next)
-{
-	assert(batch <= ANALYZE_MAX_BATCH);
-
-	SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
-	SearchBatchData<pixel_t>* searchbatch = (SearchBatchData<pixel_t>*)_searchbatch;
-	SearchBatchData<pixel_t> hsearchbatch[ANALYZE_MAX_BATCH];
-
-	{
-		// set zeroMV and globalMV
-		kl_init_const_vec << <dim3(2, batch), 1, 0, stream >> >(vectors, vectorsPitch, globalMV, nPel);
-		DebugSync();
-	}
-
-	{ // prepare
-		dim3 threads(32, 8);
-		dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y), batch);
-		kl_prepare_search << <blocks, threads, 0, stream >> >(
-			nBlkX, nBlkY, nBlkSize, nLogScale, nLambdaLevel, lsad,
-			penaltyZero, penaltyGlobal, penaltyNew,
-			nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
-			vectors, vectorsPitch, sads, sadPitch, &vectors[nBlkX*nBlkY], searchblocks, prog, next);
-		DebugSync();
-
-		//DataDebug<short2> v(vectors - 2, 2, env);
-		//v.Show();
-
-		//DataDebug<SearchBlock> d(searchblocks, nBlkX*nBlkY, env);
-		//d.Show();
-	}
-
-	int fidx = ((nBlkSize == 16) ? 0 : 4) + ((nPel == 1) ? 0 : 2) + (chroma ? 0 : 1);
-
-	{ // search
-		// デバッグ用
-#define CPU_EMU true
-		void(*table[2][8])(
-      int batch,
-			SearchBatchData<pixel_t> *pdata,
-			int nBlkX, int nBlkY, int nPad,
-			int nPitchY, int nPitchUV,
-			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
-		{
-			{ // exhaustive
-				launch_search<pixel_t, 16, 1, 1, true, CPU_EMU>,
-				launch_search<pixel_t, 16, 1, 1, false, CPU_EMU>,
-				NULL,
-				NULL,
-				launch_search<pixel_t, 32, 1, 1, true, CPU_EMU>,
-				launch_search<pixel_t, 32, 1, 1, false, CPU_EMU>,
-				NULL,
-				NULL,
-			},
-			{ // hex
-				launch_search<pixel_t, 16, 2, 1, true, CPU_EMU>,
-				launch_search<pixel_t, 16, 2, 1, false, CPU_EMU>,
-				launch_search<pixel_t, 16, 2, 2, true, CPU_EMU>,
-				launch_search<pixel_t, 16, 2, 2, false, CPU_EMU>,
-				launch_search<pixel_t, 32, 2, 1, true, CPU_EMU>,
-				launch_search<pixel_t, 32, 2, 1, false, CPU_EMU>,
-				launch_search<pixel_t, 32, 2, 2, true, CPU_EMU>,
-				launch_search<pixel_t, 32, 2, 2, false, CPU_EMU>,
-			}
-		};
-#undef CPU_EMU
-
-		// パラメータを作る
-		for (int i = 0; i < batch; ++i) {
-			hsearchbatch[i].d.blocks = searchblocks + nBlkX * nBlkY * i;
-			hsearchbatch[i].d.vectors = vectors + vectorsPitch * i;
-			hsearchbatch[i].d.prog = prog + nBlkX * i;
-			hsearchbatch[i].d.next = next + i;
-			hsearchbatch[i].d.pSrcY = pSrcY[i];
-			hsearchbatch[i].d.pSrcU = pSrcU[i];
-			hsearchbatch[i].d.pSrcV = pSrcV[i];
-			hsearchbatch[i].d.pRefY = pRefY[i];
-			hsearchbatch[i].d.pRefU = pRefU[i];
-			hsearchbatch[i].d.pRefV = pRefV[i];
-		}
-
-		// 64KBより小さいのでasync転送になる
-		CUDA_CHECK(cudaMemcpy(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice));
-
-		auto analyzef = table[(searchType == 8) ? 0 : 1][fidx];
-		if (analyzef == NULL) {
-			env->ThrowError("Unsupported search param combination");
-		}
-		analyzef(batch, searchbatch, nBlkX, nBlkY, nPad,
-			nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
-		DebugSync();
-
-		//DataDebug<short2> d(vectors, nBlkX*nBlkY, env);
-		//d.Show();
-	}
-
-	{ // calc sad
-		void (*table[])(
-			int nBlkX, int nBlkY,
-			const short2* vectors, // [x,y]
-			int* dst_sad, int nPad,
-			const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-			const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
-			int nPitchY, int nPitchUV,
-			int nImgPitchY, int nImgPitchUV, cudaStream_t stream) =
-		{
-			launch_calc_all_sad<pixel_t, 16, 1, true>,
-			launch_calc_all_sad<pixel_t, 16, 1, false>,
-			launch_calc_all_sad<pixel_t, 16, 2, true>,
-			launch_calc_all_sad<pixel_t, 16, 2, false>,
-			launch_calc_all_sad<pixel_t, 32, 1, true>,
-			launch_calc_all_sad<pixel_t, 32, 1, false>,
-			launch_calc_all_sad<pixel_t, 32, 2, true>,
-			launch_calc_all_sad<pixel_t, 32, 2, false>,
-		};
-
-		// calc_all_sadは十分な並列性があるのでバッチ分はループで回す
-		for (int i = 0; i < batch; ++i) {
-			table[fidx](nBlkX, nBlkY,
-				vectors + vectorsPitch * i, sads + sadPitch * i, nPad,
-				pSrcY[i], pSrcU[i], pSrcV[i], pRefY[i], pRefU[i], pRefV[i],
-				nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
-			DebugSync();
-		}
-
-		//DataDebug<int> d(sads, nBlkX*nBlkY, env);
-		//d.Show();
-	}
-}
-
-template void KDeintKernel::Search<uint8_t>(
-	int batch, void* _searchbatch,
-	int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
-	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
-	int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const uint8_t** pSrcY, const uint8_t** pSrcU, const uint8_t** pSrcV,
-	const uint8_t** pRefY, const uint8_t** pRefU, const uint8_t** pRefV,
-	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next);
-template void KDeintKernel::Search<uint16_t>(
-	int batch, void* _searchbatch,
-	int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
-	int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
-	int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-	const uint16_t** pSrcY, const uint16_t** pSrcU, const uint16_t** pSrcV,
-	const uint16_t** pRefY, const uint16_t** pRefU, const uint16_t** pRefV,
-	int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-	const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next);
-
-void KDeintKernel::EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV)
-{
-	kl_most_freq_mv << <dim3(2, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
-	DebugSync();
-	//DataDebug<short2> v1(globalMV, 1, env);
-	//v1.Show();
-	kl_mean_global_mv << <dim3(1, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
-	DebugSync();
-	//DataDebug<short2> v2(globalMV, 1, env);
-	//v2.Show();
-}
-
-void KDeintKernel::InterpolatePrediction(
-	int batch,
-	const short2* src_vector, int srcVectorPitch, const int* src_sad, int srcSadPitch,
-	short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
-	int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
-	int normFactor, int normov, int atotal, int aodd, int aeven)
-{
-	dim3 threads(32, 8);
-	dim3 blocks(nblocks(nDstBlkX, threads.x), nblocks(nDstBlkY, threads.y), batch);
-	kl_interpolate_prediction << <blocks, threads, 0, stream >> >(
-		src_vector, srcVectorPitch, src_sad, srcSadPitch,
-		dst_vector, dstVectorPitch, dst_sad, dstSadPitch,
-		nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
-		normFactor, normov, atotal, aodd, aeven);
-	DebugSync();
-}
-
-void KDeintKernel::LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount)
-{
-	dim3 threads(256);
-	dim3 blocks(nblocks(nBlkCount, threads.x));
-	kl_load_mv << <blocks, threads, 0, stream >> >(in, vectors, sads, nBlkCount);
-	DebugSync();
-}
-
-void KDeintKernel::StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount)
-{
-	dim3 threads(256);
-	dim3 blocks(nblocks(nBlkCount, threads.x));
-	kl_store_mv << <blocks, threads, 0, stream >> >(out, vectors, sads, nBlkCount);
-	DebugSync();
-}
-
-void KDeintKernel::WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD)
-{
-	dim3 threads(256);
-	dim3 blocks(nblocks(nBlkCount, threads.x));
-	kl_write_default_mv << <blocks, threads, 0, stream >> >(dst, nBlkCount, verybigSAD);
-	DebugSync();
+  vectors += blockIdx.y * vectorsPitch;
+  if (blockIdx.x == 0) {
+    vectors[-2] = short2();
+  }
+  else {
+    short2 g = *globalMV;
+    short2 c = { short(g.x * nPel), short(g.y * nPel) };
+    vectors[-1] = c;
+  }
 }
 
 /////////////////////////////////////////////////////////////////////////////
 // DEGRAIN
 /////////////////////////////////////////////////////////////////////////////
 
-template <typename pixel_t, int N>
-struct DegrainBlockData {
-	const short *winOver;
-	const pixel_t *pSrc, *pB[N], *pF[N];
-	pixel_t *pDst;
-	int WSrc, WRefB[N], WRefF[N];
-};
-
-template <typename pixel_t, int N>
-union DegrainBlock {
-	enum { LEN = sizeof(DegrainBlockData<pixel_t, N>) / 4 };
-	DegrainBlockData<pixel_t, N> d;
-	uint32_t m[LEN];
-};
-
-enum {
-	OVER_KER_SPAN_W = 4,
-	OVER_KER_SPAN_H = 4,
-};
-
-template <typename pixel_t, int N, int BLK_SIZE>
-__global__ void kl_degrain(
-	int nPatternX, int nPatternY,
-	int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, pixel_t* pDst, int pitch
-	)
+// スレッド数: sceneChangeの数
+__global__ void kl_init_scene_change(int* sceneChange)
 {
-	typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
-	typedef DegrainBlock<pixel_t, N> blk_t;
-
-	enum {
-		BLK_SIZE_UV = BLK_SIZE / 2,
-		BLK_STEP = BLK_SIZE / 2,
-		THREADS = BLK_SIZE*BLK_SIZE,
-		TMP_W = BLK_SIZE + BLK_STEP * (OVER_KER_SPAN_W - 1),
-		TMP_H = BLK_SIZE + BLK_STEP * (OVER_KER_SPAN_H - 1)
-	};
-
-	int tx = threadIdx.x;
-	int ty = threadIdx.y;
-
-	int tid = tx + ty * BLK_SIZE;
-	int offset = tx + ty * pitch;
-
-	__shared__ tmp_t tmp[TMP_H][TMP_W];
-	__shared__ blk_t info;
-
-	// tmp初期化
-	// TODO:
-	//for (int x = )
-	for (int i = tid; i < TMP_H*TMP_W; i += THREADS) {
-		tmp[i] = 0;
-	}
-
-	__syncthreads();
-
-	const bool no_need_round = (sizeof(pixel_t) > 1);
-
-	for (int bby = 0; bby < OVER_KER_SPAN_H; ++bby) {
-		for (int bbx = 0; bbx < OVER_KER_SPAN_W; ++bbx) {
-			int bx = (blockIdx.x * 2 + nPatternX) * OVER_KER_SPAN_W + bbx;
-			int by = (blockIdx.y * 2 + nPatternY) * OVER_KER_SPAN_H + bby;
-			if (bx >= nBlkX || by >= nBlkY) continue;
-
-			int blkidx = bx + by * nBlkX;
-
-			// ブロック情報を読み込む
-			if (blk_t::LEN <= THREADS) {
-				if (tid < blk_t::LEN)
-					info.m[tid] = data[blkidx].m[tid];
-			}
-			else {
-				for (int i = tid; i < blk_t::LEN; i += THREADS) {
-					info.m[tid] = data[blkidx].m[tid];
-				}
-			}
-			__syncthreads();
-
-			int dstx = bbx * BLK_STEP + tx;
-			int dsty = bby * BLK_STEP + ty;
-
-			int val = 0;
-			if (N == 1)
-				val = info.d.pSrc[offset] * info.d.WSrc +
-					info.d.pRefF[0][offset] * info.d.WRefF[0] + info.d.pRefB[0][offset] * info.d.WRefB[0];
-			else if (N == 2)
-				val = info.d.pSrc[offset] * info.d.WSrc +
-					info.d.pRefF[0][offset] * info.d.WRefF[0] + info.d.pRefB[0][offset] * info.d.WRefB[0] +
-					info.d.pRefF[1][offset] * info.d.WRefF[1] + info.d.pRefB[1][offset] * info.d.WRefB[1];
-
-			val = (val + (no_need_round ? 0 : 128)) >> 8;
-			tmp[dsty][dstx] += val * info.d.winOver[tid];
-
-			__syncthreads();
-		}
-	}
-
-	//
+  sceneChange[threadIdx.x] = 0;
 }
 
+// スレッド数: 256（合計: nBlks）
+__global__ void kl_scene_change(const VECTOR* mv, int nBlks, int nTh1, int* sceneChange)
+{
+  enum {
+    DIMX = 256,
+  };
+
+  int tid = threadIdx.x;
+  int x = tid + blockIdx.x * blockDim.x;
+
+  int s = 0;
+  if (x < nBlks) {
+    s = (mv[x].sad > nTh1) ? 1 : 0;
+  }
+
+  __shared__ int sbuf[DIMX];
+  dev_reduce<int, DIMX, AddReducer<int>>(tid, s, sbuf);
+
+  if (tid == 0) {
+    atomicAdd(sceneChange, s);
+  }
+}
+
+template <typename vpixel_t, int N>
+struct DegrainBlockData {
+  const short *winOver;
+  const vpixel_t *pSrc, *pB[N], *pF[N];
+  vpixel_t *pDst;
+  int WSrc, WRefB[N], WRefF[N];
+};
+
+template <typename vpixel_t, int N>
+union DegrainBlock {
+  enum { LEN = sizeof(DegrainBlockData<vpixel_t, N>) / 4 };
+  DegrainBlockData<vpixel_t, N> d;
+  uint32_t m[LEN];
+};
+
+template <typename pixel_t, int N>
+struct DegrainArgData {
+  const VECTOR *mvB[N], *mvF[N];
+  const pixel_t *pSrc, *pRefB[N], *pRefF[N];
+  pixel_t *pDst;
+  bool isUsableB[N], isUsableF[N];
+};
+
+template <typename pixel_t, int N>
+struct DegrainArg {
+  enum { LEN = sizeof(DegrainArgData<pixel_t, N>) / 4 };
+  DegrainArgData<pixel_t, N> d;
+  uint32_t m[LEN];
+};
+
+static __device__ int dev_degrain_weight(int thSAD, int blockSAD)
+{
+  // Returning directly prevents a divide by 0 if thSAD == blockSAD == 0.
+  if (thSAD <= blockSAD)
+  {
+    return 0;
+  }
+  const float sq_thSAD = float(thSAD) * float(thSAD);
+  const float sq_blockSAD = float(blockSAD) * float(blockSAD);
+  return (int)(256.0f*(sq_thSAD - sq_blockSAD) / (sq_thSAD + sq_blockSAD));
+}
+
+template<int delta>
+static __device__ void dev_norm_weights(int &WSrc, int *WRefB, int *WRefF)
+{
+  WSrc = 256;
+  int WSum;
+  if (delta == 6)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + WRefB[5] + WRefF[5] + 1;
+  else if (delta == 5)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + 1;
+  else if (delta == 4)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + 1;
+  else if (delta == 3)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + 1;
+  else if (delta == 2)
+    WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + 1;
+  else if (delta == 1)
+    WSum = WRefB[0] + WRefF[0] + WSrc + 1;
+  WRefB[0] = WRefB[0] * 256 / WSum; // normalize weights to 256
+  WRefF[0] = WRefF[0] * 256 / WSum;
+  if (delta >= 2) {
+    WRefB[1] = WRefB[1] * 256 / WSum; // normalize weights to 256
+    WRefF[1] = WRefF[1] * 256 / WSum;
+  }
+  if (delta >= 3) {
+    WRefB[2] = WRefB[2] * 256 / WSum; // normalize weights to 256
+    WRefF[2] = WRefF[2] * 256 / WSum;
+  }
+  if (delta >= 4) {
+    WRefB[3] = WRefB[3] * 256 / WSum; // normalize weights to 256
+    WRefF[3] = WRefF[3] * 256 / WSum;
+  }
+  if (delta >= 5) {
+    WRefB[4] = WRefB[4] * 256 / WSum; // normalize weights to 256
+    WRefF[4] = WRefF[4] * 256 / WSum;
+  }
+  if (delta >= 6) {
+    WRefB[5] = WRefB[5] * 256 / WSum; // normalize weights to 256
+    WRefF[5] = WRefF[5] * 256 / WSum;
+  }
+  if (delta == 6)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3] - WRefB[4] - WRefF[4] - WRefB[5] - WRefF[5];
+  else if (delta == 5)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3] - WRefB[4] - WRefF[4];
+  else if (delta == 4)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2] - WRefB[3] - WRefF[3];
+  else if (delta == 3)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1] - WRefB[2] - WRefF[2];
+  else if (delta == 2)
+    WSrc = 256 - WRefB[0] - WRefF[0] - WRefB[1] - WRefF[1];
+  else if (delta == 1)
+    WSrc = 256 - WRefB[0] - WRefF[0];
+}
+
+template <typename pixel_t, typename vpixel_t, int N, int NPEL>
+static __global__ void kl_prepare_degrain(
+  int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
+  const short* ovrwins,
+  const int * __restrict__ sceneChangeB,
+  const int * __restrict__ sceneChangeF,
+  const DegrainArg<pixel_t, N>* parg,
+  DegrainBlock<vpixel_t, N>* blocks,
+  int nPitch, int nImgPitch
+)
+{
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int blkx = tx + blockIdx.x * blockDim.x;
+  int blky = ty + blockIdx.y * blockDim.y;
+  int idx = blkx + blky * nBlkX;
+
+  __shared__ DegrainArg<pixel_t, N> s_arg_buf;
+
+  if (tx < DegrainArg<pixel_t, N>::LEN) {
+    s_arg_buf.m[tx] = parg->m[tx];
+  }
+  __syncthreads();
+
+  if (blkx < nBlkX && blky < nBlkY) {
+    DegrainArgData<pixel_t, N>& arg = s_arg_buf.d;
+    DegrainBlockData<vpixel_t, N>& b = blocks[idx].d;
+
+    // winOver
+    int wby = ((blky + nBlkY - 3) / (nBlkY - 2)) * 3;
+    int wbx = (blkx + nBlkX - 3) / (nBlkX - 2);
+    b.winOver = ovrwins + (wby + wbx) * nBlkSize * nBlkSize;
+
+    int blkStep = nBlkSize / 2;
+    int offx = nPad + blkx * blkStep;
+    int offy = nPad + blky * blkStep;
+    int offset = offx + offy * nPitch;
+
+    int WSrc, WRefB[N], WRefF[N];
+
+    // pSrc,pDst,pB,pF
+    b.pSrc = (const vpixel_t*)(arg.pSrc + offset);
+    b.pDst = (vpixel_t*)(arg.pDst + offset);
+
+    for (int i = 0; i < N; ++i) {
+      bool isUsableB = arg.isUsableB[i] && !(sceneChangeB[i] > nTh2);
+      if (isUsableB) {
+        b.pB[i] = (const vpixel_t*)dev_get_ref_block<pixel_t, NPEL>(arg.pRefB[i] + offset, nPitch, nImgPitch, arg.mvB[i][idx].x, arg.mvB[i][idx].y);
+        WRefB[i] = dev_degrain_weight(thSAD, arg.mvB[i][idx].sad);
+      }
+      else {
+        b.pB[i] = (const vpixel_t*)(arg.pSrc + offset);
+        WRefB[i] = 0;
+      }
+      bool isUsableF = arg.isUsableF[i] && !(sceneChangeF[i] > nTh2);
+      if (isUsableF) {
+        b.pF[i] = (const vpixel_t*)dev_get_ref_block<pixel_t, NPEL>(arg.pRefF[i] + offset, nPitch, nImgPitch, arg.mvF[i][idx].x, arg.mvF[i][idx].y);
+        WRefF[i] = dev_degrain_weight(thSAD, arg.mvF[i][idx].sad);
+      }
+      else {
+        b.pF[i] = (const vpixel_t*)(arg.pSrc + offset);
+        WRefF[i] = 0;
+      }
+    }
+
+    // weight
+    dev_norm_weights<N>(WSrc, WRefB, WRefF);
+
+    b.WSrc = WSrc;
+    for (int i = 0; i < N; ++i) {
+      b.WRefB[i] = WRefB[i];
+      b.WRefF[i] = WRefF[i];
+    }
+  }
+}
+
+// ブロックは2x3前提
+template <typename pixel_t, typename vpixel_t, typename vtmp_t, int N, int BLK_SIZE, int M>
+static __global__ void kl_degrain_2x3(
+  int nPatternX, int nPatternY,
+  int nBlkX, int nBlkY, DegrainBlock<vpixel_t, N>* data, vtmp_t* pDst, int pitch4
+)
+{
+  enum {
+    SPAN_X = 3,
+    SPAN_Y = 2,
+    BLK_STEP = BLK_SIZE / 2,
+    BLK_SIZE4 = BLK_SIZE / 4,
+    BLK_STEP4 = BLK_STEP / 4,
+    THREADS = BLK_SIZE*BLK_SIZE4,
+    TMP_W = BLK_SIZE + BLK_STEP * 2, // == BLK_SIZE * 2
+    TMP_H = BLK_SIZE + BLK_STEP * 1,
+    TMP_W4 = TMP_W / 4,
+    N_READ_LOOP = DegrainBlock<vpixel_t, N>::LEN / THREADS
+  };
+
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int tz = threadIdx.z;
+
+  int tid = tx + ty * BLK_SIZE4;
+  int offset = tx + ty * pitch4;
+
+  __shared__ vtmp_t tmp[M][TMP_H][TMP_W4];
+  __shared__ DegrainBlock<vpixel_t, N> info;
+
+  // tmp初期化
+  tmp[tx][ty][tx] = VHelper<vtmp_t>::make(0);
+  tmp[tx][ty][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
+  if (ty < BLK_STEP) {
+    tmp[tx][ty + BLK_SIZE][tx] = VHelper<vtmp_t>::make(0);
+    tmp[tx][ty + BLK_SIZE][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
+  }
+
+  __syncthreads();
+
+  const bool no_need_round = (sizeof(pixel_t) > 1);
+
+  int largex = blockIdx.x * M + tz;
+  int largey = blockIdx.y;
+  int basex = (largex * 2 + nPatternX) * SPAN_X;
+  int basey = (largey * 2 + nPatternY) * SPAN_Y;
+
+  for (int bby = 0; bby < SPAN_Y; ++bby) {
+    int by = basey + bby;
+    if (by >= nBlkY) continue;
+
+    for (int bbx = 0; bbx < SPAN_X; ++bbx) {
+      int bx = basex + bbx;
+      if (bx >= nBlkX) continue;
+
+      int blkidx = bx + by * nBlkX;
+
+      // ブロック情報を読み込む
+      for (int i = 0; i < N_READ_LOOP; ++i) {
+        info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
+      }
+      if (THREADS * N_READ_LOOP + tid < DegrainBlock<vpixel_t, N>::LEN) {
+        info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
+      }
+      __syncthreads();
+
+      int4 val = { 0 };
+      if (N == 1)
+        val = to_int(info.d.pSrc[offset]) * info.d.WSrc +
+        to_int(info.d.pF[0][offset]) * info.d.WRefF[0] + to_int(info.d.pB[0][offset]) * info.d.WRefB[0];
+      else if (N == 2)
+        val = to_int(info.d.pSrc[offset]) * info.d.WSrc +
+          to_int(info.d.pF[0][offset]) * info.d.WRefF[0] + to_int(info.d.pB[0][offset]) * info.d.WRefB[0] +
+          to_int(info.d.pF[1][offset]) * info.d.WRefF[1] + to_int(info.d.pB[1][offset]) * info.d.WRefB[1];
+
+      int dstx = bbx * BLK_STEP4 + tx;
+      int dsty = bby * BLK_STEP + ty;
+
+      val = (val + (no_need_round ? 0 : 128)) >> 8;
+      tmp[tz][dsty][dstx] += val * info.d.winOver[tid];
+
+      __syncthreads();
+    }
+  }
+
+  // dstに書き込む
+  vtmp_t *p = &pDst[basex * BLK_STEP + tx + (basey * BLK_STEP + ty) * pitch4];
+
+  int bsx = tx / BLK_STEP4 - 1;
+  int bsy = ty / BLK_STEP - 1;
+  if (basex + bsx < nBlkX && basey + bsy < nBlkY) {
+    p[0] += tmp[tz][ty][tx];
+    if (basex + bsx + 2 < nBlkX) {
+      p[BLK_SIZE4] += tmp[tz][ty][tx + BLK_SIZE4];
+    }
+    if (ty < BLK_STEP) {
+      if (basey + bsy + 2 < nBlkY) {
+        p[BLK_SIZE * pitch4] += tmp[tz][ty + BLK_SIZE][tx];
+        if (basex + bsx + 2 < nBlkX) {
+          p[BLK_SIZE4 + BLK_SIZE * pitch4] += tmp[tz][ty + BLK_SIZE][tx + BLK_SIZE4];
+        }
+      }
+    }
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// DegrainTypes
+/////////////////////////////////////////////////////////////////////////////
+
+template <typename pixel_t> struct DegrainTypes { };
+
+template <> struct DegrainTypes<uint8_t> {
+  typedef uint16_t tmp_t;
+  typedef uchar4 vpixel_t;
+  typedef ushort4 vtmp_t;
+};
+
+template <> struct DegrainTypes<uint16_t> {
+  typedef int32_t tmp_t;
+  typedef ushort4 vpixel_t;
+  typedef int4 vtmp_t;
+};
+
+/////////////////////////////////////////////////////////////////////////////
+// KDeintKernel
+/////////////////////////////////////////////////////////////////////////////
+
+template <typename pixel_t>
+class KDeintKernel : public CudaKernelBase, public IKDeintKernel<pixel_t>
+{
+public:
+  typedef KDeintKernel Me;
+  typedef typename DegrainTypes<pixel_t>::tmp_t tmp_t;
+  typedef typename DegrainTypes<pixel_t>::vpixel_t vpixel_t;
+  typedef typename DegrainTypes<pixel_t>::vtmp_t vtmp_t;
+
+  virtual bool IsEnabled() const {
+    return isEnabled;
+  }
+
+  void MemCpy(void* dst, const void* src, int nbytes)
+  {
+    dim3 threads(256);
+    dim3 blocks(nblocks(nbytes, threads.x));
+    memcpy_kernel << <blocks, threads, 0, stream >> > ((uint8_t*)dst, (uint8_t*)src, nbytes);
+    DebugSync();
+  }
+
+  void Copy(
+    pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height)
+  {
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+    kl_copy<pixel_t> << <blocks, threads, 0, stream >> > (
+      dst, dst_pitch, src, src_pitch, width, height);
+    DebugSync();
+  }
+
+  void PadFrame(pixel_t *ptr, int pitch, int hPad, int vPad, int width, int height)
+  {
+    { // H方向
+      dim3 threads(hPad, 32);
+      dim3 blocks(2, nblocks(height, threads.y));
+      kl_pad_frame_h<pixel_t> << <blocks, threads, 0, stream >> > (
+        ptr + vPad * pitch, pitch, hPad, width, height);
+      DebugSync();
+    }
+    { // V方向（すでにPadされたH方向分も含む）
+      dim3 threads(32, vPad);
+      dim3 blocks(nblocks(width + hPad * 2, threads.x), 2);
+      kl_pad_frame_v<pixel_t> << <blocks, threads, 0, stream >> > (
+        ptr, pitch, vPad, width + hPad * 2, height);
+      DebugSync();
+    }
+  }
+
+  void VerticalWiener(
+    pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
+    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
+  {
+    const int max_pixel_value = sizeof(pixel_t) == 1 ? 255 : (1 << bits_per_pixel) - 1;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
+    kl_vertical_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
+      pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
+    DebugSync();
+  }
+
+  void HorizontalWiener(
+    pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
+    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
+  {
+    const int max_pixel_value = sizeof(pixel_t) == 1 ? 255 : (1 << bits_per_pixel) - 1;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
+    kl_horizontal_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
+      pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
+    DebugSync();
+  }
+
+  void RB2BilinearFiltered(
+    pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight)
+  {
+    dim3 threads(RB2B_BILINEAR_W, RB2B_BILINEAR_H);
+    dim3 blocks(nblocks(nWidth * 2, RB2B_BILINEAR_W - 2), nblocks(nHeight, RB2B_BILINEAR_H));
+    kl_RB2B_bilinear_filtered<pixel_t> << <blocks, threads, 0, stream >> > (
+      pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight);
+    DebugSync();
+  }
+
+  template <int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
+  void launch_search(
+    int batch,
+    SearchBatchData<pixel_t> *pdata,
+    int nBlkX, int nBlkY, int nPad,
+    int nPitchY, int nPitchUV,
+    int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
+  {
+    dim3 threads(128);
+    // 余分なブロックは仕事せずに終了するので問題ない
+    dim3 blocks(batch, std::min(nBlkX, nBlkY));
+    kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> >(
+      pdata, nBlkX, nBlkY, nPad,
+      nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
+    DebugSync();
+  }
+
+  typedef void (Me::*LAUNCH_SEARCH)(
+    int batch,
+    SearchBatchData<pixel_t> *pdata,
+    int nBlkX, int nBlkY, int nPad,
+    int nPitchY, int nPitchUV,
+    int nImgPitchY, int nImgPitchUV, cudaStream_t stream);
+
+  template <int BLK_SIZE, int NPEL, bool CHROMA>
+  void launch_calc_all_sad(
+    int nBlkX, int nBlkY,
+    const short2* vectors, // [x,y]
+    int* dst_sad, int nPad,
+    const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+    const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+    int nPitchY, int nPitchUV,
+    int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
+  {
+    dim3 threads(128);
+    dim3 blocks(nBlkX, nBlkY);
+    kl_calc_all_sad <pixel_t, BLK_SIZE, NPEL, CHROMA> << <blocks, threads, 0, stream >> >(
+      nBlkX, nBlkY, vectors, dst_sad, nPad,
+      pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+      nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
+    DebugSync();
+  }
+
+  typedef void (Me::*LAUNCH_CALC_ALL_SAD)(
+    int nBlkX, int nBlkY,
+    const short2* vectors, // [x,y]
+    int* dst_sad, int nPad,
+    const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+    const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
+    int nPitchY, int nPitchUV,
+    int nImgPitchY, int nImgPitchUV, cudaStream_t stream);
+
+  int GetSearchBlockSize()
+  {
+    return sizeof(SearchBlock);
+  }
+
+  int GetSearchBatchSize()
+  {
+    return sizeof(SearchBatchData<pixel_t>);
+  }
+
+  void Search(
+    int batch, void* _searchbatch,
+    int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+    int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
+    int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
+    const pixel_t** pSrcY, const pixel_t** pSrcU, const pixel_t** pSrcV,
+    const pixel_t** pRefY, const pixel_t** pRefU, const pixel_t** pRefV,
+    int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
+    const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* _searchblocks, int* prog, int* next)
+  {
+    assert(batch <= ANALYZE_MAX_BATCH);
+
+    SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
+    SearchBatchData<pixel_t>* searchbatch = (SearchBatchData<pixel_t>*)_searchbatch;
+    SearchBatchData<pixel_t> hsearchbatch[ANALYZE_MAX_BATCH];
+
+    {
+      // set zeroMV and globalMV
+      kl_init_const_vec << <dim3(2, batch), 1, 0, stream >> >(vectors, vectorsPitch, globalMV, nPel);
+      DebugSync();
+    }
+
+    { // prepare
+      dim3 threads(32, 8);
+      dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y), batch);
+      kl_prepare_search << <blocks, threads, 0, stream >> >(
+        nBlkX, nBlkY, nBlkSize, nLogScale, nLambdaLevel, lsad,
+        penaltyZero, penaltyGlobal, penaltyNew,
+        nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
+        vectors, vectorsPitch, sads, sadPitch, &vectors[nBlkX*nBlkY], searchblocks, prog, next);
+      DebugSync();
+
+      //DataDebug<short2> v(vectors - 2, 2, env);
+      //v.Show();
+
+      //DataDebug<SearchBlock> d(searchblocks, nBlkX*nBlkY, env);
+      //d.Show();
+    }
+
+    int fidx = ((nBlkSize == 16) ? 0 : 4) + ((nPel == 1) ? 0 : 2) + (chroma ? 0 : 1);
+
+    { // search
+      // デバッグ用
+#define CPU_EMU true
+      LAUNCH_SEARCH table[2][8] =
+      {
+        { // exhaustive
+          &Me::launch_search<16, 1, 1, true, CPU_EMU>,
+          &Me::launch_search<16, 1, 1, false, CPU_EMU>,
+          NULL,
+          NULL,
+          &Me::launch_search<32, 1, 1, true, CPU_EMU>,
+          &Me::launch_search<32, 1, 1, false, CPU_EMU>,
+          NULL,
+          NULL,
+        },
+        { // hex
+          &Me::launch_search<16, 2, 1, true, CPU_EMU>,
+          &Me::launch_search<16, 2, 1, false, CPU_EMU>,
+          &Me::launch_search<16, 2, 2, true, CPU_EMU>,
+          &Me::launch_search<16, 2, 2, false, CPU_EMU>,
+          &Me::launch_search<32, 2, 1, true, CPU_EMU>,
+          &Me::launch_search<32, 2, 1, false, CPU_EMU>,
+          &Me::launch_search<32, 2, 2, true, CPU_EMU>,
+          &Me::launch_search<32, 2, 2, false, CPU_EMU>,
+        }
+      };
+#undef CPU_EMU
+
+      // パラメータを作る
+      for (int i = 0; i < batch; ++i) {
+        hsearchbatch[i].d.blocks = searchblocks + nBlkX * nBlkY * i;
+        hsearchbatch[i].d.vectors = vectors + vectorsPitch * i;
+        hsearchbatch[i].d.prog = prog + nBlkX * i;
+        hsearchbatch[i].d.next = next + i;
+        hsearchbatch[i].d.pSrcY = pSrcY[i];
+        hsearchbatch[i].d.pSrcU = pSrcU[i];
+        hsearchbatch[i].d.pSrcV = pSrcV[i];
+        hsearchbatch[i].d.pRefY = pRefY[i];
+        hsearchbatch[i].d.pRefU = pRefU[i];
+        hsearchbatch[i].d.pRefV = pRefV[i];
+      }
+
+      // 64KBより小さいのでasync転送になる
+      CUDA_CHECK(cudaMemcpy(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice));
+
+      auto analyzef = table[(searchType == 8) ? 0 : 1][fidx];
+      if (analyzef == NULL) {
+        env->ThrowError("Unsupported search param combination");
+      }
+      (this->*analyzef)(batch, searchbatch, nBlkX, nBlkY, nPad,
+        nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
+
+      //DataDebug<short2> d(vectors, nBlkX*nBlkY, env);
+      //d.Show();
+    }
+
+    { // calc sad
+      LAUNCH_CALC_ALL_SAD table[] =
+      {
+        &Me::launch_calc_all_sad<16, 1, true>,
+        &Me::launch_calc_all_sad<16, 1, false>,
+        &Me::launch_calc_all_sad<16, 2, true>,
+        &Me::launch_calc_all_sad<16, 2, false>,
+        &Me::launch_calc_all_sad<32, 1, true>,
+        &Me::launch_calc_all_sad<32, 1, false>,
+        &Me::launch_calc_all_sad<32, 2, true>,
+        &Me::launch_calc_all_sad<32, 2, false>,
+      };
+
+      // calc_all_sadは十分な並列性があるのでバッチ分はループで回す
+      for (int i = 0; i < batch; ++i) {
+        (this->*table[fidx])(nBlkX, nBlkY,
+          vectors + vectorsPitch * i, sads + sadPitch * i, nPad,
+          pSrcY[i], pSrcU[i], pSrcV[i], pRefY[i], pRefU[i], pRefV[i],
+          nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
+        DebugSync();
+      }
+
+      //DataDebug<int> d(sads, nBlkX*nBlkY, env);
+      //d.Show();
+    }
+  }
+
+  void EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV)
+  {
+    kl_most_freq_mv << <dim3(2, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
+    DebugSync();
+    //DataDebug<short2> v1(globalMV, 1, env);
+    //v1.Show();
+    kl_mean_global_mv << <dim3(1, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
+    DebugSync();
+    //DataDebug<short2> v2(globalMV, 1, env);
+    //v2.Show();
+  }
+
+  void InterpolatePrediction(
+    int batch,
+    const short2* src_vector, int srcVectorPitch, const int* src_sad, int srcSadPitch,
+    short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
+    int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
+    int normFactor, int normov, int atotal, int aodd, int aeven)
+  {
+    dim3 threads(32, 8);
+    dim3 blocks(nblocks(nDstBlkX, threads.x), nblocks(nDstBlkY, threads.y), batch);
+    kl_interpolate_prediction << <blocks, threads, 0, stream >> >(
+      src_vector, srcVectorPitch, src_sad, srcSadPitch,
+      dst_vector, dstVectorPitch, dst_sad, dstSadPitch,
+      nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
+      normFactor, normov, atotal, aodd, aeven);
+    DebugSync();
+  }
+
+  void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount)
+  {
+    dim3 threads(256);
+    dim3 blocks(nblocks(nBlkCount, threads.x));
+    kl_load_mv << <blocks, threads, 0, stream >> >(in, vectors, sads, nBlkCount);
+    DebugSync();
+  }
+
+  void StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount)
+  {
+    dim3 threads(256);
+    dim3 blocks(nblocks(nBlkCount, threads.x));
+    kl_store_mv << <blocks, threads, 0, stream >> >(out, vectors, sads, nBlkCount);
+    DebugSync();
+  }
+
+  void WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD)
+  {
+    dim3 threads(256);
+    dim3 blocks(nblocks(nBlkCount, threads.x));
+    kl_write_default_mv << <blocks, threads, 0, stream >> >(dst, nBlkCount, verybigSAD);
+    DebugSync();
+  }
+  void GetDegrainStructSize(int N, int& degrainBlock, int& degrainArg)
+  {
+    switch (N) {
+    case 1:
+      degrainBlock = sizeof(DegrainBlock<uchar4, 1>);
+      degrainArg = sizeof(DegrainArg<pixel_t, 1>);
+      break;
+    case 2:
+      degrainBlock = sizeof(DegrainBlock<uchar4, 2>);
+      degrainArg = sizeof(DegrainArg<pixel_t, 2>);
+      break;
+    default:
+      env->ThrowError("Degrain: Invalid N (%d)", N);
+    }
+  }
+
+  template <typename vpixel_t, int N, int NPEL>
+  void launch_prepare_degrain(
+    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
+    const short* ovrwins,
+    const int * sceneChangeB,
+    const int * sceneChangeF,
+    const DegrainArg<pixel_t, N>* parg,
+    DegrainBlock<vpixel_t, N>* pblocks,
+    int nPitch, int nImgPitch)
+  {
+    dim3 threads(32, 8);
+    dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
+    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL> << <blocks, threads >> > (
+      nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nImgPitch);
+    DebugSync();
+  }
+
+  template <int N, int BLK_SIZE, int M>
+  void launch_degrain_2x3(
+    int nPatternX, int nPatternY,
+    int nBlkX, int nBlkY, DegrainBlock<vpixel_t, N>* data, vtmp_t* pDst, int pitch4)
+  {
+    dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
+    dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
+    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, N, BLK_SIZE, M> << <blocks, threads >> > (
+      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4);
+    DebugSync();
+  }
+
+  struct DegrainShortToChar {
+    __device__ void operator()(vpixel_t& a, vtmp_t b) {
+      a.x = (pixel_t)b.x;
+      a.y = (pixel_t)b.y;
+      a.z = (pixel_t)b.z;
+      a.w = (pixel_t)b.w;
+    }
+  };
+
+  typedef void (Me::*DEGRAINN)(
+    int nWidth, int nHeight,
+    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel,
+    bool* enableYUV, bool* isUsableB, bool* isUsableF,
+    int nTh1, int nTh2, int thSAD,
+    const short* ovrwins, const short* overwinsUV,
+    const VECTOR** mvB, const VECTOR** mvF,
+    const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
+    int nPitch, int nPitchUV, int nImgPitch, int nImgPitchUV,
+    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
+  );
+
+  // pTmpはpSrcと同じpitchであること
+  template <int N>
+  void DegrainN(
+    int nWidth, int nHeight,
+    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel,
+    bool* enableYUV, bool* isUsableB, bool* isUsableF,
+    int nTh1, int nTh2, int thSAD,
+    const short* ovrwins, const short* overwinsUV,
+    const VECTOR** mvB, const VECTOR** mvF,
+    const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
+    int nPitch, int nPitchUV, int nImgPitch, int nImgPitchUV,
+    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
+  )
+  {
+
+    int nOverlap = nBlkSize / 2;
+    int nWidth_B = nBlkX*(nBlkSize - nOverlap) + nOverlap;
+    int nHeight_B = nBlkY*(nBlkSize - nOverlap) + nOverlap;
+
+    // degrainarg作成
+    DegrainArg<pixel_t, N> *hargs = new DegrainArg<pixel_t, N>[3];
+    DegrainArg<pixel_t, N> *dargs = (DegrainArg<pixel_t, N>*)_degraindarg;
+
+    for (int p = 0; p < 3; ++p) {
+      DegrainArgData<pixel_t, N>& arg = hargs[p].d;
+      if (enableYUV[p]) {
+        for (int i = 0; i < N; ++i) {
+          arg.mvB[i] = mvB[i];
+          arg.mvF[i] = mvF[i];
+        }
+        arg.pSrc = pSrc[p];
+        arg.pDst = pDst[p];
+        for (int i = 0; i < N; ++i) {
+          arg.pRefB[i] = pRefB[p + i * 3];
+          arg.pRefF[i] = pRefF[p + i * 3];
+        }
+      }
+    }
+
+    CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice));
+
+    // 終わったら解放するコールバックを追加
+    static_cast<IScriptEnvironment2*>(env)->DeviceAddCallback([](void* arg) {
+      delete[]((DegrainArg<pixel_t, N>*)arg);
+    }, hargs);
+
+    void(Me::*prepare_func)(
+      int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
+      const short* ovrwins,
+      const int * sceneChangeB,
+      const int * sceneChangeF,
+      const DegrainArg<pixel_t, N>* parg,
+      DegrainBlock<vpixel_t, N>* blocks,
+      int nPitch, int nImgPitch);
+
+    switch (nPel) {
+    case 1:
+      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 1>;
+      break;
+    case 2:
+      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 2>;
+      break;
+    default:
+      env->ThrowError("未対応Pel");
+    }
+
+    DegrainBlock<vpixel_t, N>* degrainblocks = (DegrainBlock<vpixel_t, N>*)_degrainblocks;
+
+    // YUVループ
+    for (int p = 0; p < 3; ++p) {
+
+      int shift = (p == 0) ? 0 : 1;
+      int blksize = nBlkSize >> shift;
+      int width = nWidth >> shift;
+      int width_b = nWidth_B >> shift;
+      int width4 = width / 4;
+      int width_b4 = width_b / 4;
+      int height = nHeight >> shift;
+      int height_b = nHeight_B >> shift;
+      int pitch = (p == 0) ? nPitch : nPitchUV;
+      int pitch4 = pitch / 4;
+      int imgpitch = (p == 0) ? nImgPitch : nImgPitchUV;
+
+      if (enableYUV[p]) {
+
+        // DegrainBlockData作成
+        (this->*prepare_func)(
+          nBlkX, nBlkY, nPad >> shift, blksize, nTh2, thSAD,
+          (p == 0) ? ovrwins : overwinsUV,
+          sceneChangeB, sceneChangeF, &dargs[p],
+          degrainblocks, pitch, imgpitch);
+        DebugSync();
+
+        // pTmp初期化
+        launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
+          (vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
+
+        void(Me::*degrain_func)(
+          int nPatternX, int nPatternY,
+          int nBlkX, int nBlkY, DegrainBlock<vpixel_t, N>* data, vtmp_t* pDst, int pitch4);
+
+        switch (blksize) {
+        case 8:
+          degrain_func = &Me::launch_degrain_2x3<N, 8, 8>;  // 8x2x8  = 128threads
+          break;
+        case 16:
+          degrain_func = &Me::launch_degrain_2x3<N, 16, 1>; // 16x4x1 =  64threads
+          break;
+        case 32:
+          degrain_func = &Me::launch_degrain_2x3<N, 32, 1>; // 32x8x1 = 256threads
+          break;
+        default:
+          env->ThrowError("未対応ブロックサイズ");
+        }
+
+        // 4回カーネル呼び出し
+        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
+        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
+        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
+        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
+
+        // tmp_t -> pixel_t 変換
+        launch_elementwise<vpixel_t, vtmp_t, DegrainShortToChar>(
+          (vpixel_t*)pDst[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
+
+        // right non-covered regionをsrcからコピー
+        if (nWidth_B < nWidth) {
+          launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+            (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
+            (const vpixel_t*)(pSrc[p] + (nWidth_B >> shift)),
+            ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4);
+        }
+
+        // bottom uncovered regionをsrcからコピー
+        if (nHeight_B < nHeight) {
+          launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+            (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch4),
+            (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch4),
+            width4, (nHeight - nHeight_B) >> shift, pitch4);
+        }
+      }
+      else {
+        // srcからコピー
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], width4, height, pitch4);
+      }
+    }
+  }
+
+  void Degrain(
+    int N, int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel,
+    bool* enableYUV,
+    bool* isUsableB, bool* isUsableF,
+    int nTh1, int nTh2, int thSAD,
+    const short* ovrwins, const short* overwinsUV,
+    const VECTOR** mvB, const VECTOR** mvF,
+    const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
+    int nPitch, int nPitchUV, int nImgPitch, int nImgPitchUV,
+    void* _degrainblock, void* _degrainarg, int* sceneChange)
+  {
+    int numRef = N * 2;
+    int numBlks = nBlkX * nBlkY;
+
+    // SceneChange検出
+    int *sceneChangeB = sceneChange;
+    int *sceneChangeF = sceneChange + N;
+
+    kl_init_scene_change << <1, numRef >> > (sceneChange);
+    DebugSync();
+    for (int i = 0; i < N; ++i) {
+      dim3 threads(256);
+      dim3 blocks(nblocks(numBlks, threads.x));
+      kl_scene_change << <blocks, threads >> > (mvB[i], numBlks, nTh1, &sceneChangeB[i]);
+      kl_scene_change << <blocks, threads >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
+      DebugSync();
+    }
+
+    DEGRAINN degrain;
+    switch (N) {
+    case 1:
+      degrain = &Me::DegrainN<1>;
+      break;
+    case 2:
+      degrain = &Me::DegrainN<2>;
+      break;
+    default:
+      env->ThrowError("未対応Nです");
+    }
+
+    (this->*degrain)(
+      nWidth, nHeight, nBlkX, nBlkY, nPad, nBlkSize, nPel,
+      enableYUV, isUsableB, isUsableF,
+      nTh1, nTh2, thSAD,
+      ovrwins, overwinsUV, mvB, mvF,
+      pSrc, pDst, pTmp, pRefB, pRefF,
+      nPitch, nPitchUV, nImgPitch, nImgPitchUV,
+      _degrainblock, _degrainarg, sceneChangeB, sceneChangeF);
+  }
+
+};
+
+/////////////////////////////////////////////////////////////////////////////
+// IKDeintKernelGImpl
+/////////////////////////////////////////////////////////////////////////////
+
+class IKDeintCUDAImpl : public IKDeintCUDA
+{
+  KDeintKernel<uint8_t> k8;
+  KDeintKernel<uint16_t> k16;
+
+public:
+  virtual void SetEnv(bool isEnabled, cudaStream_t stream, IScriptEnvironment* env) {
+    k8.SetEnv(isEnabled, stream, env);
+    k16.SetEnv(isEnabled, stream, env);
+  }
+
+  virtual bool IsEnabled() const {
+    return k8.IsEnabled();
+  }
+
+  virtual IKDeintKernel<uint8_t>* get(uint8_t) { return &k8; }
+  virtual IKDeintKernel<uint16_t>* get(uint16_t) { return &k16; }
+};
+
+IKDeintCUDA* CreateKDeintCUDA()
+{
+  return new IKDeintCUDAImpl();
+}
