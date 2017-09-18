@@ -19,7 +19,7 @@ template <typename T>
 class DataDebug
 {
 public:
-	DataDebug(T* ptr, int size, IScriptEnvironment* env) {
+	DataDebug(T* ptr, int size, IScriptEnvironment2* env) {
 		host = (T*)malloc(sizeof(T)*size);
 		CUDA_CHECK(cudaMemcpy(host, ptr, sizeof(T)*size, cudaMemcpyDeviceToHost));
 		CUDA_CHECK(cudaDeviceSynchronize());
@@ -1723,18 +1723,19 @@ __global__ void kl_scene_change(const VECTOR* mv, int nBlks, int nTh1, int* scen
   }
 }
 
-template <typename vpixel_t, int N>
+template <typename pixel_t, typename vpixel_t, int N>
 struct DegrainBlockData {
-  const short *winOver;
-  const vpixel_t *pSrc, *pB[N], *pF[N];
+  const short4 *winOver;
+  const vpixel_t *pSrc;
+  const pixel_t *pB[N], *pF[N];
   vpixel_t *pDst;
   int WSrc, WRefB[N], WRefF[N];
 };
 
-template <typename vpixel_t, int N>
+template <typename pixel_t, typename vpixel_t, int N>
 union DegrainBlock {
-  enum { LEN = sizeof(DegrainBlockData<vpixel_t, N>) / 4 };
-  DegrainBlockData<vpixel_t, N> d;
+  enum { LEN = sizeof(DegrainBlockData<pixel_t, vpixel_t, N>) / 4 };
+  DegrainBlockData<pixel_t, vpixel_t, N> d;
   uint32_t m[LEN];
 };
 
@@ -1747,7 +1748,7 @@ struct DegrainArgData {
 };
 
 template <typename pixel_t, int N>
-struct DegrainArg {
+union DegrainArg {
   enum { LEN = sizeof(DegrainArgData<pixel_t, N>) / 4 };
   DegrainArgData<pixel_t, N> d;
   uint32_t m[LEN];
@@ -1818,15 +1819,15 @@ static __device__ void dev_norm_weights(int &WSrc, int *WRefB, int *WRefF)
     WSrc = 256 - WRefB[0] - WRefF[0];
 }
 
-template <typename pixel_t, typename vpixel_t, int N, int NPEL>
+template <typename pixel_t, typename vpixel_t, int N, int NPEL, int SHIFT>
 static __global__ void kl_prepare_degrain(
   int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
   const short* ovrwins,
   const int * __restrict__ sceneChangeB,
   const int * __restrict__ sceneChangeF,
   const DegrainArg<pixel_t, N>* parg,
-  DegrainBlock<vpixel_t, N>* blocks,
-  int nPitch, int nImgPitch
+  DegrainBlock<pixel_t, vpixel_t, N>* blocks,
+  int nPitch, int nPitchSuper, int nImgPitch
 )
 {
   int tx = threadIdx.x;
@@ -1844,17 +1845,20 @@ static __global__ void kl_prepare_degrain(
 
   if (blkx < nBlkX && blky < nBlkY) {
     DegrainArgData<pixel_t, N>& arg = s_arg_buf.d;
-    DegrainBlockData<vpixel_t, N>& b = blocks[idx].d;
+    DegrainBlockData<pixel_t, vpixel_t, N>& b = blocks[idx].d;
 
     // winOver
     int wby = ((blky + nBlkY - 3) / (nBlkY - 2)) * 3;
     int wbx = (blkx + nBlkX - 3) / (nBlkX - 2);
-    b.winOver = ovrwins + (wby + wbx) * nBlkSize * nBlkSize;
+    b.winOver = (const short4*)(ovrwins + (wby + wbx) * nBlkSize * nBlkSize);
 
     int blkStep = nBlkSize / 2;
-    int offx = nPad + blkx * blkStep;
-    int offy = nPad + blky * blkStep;
+    int offx = blkx * blkStep;
+    int offy = blky * blkStep;
+    int offxS = nPad + offx;
+    int offyS = nPad + offy;
     int offset = offx + offy * nPitch;
+    int offsetS = offxS + offyS * nPitchSuper;
 
     int WSrc, WRefB[N], WRefF[N];
 
@@ -1865,20 +1869,29 @@ static __global__ void kl_prepare_degrain(
     for (int i = 0; i < N; ++i) {
       bool isUsableB = arg.isUsableB[i] && !(sceneChangeB[i] > nTh2);
       if (isUsableB) {
-        b.pB[i] = (const vpixel_t*)dev_get_ref_block<pixel_t, NPEL>(arg.pRefB[i] + offset, nPitch, nImgPitch, arg.mvB[i][idx].x, arg.mvB[i][idx].y);
+        b.pB[i] = dev_get_ref_block<pixel_t, NPEL>(arg.pRefB[i] + offsetS, nPitchSuper, nImgPitch,
+          arg.mvB[i][idx].x >> SHIFT, arg.mvB[i][idx].y >> SHIFT);
         WRefB[i] = dev_degrain_weight(thSAD, arg.mvB[i][idx].sad);
+#if 0
+        if (blkx == 13 && blky == 0) {
+          int off = b.pB[i] - (vpixel_t*)arg.pRefB[i];
+          printf("(%d,%d) => off=%d, pitch=%d,imgpitch=%d,v=%d\n",
+            arg.mvB[i][idx].x, arg.mvB[i][idx].y, off, nPitchSuper, nImgPitch, b.pB[i][1].y);
+        }
+#endif
       }
       else {
-        b.pB[i] = (const vpixel_t*)(arg.pSrc + offset);
+        b.pB[i] = (arg.pSrc + offset);
         WRefB[i] = 0;
       }
       bool isUsableF = arg.isUsableF[i] && !(sceneChangeF[i] > nTh2);
       if (isUsableF) {
-        b.pF[i] = (const vpixel_t*)dev_get_ref_block<pixel_t, NPEL>(arg.pRefF[i] + offset, nPitch, nImgPitch, arg.mvF[i][idx].x, arg.mvF[i][idx].y);
+        b.pF[i] = dev_get_ref_block<pixel_t, NPEL>(arg.pRefF[i] + offsetS, nPitchSuper, nImgPitch,
+          arg.mvF[i][idx].x >> SHIFT, arg.mvF[i][idx].y >> SHIFT);
         WRefF[i] = dev_degrain_weight(thSAD, arg.mvF[i][idx].sad);
       }
       else {
-        b.pF[i] = (const vpixel_t*)(arg.pSrc + offset);
+        b.pF[i] = (arg.pSrc + offset);
         WRefF[i] = 0;
       }
     }
@@ -1898,7 +1911,7 @@ static __global__ void kl_prepare_degrain(
 template <typename pixel_t, typename vpixel_t, typename vtmp_t, int N, int BLK_SIZE, int M>
 static __global__ void kl_degrain_2x3(
   int nPatternX, int nPatternY,
-  int nBlkX, int nBlkY, DegrainBlock<vpixel_t, N>* data, vtmp_t* pDst, int pitch4
+  int nBlkX, int nBlkY, DegrainBlock<pixel_t, vpixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4
 )
 {
   enum {
@@ -1911,25 +1924,27 @@ static __global__ void kl_degrain_2x3(
     TMP_W = BLK_SIZE + BLK_STEP * 2, // == BLK_SIZE * 2
     TMP_H = BLK_SIZE + BLK_STEP * 1,
     TMP_W4 = TMP_W / 4,
-    N_READ_LOOP = DegrainBlock<vpixel_t, N>::LEN / THREADS
+    N_READ_LOOP = DegrainBlock<pixel_t, vpixel_t, N>::LEN / THREADS
   };
 
   int tx = threadIdx.x;
   int ty = threadIdx.y;
-  int tz = threadIdx.z;
+  int tz = (M == 1) ? 0 : threadIdx.z;
 
   int tid = tx + ty * BLK_SIZE4;
   int offset = tx + ty * pitch4;
+  int offsetSuper = (tx + ty * pitchsuper4) * 4;
 
   __shared__ vtmp_t tmp[M][TMP_H][TMP_W4];
-  __shared__ DegrainBlock<vpixel_t, N> info;
+  __shared__ DegrainBlock<pixel_t, vpixel_t, N> info_[M];
+  DegrainBlock<pixel_t, vpixel_t, N>& info = info_[tz];
 
   // tmp初期化
-  tmp[tx][ty][tx] = VHelper<vtmp_t>::make(0);
-  tmp[tx][ty][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
+  tmp[tz][ty][tx] = VHelper<vtmp_t>::make(0);
+  tmp[tz][ty][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
   if (ty < BLK_STEP) {
-    tmp[tx][ty + BLK_SIZE][tx] = VHelper<vtmp_t>::make(0);
-    tmp[tx][ty + BLK_SIZE][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
+    tmp[tz][ty + BLK_SIZE][tx] = VHelper<vtmp_t>::make(0);
+    tmp[tz][ty + BLK_SIZE][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
   }
 
   __syncthreads();
@@ -1955,33 +1970,52 @@ static __global__ void kl_degrain_2x3(
       for (int i = 0; i < N_READ_LOOP; ++i) {
         info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
       }
-      if (THREADS * N_READ_LOOP + tid < DegrainBlock<vpixel_t, N>::LEN) {
+      if (THREADS * N_READ_LOOP + tid < DegrainBlock<pixel_t, vpixel_t, N>::LEN) {
         info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
       }
       __syncthreads();
 
       int4 val = { 0 };
       if (N == 1)
-        val = to_int(info.d.pSrc[offset]) * info.d.WSrc +
-        to_int(info.d.pF[0][offset]) * info.d.WRefF[0] + to_int(info.d.pB[0][offset]) * info.d.WRefB[0];
+        val = to_int(__ldg(&info.d.pSrc[offset])) * info.d.WSrc +
+          load_to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + load_to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
       else if (N == 2)
-        val = to_int(info.d.pSrc[offset]) * info.d.WSrc +
-          to_int(info.d.pF[0][offset]) * info.d.WRefF[0] + to_int(info.d.pB[0][offset]) * info.d.WRefB[0] +
-          to_int(info.d.pF[1][offset]) * info.d.WRefF[1] + to_int(info.d.pB[1][offset]) * info.d.WRefB[1];
+        val = to_int(__ldg(&info.d.pSrc[offset])) * info.d.WSrc +
+          load_to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + load_to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
+          load_to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + load_to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
 
       int dstx = bbx * BLK_STEP4 + tx;
       int dsty = bby * BLK_STEP + ty;
 
       val = (val + (no_need_round ? 0 : 128)) >> 8;
-      tmp[tz][dsty][dstx] += val * info.d.winOver[tid];
+
+      if (sizeof(pixel_t) == 1)
+        tmp[tz][dsty][dstx] += (val * __ldg(&info.d.winOver[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+      else
+        tmp[tz][dsty][dstx] += val * __ldg(&info.d.winOver[tid]); // shift (5+6); in Short2Bytes16
 
       __syncthreads();
+#if 0
+      if (basex == 12 && basey == 0 && dsty == 0 && dstx == 2) {
+        auto t = (val * info.d.winOver[tid] + 256) >> 6;
+        printf("%d,%d*%d+%d*%d+%d*%d=%d*%d=>%d\n",
+          tmp[0][0][3].y, info.d.pSrc[offset].y,
+          info.d.WSrc, info.d.pF[0][offsetSuper].y,
+          info.d.WRefF[0], info.d.pB[0][offsetSuper].y,
+          info.d.WRefB[0], val.y, info.d.winOver[tid].y,
+          t.y);
+      }
+#endif
     }
   }
 
   // dstに書き込む
-  vtmp_t *p = &pDst[basex * BLK_STEP + tx + (basey * BLK_STEP + ty) * pitch4];
-
+  vtmp_t *p = &pDst[basex * BLK_STEP4 + tx + (basey * BLK_STEP + ty) * pitch4];
+#if 0
+  if (basex == 0 && basey == 0 && tx == 0 && ty == 0) {
+    printf("%d\n", tmp[0][0][0].x);
+  }
+#endif
   int bsx = tx / BLK_STEP4 - 1;
   int bsy = ty / BLK_STEP - 1;
   if (basex + bsx < nBlkX && basey + bsy < nBlkY) {
@@ -1997,6 +2031,20 @@ static __global__ void kl_degrain_2x3(
         }
       }
     }
+  }
+}
+
+template <typename vpixel_t, typename vtmp_t>
+__global__ void kl_short_to_byte(
+  vpixel_t* dst, const vtmp_t* src, int width4, int height, int pitch4, int max_pixel_value)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    const int shift = sizeof(dst[0].x) == 1 ? 5 : (5 + 6);
+    int4 v = min(to_int(src[x + y * pitch4]) >> shift, max_pixel_value);
+    dst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(v);
   }
 }
 
@@ -2032,7 +2080,7 @@ public:
   typedef typename DegrainTypes<pixel_t>::vtmp_t vtmp_t;
 
   virtual bool IsEnabled() const {
-    return isEnabled;
+    return (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA);
   }
 
   void MemCpy(void* dst, const void* src, int nbytes)
@@ -2349,11 +2397,11 @@ public:
   {
     switch (N) {
     case 1:
-      degrainBlock = sizeof(DegrainBlock<uchar4, 1>);
+      degrainBlock = sizeof(DegrainBlock<pixel_t, uchar4, 1>);
       degrainArg = sizeof(DegrainArg<pixel_t, 1>);
       break;
     case 2:
-      degrainBlock = sizeof(DegrainBlock<uchar4, 2>);
+      degrainBlock = sizeof(DegrainBlock<pixel_t, uchar4, 2>);
       degrainArg = sizeof(DegrainArg<pixel_t, 2>);
       break;
     default:
@@ -2361,53 +2409,55 @@ public:
     }
   }
 
-  template <typename vpixel_t, int N, int NPEL>
+  template <typename vpixel_t, int N, int NPEL, int SHIFT>
   void launch_prepare_degrain(
     int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
     const short* ovrwins,
     const int * sceneChangeB,
     const int * sceneChangeF,
     const DegrainArg<pixel_t, N>* parg,
-    DegrainBlock<vpixel_t, N>* pblocks,
-    int nPitch, int nImgPitch)
+    DegrainBlock<pixel_t, vpixel_t, N>* pblocks,
+    int nPitch, int nPitchSuper, int nImgPitch)
   {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
-    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL> << <blocks, threads >> > (
-      nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nImgPitch);
+    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT> << <blocks, threads >> > (
+      nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nPitchSuper, nImgPitch);
     DebugSync();
   }
 
   template <int N, int BLK_SIZE, int M>
   void launch_degrain_2x3(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, DegrainBlock<vpixel_t, N>* data, vtmp_t* pDst, int pitch4)
+    int nBlkX, int nBlkY, DegrainBlock<pixel_t, vpixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4)
   {
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
     kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, N, BLK_SIZE, M> << <blocks, threads >> > (
-      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4);
+      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4, pitchsuper4);
     DebugSync();
   }
 
-  struct DegrainShortToChar {
-    __device__ void operator()(vpixel_t& a, vtmp_t b) {
-      a.x = (pixel_t)b.x;
-      a.y = (pixel_t)b.y;
-      a.z = (pixel_t)b.z;
-      a.w = (pixel_t)b.w;
-    }
-  };
+  template <typename vpixel_t, typename vtmp_t>
+  void launch_short_to_byte(
+    vpixel_t* dst, const vtmp_t* src, int width4, int height, int pitch4, int max_pixel_value)
+  {
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_short_to_byte<vpixel_t, vtmp_t> << <blocks, threads >> > (
+      dst, src, width4, height, pitch4, max_pixel_value);
+    DebugSync();
+  }
 
   typedef void (Me::*DEGRAINN)(
     int nWidth, int nHeight,
-    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel,
+    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV, bool* isUsableB, bool* isUsableF,
-    int nTh1, int nTh2, int thSAD,
+    int nTh1, int nTh2, int thSAD, int thSADC,
     const short* ovrwins, const short* overwinsUV,
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
-    int nPitch, int nPitchUV, int nImgPitch, int nImgPitchUV,
+    int nPitch, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitch, int nImgPitchUV,
     void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
   );
 
@@ -2415,13 +2465,13 @@ public:
   template <int N>
   void DegrainN(
     int nWidth, int nHeight,
-    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel,
+    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV, bool* isUsableB, bool* isUsableF,
-    int nTh1, int nTh2, int thSAD,
+    int nTh1, int nTh2, int thSAD, int thSADC,
     const short* ovrwins, const short* overwinsUV,
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
-    int nPitch, int nPitchUV, int nImgPitch, int nImgPitchUV,
+    int nPitchY, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
     void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
   )
   {
@@ -2447,6 +2497,10 @@ public:
           arg.pRefB[i] = pRefB[p + i * 3];
           arg.pRefF[i] = pRefF[p + i * 3];
         }
+        for (int i = 0; i < N; ++i) {
+          arg.isUsableB[i] = isUsableB[i];
+          arg.isUsableF[i] = isUsableF[i];
+        }
       }
     }
 
@@ -2457,31 +2511,37 @@ public:
       delete[]((DegrainArg<pixel_t, N>*)arg);
     }, hargs);
 
-    void(Me::*prepare_func)(
+    typedef void (Me::*PREPARE)(
       int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
       const short* ovrwins,
       const int * sceneChangeB,
       const int * sceneChangeF,
       const DegrainArg<pixel_t, N>* parg,
-      DegrainBlock<vpixel_t, N>* blocks,
-      int nPitch, int nImgPitch);
+      DegrainBlock<pixel_t, vpixel_t, N>* blocks,
+      int nPitch, int nPitchSuper, int nImgPitch);
+
+    PREPARE prepare_func, prepareuv_func;
 
     switch (nPel) {
     case 1:
-      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 1>;
+      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 0>;
+      prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 1>;
       break;
     case 2:
-      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 2>;
+      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 0>;
+      prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 1>;
       break;
     default:
       env->ThrowError("未対応Pel");
     }
 
-    DegrainBlock<vpixel_t, N>* degrainblocks = (DegrainBlock<vpixel_t, N>*)_degrainblocks;
+    DegrainBlock<pixel_t, vpixel_t, N>* degrainblocks = (DegrainBlock<pixel_t, vpixel_t, N>*)_degrainblocks;
+    const int max_pixel_value = (1 << nBitsPerPixel) - 1;
 
     // YUVループ
     for (int p = 0; p < 3; ++p) {
 
+      PREPARE prepare = (p == 0) ? prepare_func : prepareuv_func;
       int shift = (p == 0) ? 0 : 1;
       int blksize = nBlkSize >> shift;
       int width = nWidth >> shift;
@@ -2490,27 +2550,30 @@ public:
       int width_b4 = width_b / 4;
       int height = nHeight >> shift;
       int height_b = nHeight_B >> shift;
-      int pitch = (p == 0) ? nPitch : nPitchUV;
+      int pitch = (p == 0) ? nPitchY : nPitchUV;
+      int pitchsuper = (p == 0) ? nPitchSuperY : nPitchSuperUV;
       int pitch4 = pitch / 4;
-      int imgpitch = (p == 0) ? nImgPitch : nImgPitchUV;
+      int pitchsuper4 = pitchsuper / 4;
+      int imgpitch = (p == 0) ? nImgPitchY : nImgPitchUV;
 
       if (enableYUV[p]) {
 
         // DegrainBlockData作成
-        (this->*prepare_func)(
-          nBlkX, nBlkY, nPad >> shift, blksize, nTh2, thSAD,
+        (this->*prepare)(
+          nBlkX, nBlkY, nPad >> shift, blksize, nTh2,
+          (p == 0) ? thSAD : thSADC,
           (p == 0) ? ovrwins : overwinsUV,
           sceneChangeB, sceneChangeF, &dargs[p],
-          degrainblocks, pitch, imgpitch);
-        DebugSync();
+          degrainblocks, pitch, pitchsuper, imgpitch);
 
         // pTmp初期化
         launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
           (vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
+        DebugSync();
 
         void(Me::*degrain_func)(
           int nPatternX, int nPatternY,
-          int nBlkX, int nBlkY, DegrainBlock<vpixel_t, N>* data, vtmp_t* pDst, int pitch4);
+          int nBlkX, int nBlkY, DegrainBlock<pixel_t, vpixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4);
 
         switch (blksize) {
         case 8:
@@ -2527,14 +2590,20 @@ public:
         }
 
         // 4回カーネル呼び出し
-        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
-        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
-        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
-        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4);
+        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
 
         // tmp_t -> pixel_t 変換
-        launch_elementwise<vpixel_t, vtmp_t, DegrainShortToChar>(
-          (vpixel_t*)pDst[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
+        launch_short_to_byte<vpixel_t, vtmp_t>(
+          (vpixel_t*)pDst[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value);
+
+#if 0
+        DataDebug<tmp_t> dtmp(pTmp[p], height_b * pitch, env);
+        DataDebug<pixel_t> ddst(pDst[p], height_b * pitch, env);
+        dtmp.Show();
+#endif
 
         // right non-covered regionをsrcからコピー
         if (nWidth_B < nWidth) {
@@ -2561,14 +2630,15 @@ public:
   }
 
   void Degrain(
-    int N, int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel,
+    int N, int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV,
     bool* isUsableB, bool* isUsableF,
-    int nTh1, int nTh2, int thSAD,
+    int nTh1, int nTh2, int thSAD, int thSADC,
     const short* ovrwins, const short* overwinsUV,
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
-    int nPitch, int nPitchUV, int nImgPitch, int nImgPitchUV,
+    int nPitchY, int nPitchUV,
+    int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
     void* _degrainblock, void* _degrainarg, int* sceneChange)
   {
     int numRef = N * 2;
@@ -2601,19 +2671,19 @@ public:
     }
 
     (this->*degrain)(
-      nWidth, nHeight, nBlkX, nBlkY, nPad, nBlkSize, nPel,
+      nWidth, nHeight, nBlkX, nBlkY, nPad, nBlkSize, nPel, nBitsPerPixel,
       enableYUV, isUsableB, isUsableF,
-      nTh1, nTh2, thSAD,
+      nTh1, nTh2, thSAD, thSADC,
       ovrwins, overwinsUV, mvB, mvF,
       pSrc, pDst, pTmp, pRefB, pRefF,
-      nPitch, nPitchUV, nImgPitch, nImgPitchUV,
+      nPitchY, nPitchUV, nPitchSuperY, nPitchSuperUV, nImgPitchY, nImgPitchUV,
       _degrainblock, _degrainarg, sceneChangeB, sceneChangeF);
   }
 
 };
 
 /////////////////////////////////////////////////////////////////////////////
-// IKDeintKernelGImpl
+// IKDeintCUDAImpl
 /////////////////////////////////////////////////////////////////////////////
 
 class IKDeintCUDAImpl : public IKDeintCUDA
@@ -2622,9 +2692,9 @@ class IKDeintCUDAImpl : public IKDeintCUDA
   KDeintKernel<uint16_t> k16;
 
 public:
-  virtual void SetEnv(bool isEnabled, cudaStream_t stream, IScriptEnvironment* env) {
-    k8.SetEnv(isEnabled, stream, env);
-    k16.SetEnv(isEnabled, stream, env);
+  virtual void SetEnv(cudaStream_t stream, IScriptEnvironment2* env) {
+    k8.SetEnv(stream, env);
+    k16.SetEnv(stream, env);
   }
 
   virtual bool IsEnabled() const {

@@ -9,14 +9,12 @@
 class CudaKernelBase
 {
 protected:
-  bool isEnabled;
-  IScriptEnvironment* env;
+  IScriptEnvironment2* env;
   cudaStream_t stream;
 public:
 
-  void SetEnv(bool isEnabled, cudaStream_t stream, IScriptEnvironment* env)
+  void SetEnv(cudaStream_t stream, IScriptEnvironment2* env)
   {
-    this->isEnabled = isEnabled;
     this->env = env;
     this->stream = stream;
   }
@@ -24,8 +22,9 @@ public:
   void DebugSync()
   {
 #ifndef NDEBUG
+//#if 1
     CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    CUDA_CHECK(cudaDeviceSynchronize());
 #endif
   }
 

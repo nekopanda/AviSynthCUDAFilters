@@ -298,7 +298,7 @@ public:
 
 #pragma endregion
 
-void AddFuncKernel(IScriptEnvironment* env)
+void AddFuncKernel(IScriptEnvironment2* env)
 {
 	env->AddFunction("KDeintBob", "c", KDeintBob::Create, 0);
 }

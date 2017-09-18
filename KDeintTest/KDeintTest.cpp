@@ -53,7 +53,8 @@ protected:
 	std::string modulePath;
 	std::string workDirPath;
 
-	void AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch);
+  void AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch);
+  void DegrainCUDATest(int blksize, int pel);
 };
 
 void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch)
@@ -88,8 +89,8 @@ void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int
 		{
 			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
       // バッチ分は全て確認する
-      //for (int i = 0; i < batch; ++i) {
-      for (int i = 0; i < 1; ++i) {
+      for (int i = 0; i < batch; ++i) {
+      //for (int i = 0; i < 1; ++i) {
         clip->GetFrame(100 + i, env);
       }
 		}
@@ -101,6 +102,8 @@ void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int
 		GTEST_FAIL();
 	}
 }
+
+#pragma region Analyze
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch1)
 {
@@ -167,9 +170,77 @@ TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
   AnalyzeCUDATest(false, 16, true, 2, 4);
 }
 
+#pragma endregion
+
+void TestBase::DegrainCUDATest(int blksize, int pel)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string kdeintPath = modulePath + "\\KDeint.dll";
+    env->LoadPlugin(kdeintPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "s = src.KMSuper(pel = " << pel << ")" << std::endl;
+    out << "scuda = s.OnCPU(0)" << std::endl;
+    out << "pmvb = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "pmvf = s.KMPartialSuper().KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    if (false) { // MV CUDA版
+      out << "mvb = scuda.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb.OnCPU(0))" << std::endl;
+      out << "mvf = scuda.KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf.OnCPU(0))" << std::endl;
+      out << "degref = KMDegrain1(s, mvb.OnCUDA(0), mvf.OnCUDA(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
+      out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+    }
+    else {
+      out << "mvb = s.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb)" << std::endl;
+      out << "mvf = s.KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf)" << std::endl;
+      out << "degref = src.KMDegrain1(s, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
+      out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+    }
+    out << "ImageCompare(degref, degcuda)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      // バッチ分は全て確認する
+      for (int i = 0; i < 1; ++i) {
+        clip->GetFrame(100 + i, env);
+      }
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+#pragma region Degrain
+
+TEST_F(TestBase, DegrainCUDA_Blk16Pel2)
+{
+  DegrainCUDATest(16, 2);
+}
+
+#pragma endregion
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*Analyze*";
+	::testing::GTEST_FLAG(filter) = "*DegrainCUDA_Blk16Pel2*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
