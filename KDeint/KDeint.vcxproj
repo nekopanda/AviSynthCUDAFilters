@@ -23,6 +23,7 @@
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>KDeint</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <ProjectName>KTGMC</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -176,7 +177,7 @@
     <ClCompile Include="MV.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="KDeintKernel.cu" />
+    <CudaCompile Include="MVKernel.cu" />
     <CudaCompile Include="Kernel.cu">
       <FileType>Document</FileType>
     </CudaCompile>
@@ -185,7 +186,7 @@
     <ClInclude Include="CudaKernelBase.h" />
     <ClInclude Include="DebugWriter.h" />
     <ClInclude Include="DeviceLocalData.h" />
-    <ClInclude Include="KDeintKernel.h" />
+    <ClInclude Include="MVKernel.h" />
     <ClInclude Include="ReduceKernel.cuh" />
     <ClInclude Include="VectorFunctions.cuh" />
   </ItemGroup>

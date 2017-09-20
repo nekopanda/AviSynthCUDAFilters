@@ -11,7 +11,7 @@
 #undef max
 
 #include "CommonFunctions.h"
-#include "KDeintKernel.h"
+#include "MVKernel.h"
 #include "DeviceLocalData.h"
 
 #if 1
