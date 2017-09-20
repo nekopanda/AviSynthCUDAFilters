@@ -397,7 +397,7 @@ TEST_F(TestBase, CompensateCUDA_Blk32Pel1)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*Blk32Pel1*";
+	::testing::GTEST_FLAG(filter) = "*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
