@@ -53,11 +53,38 @@ protected:
 	std::string modulePath;
 	std::string workDirPath;
 
-  void AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch);
-  void DegrainCUDATest(int blksize, int pel);
+  enum TEST_FRAMES {
+    TF_MID, TF_BEGIN, TF_END
+  };
+
+  void GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env);
+
+  void AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
+  void DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel);
+  void CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel);
 };
 
-void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int batch)
+void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
+{
+  int nframes = clip->GetVideoInfo().num_frames;
+  switch (tf) {
+  case TF_MID:
+    for (int i = 0; i < 8; ++i) {
+      clip->GetFrame(100 + i, env);
+    }
+    break;
+  case TF_BEGIN:
+    clip->GetFrame(0, env);
+    clip->GetFrame(1, env);
+    break;
+  case TF_END:
+    clip->GetFrame(nframes - 2, env);
+    clip->GetFrame(nframes - 1, env);
+    break;
+  }
+}
+
+void TestBase::AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
 {
 	try {
 		IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -88,11 +115,7 @@ void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int
 
 		{
 			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      // バッチ分は全て確認する
-      for (int i = 0; i < batch; ++i) {
-      //for (int i = 0; i < 1; ++i) {
-        clip->GetFrame(100 + i, env);
-      }
+      GetFrames(clip, tf, env);
 		}
 
 		env->DeleteScriptEnvironment();
@@ -107,72 +130,72 @@ void TestBase::AnalyzeCUDATest(bool cuda, int blksize, bool chroma, int pel, int
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch1)
 {
-  AnalyzeCUDATest(true, 32, false, 1, 1);
+  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 1);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch2)
 {
-  AnalyzeCUDATest(true, 32, false, 1, 2);
+  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 2);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch3)
 {
-  AnalyzeCUDATest(true, 32, false, 1, 3);
+  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 3);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch8)
 {
-  AnalyzeCUDATest(true, 32, false, 1, 8);
+  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 8);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel2)
 {
-	AnalyzeCUDATest(true, 16, true, 2, 4);
+	AnalyzeCUDATest(TF_MID, true, 16, true, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel1)
 {
-	AnalyzeCUDATest(true, 16, true, 1, 4);
+	AnalyzeCUDATest(TF_MID, true, 16, true, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel2)
 {
-	AnalyzeCUDATest(true, 16, false, 2, 4);
+	AnalyzeCUDATest(TF_MID, true, 16, false, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel1)
 {
-	AnalyzeCUDATest(true, 16, false, 1, 4);
+	AnalyzeCUDATest(TF_MID, true, 16, false, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel2)
 {
-	AnalyzeCUDATest(true, 32, true, 2, 4);
+	AnalyzeCUDATest(TF_MID, true, 32, true, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel1)
 {
-	AnalyzeCUDATest(true, 32, true, 1, 4);
+	AnalyzeCUDATest(TF_MID, true, 32, true, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel2)
 {
-	AnalyzeCUDATest(true, 32, false, 2, 4);
+	AnalyzeCUDATest(TF_MID, true, 32, false, 2, 4);
 }
 
 TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1)
 {
-	AnalyzeCUDATest(true, 32, false, 1, 4);
+	AnalyzeCUDATest(TF_MID, true, 32, false, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
 {
-  AnalyzeCUDATest(false, 16, true, 2, 4);
+  AnalyzeCUDATest(TF_MID, false, 16, true, 2, 4);
 }
 
 #pragma endregion
 
-void TestBase::DegrainCUDATest(int blksize, int pel)
+void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -193,21 +216,51 @@ void TestBase::DegrainCUDATest(int blksize, int pel)
       ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
     out << "pmvf = s.KMPartialSuper().KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
       ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
-    if (false) { // MV CUDA版
+    if (N >= 2) {
+      out << "pmvb1 = s.KMPartialSuper().KMAnalyse(isb = true, delta = 2, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+      out << "pmvf1 = s.KMPartialSuper().KMAnalyse(isb = false, delta = 2, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    }
+    if (true) { // MV CUDA版
       out << "mvb = scuda.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
         ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb.OnCPU(0))" << std::endl;
       out << "mvf = scuda.KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
         ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf.OnCPU(0))" << std::endl;
-      out << "degref = KMDegrain1(s, mvb.OnCUDA(0), mvf.OnCUDA(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
-      out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+      if (N >= 2) {
+        out << "mvb1 = scuda.KMAnalyse(isb = true, delta = 2, chroma = false, blksize = " << blksize <<
+          ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb1.OnCPU(0))" << std::endl;
+        out << "mvf1 = scuda.KMAnalyse(isb = false, delta = 2, chroma = false, blksize = " << blksize <<
+          ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1.OnCPU(0))" << std::endl;
+      }
+      if (N == 1) {
+        out << "degref = src.KMDegrain1(s, mvb.OnCUDA(0), mvf.OnCUDA(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+      }
+      else if (N == 2) {
+        out << "degref = src.KMDegrain2(s, mvb.OnCUDA(0), mvf.OnCUDA(0), mvb1.OnCUDA(0), mvf1.OnCUDA(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+      }
     }
     else {
       out << "mvb = s.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
         ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb)" << std::endl;
       out << "mvf = s.KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
         ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf)" << std::endl;
-      out << "degref = src.KMDegrain1(s, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
-      out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+      if (N >= 2) {
+        out << "mvb1 = s.KMAnalyse(isb = true, delta = 2, chroma = false, blksize = " << blksize <<
+          ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb1)" << std::endl;
+        out << "mvf1 = s.KMAnalyse(isb = false, delta = 2, chroma = false, blksize = " << blksize <<
+          ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1)" << std::endl;
+      }
+      if (N == 1) {
+        out << "degref = src.KMDegrain1(s, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+      }
+      else if (N == 2) {
+        out << "degref = src.KMDegrain2(s, mvb, mvf, mvb1, mvf1, thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb.OnCPU(0), mvf.OnCPU(0), mvb1.OnCPU(0), mvf1.OnCPU(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+      }
     }
     out << "ImageCompare(degref, degcuda)" << std::endl;
 
@@ -215,10 +268,7 @@ void TestBase::DegrainCUDATest(int blksize, int pel)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      // バッチ分は全て確認する
-      for (int i = 0; i < 1; ++i) {
-        clip->GetFrame(100 + i, env);
-      }
+      GetFrames(clip, tf, env);
     }
 
     env->DeleteScriptEnvironment();
@@ -231,16 +281,123 @@ void TestBase::DegrainCUDATest(int blksize, int pel)
 
 #pragma region Degrain
 
-TEST_F(TestBase, DegrainCUDA_Blk16Pel2)
+TEST_F(TestBase, DegrainCUDA_1Blk16Pel2)
 {
-  DegrainCUDATest(16, 2);
+  DegrainCUDATest(TF_MID, 1, 16, 2);
+}
+
+TEST_F(TestBase, DegrainCUDA_1Blk16Pel1)
+{
+  DegrainCUDATest(TF_MID, 1, 16, 1);
+}
+
+TEST_F(TestBase, DegrainCUDA_1Blk32Pel2)
+{
+  DegrainCUDATest(TF_MID, 1, 32, 2);
+}
+
+TEST_F(TestBase, DegrainCUDA_1Blk32Pel1)
+{
+  DegrainCUDATest(TF_MID, 1, 32, 1);
+}
+
+TEST_F(TestBase, DegrainCUDA_2Blk16Pel2)
+{
+  DegrainCUDATest(TF_MID, 2, 16, 2);
+}
+
+TEST_F(TestBase, DegrainCUDA_2Blk16Pel1)
+{
+  DegrainCUDATest(TF_MID, 2, 16, 1);
+}
+
+TEST_F(TestBase, DegrainCUDA_2Blk32Pel2)
+{
+  DegrainCUDATest(TF_MID, 2, 32, 2);
+}
+
+TEST_F(TestBase, DegrainCUDA_2Blk32Pel1)
+{
+  DegrainCUDATest(TF_MID, 2, 32, 1);
+}
+
+#pragma endregion
+
+void TestBase::CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string kdeintPath = modulePath + "\\KDeint.dll";
+    env->LoadPlugin(kdeintPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "s = src.KMSuper(pel = " << pel << ")" << std::endl;
+    out << "scuda = s.OnCPU(0)" << std::endl;
+    out << "pmvb = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    if (true) { // MV CUDA版
+      out << "mvb = scuda.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb.OnCPU(0))" << std::endl;
+      out << "comref = src.KMCompensate(s, mvb.OnCUDA(0),thSCD1=1800,thSCD2=980)" << std::endl;
+      out << "comcuda = srcuda.KMCompensate(scuda,mvb,thSCD1=1800,thSCD2=980).OnCUDA(0)" << std::endl;
+    }
+    else {
+      out << "mvb = s.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+        ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb)" << std::endl;
+      out << "comref = src.KMCompensate(s, mvb, thSCD1=180,thSCD2=98)" << std::endl;
+      out << "comcuda = srcuda.KMCompensate(scuda, mvb.OnCPU(0), thSCD1=180,thSCD2=98).OnCUDA(0)" << std::endl;
+    }
+    out << "ImageCompare(comref, comcuda)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+#pragma region Compensate
+
+TEST_F(TestBase, CompensateCUDA_Blk16Pel2)
+{
+  CompensateCUDATest(TF_MID, 16, 2);
+}
+
+TEST_F(TestBase, CompensateCUDA_Blk16Pel1)
+{
+  CompensateCUDATest(TF_MID, 16, 1);
+}
+
+TEST_F(TestBase, CompensateCUDA_Blk32Pel2)
+{
+  CompensateCUDATest(TF_MID, 32, 2);
+}
+
+TEST_F(TestBase, CompensateCUDA_Blk32Pel1)
+{
+  CompensateCUDATest(TF_MID, 32, 1);
 }
 
 #pragma endregion
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*DegrainCUDA_Blk16Pel2*";
+	::testing::GTEST_FLAG(filter) = "*Blk32Pel1*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

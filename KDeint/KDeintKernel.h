@@ -57,7 +57,7 @@ public:
 	// Degrain //
   virtual void GetDegrainStructSize(int N, int& degrainBlock, int& degrainArg) = 0;
 
-  //33 args
+  //34 args
   virtual void Degrain(
     int N, int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV, bool* isUsableB, bool* isUsableF,
@@ -68,6 +68,19 @@ public:
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
     void* _degrainblock, void* _degrainarg, int* sceneChange) = 0;
+
+  // Compensate //
+  virtual int GetCompensateStructSize() = 0;
+
+  //31 args
+  virtual void Compensate(
+    int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
+    int nTh1, int nTh2, int time256, int thSAD,
+    const short* ovrwins, const short* overwinsUV, const VECTOR* mv,
+    const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRef,
+    int nPitchY, int nPitchUV,
+    int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
+    void* _compensateblock, int* sceneChange) = 0;
 };
 
 class IKDeintCUDA

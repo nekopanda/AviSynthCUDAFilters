@@ -1728,7 +1728,6 @@ struct DegrainBlockData {
   const short4 *winOver;
   const vpixel_t *pSrc;
   const pixel_t *pB[N], *pF[N];
-  vpixel_t *pDst;
   int WSrc, WRefB[N], WRefF[N];
 };
 
@@ -1743,7 +1742,6 @@ template <typename pixel_t, int N>
 struct DegrainArgData {
   const VECTOR *mvB[N], *mvF[N];
   const pixel_t *pSrc, *pRefB[N], *pRefF[N];
-  pixel_t *pDst;
   bool isUsableB[N], isUsableF[N];
 };
 
@@ -1864,7 +1862,6 @@ static __global__ void kl_prepare_degrain(
 
     // pSrc,pDst,pB,pF
     b.pSrc = (const vpixel_t*)(arg.pSrc + offset);
-    b.pDst = (vpixel_t*)(arg.pDst + offset);
 
     for (int i = 0; i < N; ++i) {
       bool isUsableB = arg.isUsableB[i] && !(sceneChangeB[i] > nTh2);
@@ -1881,7 +1878,9 @@ static __global__ void kl_prepare_degrain(
 #endif
       }
       else {
-        b.pB[i] = (arg.pSrc + offset);
+        // ここから読み取られる値は使われないので読み取れる適当なアドレスを入れる
+        //（ピッチがSuperと違うのでちゃんとしたoffsetを入れてもちゃんとした画像は読み取れないことに注意）
+        b.pB[i] = arg.pSrc;
         WRefB[i] = 0;
       }
       bool isUsableF = arg.isUsableF[i] && !(sceneChangeF[i] > nTh2);
@@ -1891,7 +1890,8 @@ static __global__ void kl_prepare_degrain(
         WRefF[i] = dev_degrain_weight(thSAD, arg.mvF[i][idx].sad);
       }
       else {
-        b.pF[i] = (arg.pSrc + offset);
+        // ここから読み取られる値は使われないので読み取れる適当なアドレスを入れる
+        b.pF[i] = arg.pSrc;
         WRefF[i] = 0;
       }
     }
@@ -2045,6 +2045,217 @@ __global__ void kl_short_to_byte(
     const int shift = sizeof(dst[0].x) == 1 ? 5 : (5 + 6);
     int4 v = min(to_int(src[x + y * pitch4]) >> shift, max_pixel_value);
     dst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(v);
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// COMPENSATE
+/////////////////////////////////////////////////////////////////////////////
+
+template <typename pixel_t>
+struct CompensateBlockData {
+  const short4 *winOver;
+  const pixel_t *pRef;
+};
+
+template <typename pixel_t>
+union CompensateBlock {
+  enum { LEN = sizeof(CompensateBlockData<pixel_t>) / 4 };
+  CompensateBlockData<pixel_t> d;
+  uint32_t m[LEN];
+};
+
+template <typename pixel_t, int NPEL, int SHIFT>
+static __global__ void kl_prepare_compensate(
+  int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int time256, int thSAD,
+  const short* ovrwins,
+  const int * __restrict__ sceneChange,
+  const VECTOR *mv,
+  const pixel_t *pRef0,
+  const pixel_t *pRef,
+  CompensateBlock<pixel_t>* blocks,
+  int nPitchSuper, int nImgPitch
+)
+{
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int blkx = tx + blockIdx.x * blockDim.x;
+  int blky = ty + blockIdx.y * blockDim.y;
+  int idx = blkx + blky * nBlkX;
+
+  if (blkx < nBlkX && blky < nBlkY) {
+    CompensateBlockData<pixel_t>& b = blocks[idx].d;
+
+    // winOver
+    int wby = ((blky + nBlkY - 3) / (nBlkY - 2)) * 3;
+    int wbx = (blkx + nBlkX - 3) / (nBlkX - 2);
+    b.winOver = (const short4*)(ovrwins + (wby + wbx) * nBlkSize * nBlkSize);
+
+    int blkStep = nBlkSize / 2;
+    int offxS = nPad + blkx * blkStep;
+    int offyS = nPad + blky * blkStep;
+    int offsetS = offxS + offyS * nPitchSuper;
+
+    if (!(*sceneChange > nTh2)) {
+      VECTOR vec = mv[idx];
+      if (vec.sad < thSAD) {
+        int mx = (vec.x * time256 / 256) >> SHIFT;
+        int my = (vec.y * time256 / 256) >> SHIFT;
+        b.pRef = dev_get_ref_block<pixel_t, NPEL>(pRef + offsetS, nPitchSuper, nImgPitch, mx, my);
+      }
+      else {
+        b.pRef = dev_get_ref_block<pixel_t, NPEL>(pRef0 + offsetS, nPitchSuper, nImgPitch, 0, 0);
+      }
+    }
+    else {
+      // シーンチェンジ
+      b.winOver = nullptr;
+      b.pRef = nullptr;
+    }
+  }
+}
+
+// ブロックは2x3前提
+template <typename pixel_t, typename vtmp_t, int BLK_SIZE, int M>
+static __global__ void kl_compensate_2x3(
+  int nPatternX, int nPatternY, int nBlkX, int nBlkY,
+  CompensateBlock<pixel_t>* __restrict__ data,
+  vtmp_t* pDst, int pitch4, int pitchsuper4
+)
+{
+  enum {
+    SPAN_X = 3,
+    SPAN_Y = 2,
+    BLK_STEP = BLK_SIZE / 2,
+    BLK_SIZE4 = BLK_SIZE / 4,
+    BLK_STEP4 = BLK_STEP / 4,
+    THREADS = BLK_SIZE*BLK_SIZE4,
+    TMP_W = BLK_SIZE + BLK_STEP * 2, // == BLK_SIZE * 2
+    TMP_H = BLK_SIZE + BLK_STEP * 1,
+    TMP_W4 = TMP_W / 4,
+    N_READ_LOOP = CompensateBlock<pixel_t>::LEN / THREADS
+  };
+
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int tz = (M == 1) ? 0 : threadIdx.z;
+
+  int tid = tx + ty * BLK_SIZE4;
+  int offsetSuper = (tx + ty * pitchsuper4) * 4;
+
+  __shared__ vtmp_t tmp[M][TMP_H][TMP_W4];
+  __shared__ CompensateBlock<pixel_t> info_[M];
+  __shared__ bool isCopySrc;
+  CompensateBlock<pixel_t>& info = info_[tz];
+
+  // tmp初期化
+  tmp[tz][ty][tx] = VHelper<vtmp_t>::make(0);
+  tmp[tz][ty][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
+  if (ty < BLK_STEP) {
+    tmp[tz][ty + BLK_SIZE][tx] = VHelper<vtmp_t>::make(0);
+    tmp[tz][ty + BLK_SIZE][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
+  }
+
+  if (tid == 0 && tz == 0) {
+    isCopySrc = (data[0].d.winOver == nullptr);
+  }
+
+  __syncthreads();
+
+  if (isCopySrc) {
+    // シーンチェンジ時はここでは処理しない
+    return;
+  }
+
+  int largex = blockIdx.x * M + tz;
+  int largey = blockIdx.y;
+
+  int basex = (largex * 2 + nPatternX) * SPAN_X;
+  int basey = (largey * 2 + nPatternY) * SPAN_Y;
+
+  for (int bby = 0; bby < SPAN_Y; ++bby) {
+    int by = basey + bby;
+    if (by >= nBlkY) continue;
+
+    for (int bbx = 0; bbx < SPAN_X; ++bbx) {
+      int bx = basex + bbx;
+      if (bx >= nBlkX) continue;
+
+      int blkidx = bx + by * nBlkX;
+
+      // ブロック情報を読み込む
+      for (int i = 0; i < N_READ_LOOP; ++i) {
+        info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
+      }
+      if (THREADS * N_READ_LOOP + tid < CompensateBlock<pixel_t>::LEN) {
+        info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
+      }
+      __syncthreads();
+
+      int4 val = load_to_int(&info.d.pRef[offsetSuper]);
+
+      int dstx = bbx * BLK_STEP4 + tx;
+      int dsty = bby * BLK_STEP + ty;
+
+      if (sizeof(pixel_t) == 1)
+        tmp[tz][dsty][dstx] += (val * __ldg(&info.d.winOver[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+      else
+        tmp[tz][dsty][dstx] += val * __ldg(&info.d.winOver[tid]); // shift (5+6); in Short2Bytes16
+
+      __syncthreads();
+#if 0
+      if (basex == 0 && basey == 0 && dsty == 1 && dstx == 0) {
+        auto t = (val * info.d.winOver[tid] + 256) >> 6;
+        printf("%d,%d*%d=>%d\n",
+          tmp[0][1][0].x, val.x, info.d.winOver[tid].x, t.x);
+      }
+#endif
+    }
+  }
+
+  // dstに書き込む
+  vtmp_t *p = &pDst[basex * BLK_STEP4 + tx + (basey * BLK_STEP + ty) * pitch4];
+#if 0
+  if (basex == 0 && basey == 0 && tx == 0 && ty == 0) {
+    printf("%d\n", tmp[0][0][0].x);
+  }
+#endif
+  int bsx = tx / BLK_STEP4 - 1;
+  int bsy = ty / BLK_STEP - 1;
+  if (basex + bsx < nBlkX && basey + bsy < nBlkY) {
+    p[0] += tmp[tz][ty][tx];
+    if (basex + bsx + 2 < nBlkX) {
+      p[BLK_SIZE4] += tmp[tz][ty][tx + BLK_SIZE4];
+    }
+    if (ty < BLK_STEP) {
+      if (basey + bsy + 2 < nBlkY) {
+        p[BLK_SIZE * pitch4] += tmp[tz][ty + BLK_SIZE][tx];
+        if (basex + bsx + 2 < nBlkX) {
+          p[BLK_SIZE4 + BLK_SIZE * pitch4] += tmp[tz][ty + BLK_SIZE][tx + BLK_SIZE4];
+        }
+      }
+    }
+  }
+}
+
+template <typename vpixel_t, typename vtmp_t>
+__global__ void kl_short_to_byte_or_copy_src(
+  const void** __restrict__ pflag,
+  vpixel_t* dst, const vpixel_t* src, const vtmp_t* tmp, int width4, int height, int pitch4, int max_pixel_value)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    if (*pflag) {
+      const int shift = sizeof(dst[0].x) == 1 ? 5 : (5 + 6);
+      int4 v = min(to_int(tmp[x + y * pitch4]) >> shift, max_pixel_value);
+      dst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(v);
+    }
+    else {
+      // シーンチェンジならソースをコピー
+      dst[x + y * pitch4] = src[x + y * pitch4];
+    }
   }
 }
 
@@ -2492,7 +2703,6 @@ public:
           arg.mvF[i] = mvF[i];
         }
         arg.pSrc = pSrc[p];
-        arg.pDst = pDst[p];
         for (int i = 0; i < N; ++i) {
           arg.pRefB[i] = pRefB[p + i * 3];
           arg.pRefF[i] = pRefF[p + i * 3];
@@ -2532,7 +2742,7 @@ public:
       prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 1>;
       break;
     default:
-      env->ThrowError("未対応Pel");
+      env->ThrowError("[Degrain] 未対応Pel");
     }
 
     DegrainBlock<pixel_t, vpixel_t, N>* degrainblocks = (DegrainBlock<pixel_t, vpixel_t, N>*)_degrainblocks;
@@ -2586,7 +2796,7 @@ public:
           degrain_func = &Me::launch_degrain_2x3<N, 32, 1>; // 32x8x1 = 256threads
           break;
         default:
-          env->ThrowError("未対応ブロックサイズ");
+          env->ThrowError("[Degrain] 未対応ブロックサイズ");
         }
 
         // 4回カーネル呼び出し
@@ -2616,8 +2826,8 @@ public:
         // bottom uncovered regionをsrcからコピー
         if (nHeight_B < nHeight) {
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-            (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch4),
-            (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch4),
+            (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
+            (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch),
             width4, (nHeight - nHeight_B) >> shift, pitch4);
         }
       }
@@ -2667,7 +2877,7 @@ public:
       degrain = &Me::DegrainN<2>;
       break;
     default:
-      env->ThrowError("未対応Nです");
+      env->ThrowError("[Degrain] 未対応Nです");
     }
 
     (this->*degrain)(
@@ -2678,6 +2888,189 @@ public:
       pSrc, pDst, pTmp, pRefB, pRefF,
       nPitchY, nPitchUV, nPitchSuperY, nPitchSuperUV, nImgPitchY, nImgPitchUV,
       _degrainblock, _degrainarg, sceneChangeB, sceneChangeF);
+  }
+
+  int GetCompensateStructSize() {
+    return sizeof(CompensateBlock<pixel_t>);
+  }
+
+  template <int NPEL, int SHIFT>
+  void launch_prepare_compensate(
+    int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int time256, int thSAD,
+    const short* ovrwins,
+    const int * __restrict__ sceneChange,
+    const VECTOR *mv,
+    const pixel_t *pRef0,
+    const pixel_t *pRef,
+    CompensateBlock<pixel_t>* pblocks,
+    int nPitchSuper, int nImgPitch)
+  {
+    dim3 threads(32, 8);
+    dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
+    kl_prepare_compensate<pixel_t, NPEL, SHIFT> << <blocks, threads >> > (
+      nBlkX, nBlkY, nPad, nBlkSize, nTh2, time256, thSAD, ovrwins, sceneChange,
+      mv, pRef0, pRef, pblocks, nPitchSuper, nImgPitch);
+    DebugSync();
+  }
+
+  template <int BLK_SIZE, int M>
+  void launch_compensate_2x3(
+    int nPatternX, int nPatternY,
+    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, vtmp_t* pDst, int pitch4, int pitchsuper4)
+  {
+    dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
+    dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
+    kl_compensate_2x3<pixel_t, vtmp_t, BLK_SIZE, M> << <blocks, threads >> > (
+      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4, pitchsuper4);
+    DebugSync();
+  }
+
+  void launch_short_to_byte_or_copy_src(
+    const void** __restrict__ pflag,
+    vpixel_t* dst, const vpixel_t* src, const vtmp_t* tmp, int width4, int height, int pitch4, int max_pixel_value)
+  {
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_short_to_byte_or_copy_src<vpixel_t, vtmp_t> << <blocks, threads >> > (
+      pflag, dst, src, tmp, width4, height, pitch4, max_pixel_value);
+    DebugSync();
+  }
+
+  void Compensate(
+    int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
+    int nTh1, int nTh2, int time256, int thSAD,
+    const short* ovrwins, const short* overwinsUV,
+    const VECTOR* mv,
+    const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRef,
+    int nPitchY, int nPitchUV,
+    int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
+    void* _compensateblock, int* sceneChange)
+  {
+    int numBlks = nBlkX * nBlkY;
+
+    // SceneChange検出
+    kl_init_scene_change << <1, 1 >> > (sceneChange);
+    DebugSync();
+    {
+      dim3 threads(256);
+      dim3 blocks(nblocks(numBlks, threads.x));
+      kl_scene_change << <blocks, threads >> > (mv, numBlks, nTh1, sceneChange);
+      DebugSync();
+    }
+
+    int nOverlap = nBlkSize / 2;
+    int nWidth_B = nBlkX*(nBlkSize - nOverlap) + nOverlap;
+    int nHeight_B = nBlkY*(nBlkSize - nOverlap) + nOverlap;
+
+    typedef void (Me::*PREPARE)(
+      int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int time256, int thSAD,
+      const short* ovrwins,
+      const int * __restrict__ sceneChange,
+      const VECTOR *mv,
+      const pixel_t *pRef0,
+      const pixel_t *pRef,
+      CompensateBlock<pixel_t>* pblocks,
+      int nPitchSuper, int nImgPitch);
+
+    PREPARE prepare_func, prepareuv_func;
+
+    switch (nPel) {
+    case 1:
+      prepare_func = &Me::launch_prepare_compensate<1, 0>;
+      prepareuv_func = &Me::launch_prepare_compensate<1, 1>;
+      break;
+    case 2:
+      prepare_func = &Me::launch_prepare_compensate<2, 0>;
+      prepareuv_func = &Me::launch_prepare_compensate<2, 1>;
+      break;
+    default:
+      env->ThrowError("[Compensate] 未対応Pel");
+    }
+
+    CompensateBlock<pixel_t>* compensateblocks = (CompensateBlock<pixel_t>*)_compensateblock;
+    const int max_pixel_value = (1 << nBitsPerPixel) - 1;
+
+    // YUVループ
+    for (int p = 0; p < 3; ++p) {
+
+      PREPARE prepare = (p == 0) ? prepare_func : prepareuv_func;
+      int shift = (p == 0) ? 0 : 1;
+      int blksize = nBlkSize >> shift;
+      int width = nWidth >> shift;
+      int width_b = nWidth_B >> shift;
+      int width4 = width / 4;
+      int width_b4 = width_b / 4;
+      //int height = nHeight >> shift;
+      int height_b = nHeight_B >> shift;
+      int pitch = (p == 0) ? nPitchY : nPitchUV;
+      int pitchsuper = (p == 0) ? nPitchSuperY : nPitchSuperUV;
+      int pitch4 = pitch / 4;
+      int pitchsuper4 = pitchsuper / 4;
+      int imgpitch = (p == 0) ? nImgPitchY : nImgPitchUV;
+
+      // DegrainBlockData作成
+      (this->*prepare)(
+        nBlkX, nBlkY, nPad >> shift, blksize, nTh2, time256, thSAD,
+        (p == 0) ? ovrwins : overwinsUV,
+        sceneChange, mv, pRef[0 + p], pRef[3 + p], 
+        compensateblocks, pitchsuper, imgpitch);
+
+      // pTmp初期化
+      launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
+        (vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
+      DebugSync();
+
+      void(Me::*compensate_func)(
+        int nPatternX, int nPatternY,
+        int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, vtmp_t* pDst, int pitch4, int pitchsuper4);
+
+      switch (blksize) {
+      case 8:
+        compensate_func = &Me::launch_compensate_2x3<8, 8>;  // 8x2x8  = 128threads
+        break;
+      case 16:
+        compensate_func = &Me::launch_compensate_2x3<16, 1>; // 16x4x1 =  64threads
+        break;
+      case 32:
+        compensate_func = &Me::launch_compensate_2x3<32, 1>; // 32x8x1 = 256threads
+        break;
+      default:
+        env->ThrowError("未対応ブロックサイズ");
+      }
+
+      // 4回カーネル呼び出し
+      (this->*compensate_func)(0, 0, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+      (this->*compensate_func)(1, 0, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+      (this->*compensate_func)(0, 1, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+      (this->*compensate_func)(1, 1, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+
+      // tmp_t -> pixel_t 変換
+      launch_short_to_byte_or_copy_src(
+        (const void**)&compensateblocks[0].d.winOver,
+        (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value);
+
+#if 0
+      DataDebug<tmp_t> dtmp(pTmp[p], height_b * pitch, env);
+      DataDebug<pixel_t> ddst(pDst[p], height_b * pitch, env);
+      dtmp.Show();
+#endif
+
+      // right non-covered regionをsrcからコピー
+      if (nWidth_B < nWidth) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
+          (const vpixel_t*)(pSrc[p] + (nWidth_B >> shift)),
+          ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4);
+      }
+
+      // bottom uncovered regionをsrcからコピー
+      if (nHeight_B < nHeight) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
+          (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch),
+          width4, (nHeight - nHeight_B) >> shift, pitch4);
+      }
+    }
   }
 
 };

@@ -1335,13 +1335,23 @@ enum AvsEnvProperty
   AEP_THREADPOOL_THREADS = 3,
   AEP_FILTERCHAIN_THREADS = 4,
   AEP_THREAD_ID = 5,
-  AEP_VERSION = 6
+  AEP_VERSION = 6,
+
+  AEP_DEVICE_TYPE = 7,
+  AEP_DEVICE_ID = 8,
+  AEP_DEVICE_INDEX = 9,
+  AEP_NUM_DEVICES = 10
 };
 
 enum AvsAllocType
 {
   AVS_NORMAL_ALLOC  = 1,
   AVS_POOLED_ALLOC  = 2
+};
+
+enum AvsDeviceType {
+  DEV_TYPE_CPU = 0,
+  DEV_TYPE_CUDA = 1,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1401,7 +1411,7 @@ public:
 
   // CUDA Support
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst) = 0;
-  virtual int __stdcall SetMemoryMaxCUDA(int mem, int device_index = 0) = 0;
+  virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem) = 0;
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
 }; // end class IScriptEnvironment2

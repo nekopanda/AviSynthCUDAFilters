@@ -4693,7 +4693,6 @@ class KMCompensateCore : public KMCompensateCoreBase
   const bool isUV;
   const int time256;
   const int thSAD;
-  const int fieldShift;
 
   const KMVClip* mvClip;
   const OverlapWindows* OverWins;
@@ -4713,23 +4712,22 @@ class KMCompensateCore : public KMCompensateCoreBase
     const BlockData block = mvClip->GetBlock(0, ix, iy);
     if (block.vector.sad < thSAD) {
       const int blx = block.x * nPel + block.vector.x * time256 / 256; // 2.5.11.22
-      const int bly = block.y * nPel + block.vector.y * time256 / 256 + fieldShift; // 2.5.11.22
+      const int bly = block.y * nPel + block.vector.y * time256 / 256; // 2.5.11.22
       return ref->GetPointer(blx >> nLogxRatio, bly >> nLogyRatio);
     }
     const int blx = block.x * nPel;
-    const int bly = block.y * nPel + fieldShift;
+    const int bly = block.y * nPel;
     return ref0->GetPointer(blx >> nLogxRatio, bly >> nLogyRatio);
   }
 public:
   KMCompensateCore(const KMVParam* params,
-    bool isUV, int time256, int thSAD, int fieldShift,
+    bool isUV, int time256, int thSAD,
     const KMVClip* mvClip, const OverlapWindows* OverWins,
     IScriptEnvironment2* env)
     : params(params)
     , isUV(isUV)
     , time256(time256)
     , thSAD(thSAD)
-    , fieldShift(fieldShift)
     , mvClip(mvClip)
     , OverWins(OverWins)
     , tmpDst(new tmp_t[params->nWidth * params->nHeight])
@@ -4866,11 +4864,13 @@ public:
 class KMCompensate : public GenericVideoFilter
 {
   const KMVParam *params;
-
-  const bool scBehavior;
+  std::unique_ptr<IKDeintCUDA> cuda;
 
   PClip super;
   PClip vectors;
+
+  int time256;
+  int thSAD;
 
   std::unique_ptr<OverlapWindows> OverWins;
   std::unique_ptr<OverlapWindows> OverWinsUV;
@@ -4882,16 +4882,16 @@ class KMCompensate : public GenericVideoFilter
   std::unique_ptr<KMCompensateCoreBase> coreUV;
 
   KMCompensateCoreBase* CreateCore(
-    bool isUV, int time256, int thSAD,
+    bool isUV, int time256,
     IScriptEnvironment2* env)
   {
     const OverlapWindows* wins = (isUV ? OverWinsUV : OverWins).get();
 
     if (params->nPixelSize == 1) {
-      return new KMCompensateCore<uint8_t>(params, isUV, time256, thSAD, 0, mvClip.get(), wins, env);
+      return new KMCompensateCore<uint8_t>(params, isUV, time256, thSAD, mvClip.get(), wins, env);
     }
     else {
-      return new KMCompensateCore<uint16_t>(params, isUV, time256, thSAD, 0, mvClip.get(), wins, env);
+      return new KMCompensateCore<uint16_t>(params, isUV, time256, thSAD, mvClip.get(), wins, env);
     }
   }
 
@@ -4938,16 +4938,122 @@ class KMCompensate : public GenericVideoFilter
 
     return dst;
   }
+
+  template <typename pixel_t>
+  PVideoFrame ProcCUDA(
+    int n, IScriptEnvironment2* env)
+  {
+    typedef typename IKDeintKernel<pixel_t>::tmp_t tmp_t;
+
+    PVideoFrame	src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    int nSrcPitchY = src->GetPitch(PLANAR_Y) >> params->nPixelShift;
+    int nSrcPitchUV = src->GetPitch(PLANAR_U) >> params->nPixelShift;
+
+    int nBlkX = params->levelInfo[0].nBlkX;
+    int nBlkY = params->levelInfo[0].nBlkY;
+
+    // tmp確保
+    VideoInfo tmpvi = { 0 };
+    // 420前提、tmpは2倍のサイズ
+    // nSrcPitchY < nSrcPitchUV * 2 の可能性があるので注意
+    //（大きいぶんには計算上問題ないのでコレで使う）
+    tmpvi.width = (nSrcPitchUV * 2) * 2;
+    tmpvi.height = vi.height;
+    tmpvi.pixel_type = vi.pixel_type;
+    PVideoFrame tmp = env->NewVideoFrame(tmpvi);
+
+    // ワーク確保
+    int blockBytes = cuda->get(pixel_t())->GetCompensateStructSize() * nBlkX * nBlkY;
+    int scBytes = sizeof(int);
+    int work_bytes = blockBytes + scBytes;
+    VideoInfo workvi = VideoInfo();
+    workvi.pixel_type = VideoInfo::CS_BGR32;
+    workvi.width = 2048;
+    workvi.height = nblocks(work_bytes, vi.width * 4);
+    PVideoFrame work = env->NewVideoFrame(workvi);
+
+    uint8_t* compensateblock = work->GetWritePtr();
+    int* sceneChange = (int*)(compensateblock + blockBytes);
+
+    const pixel_t *pref[3 * 2] = { 0 };
+    const pixel_t *psrc[3] = { 0 };
+    pixel_t *pdst[3] = { 0 };
+    tmp_t *ptmp[3] = { 0 };
+
+    const KMPlane<pixel_t>* pSrcYPlane;
+    const KMPlane<pixel_t>* pSrcUPlane;
+
+    for (int i = 0; i < 2; ++i) {
+      auto yplane = static_cast<const KMPlane<pixel_t>*>(superFrame[i]->GetFrame(0)->GetYPlane());
+      auto uplane = static_cast<const KMPlane<pixel_t>*>(superFrame[i]->GetFrame(0)->GetUPlane());
+      auto vplane = static_cast<const KMPlane<pixel_t>*>(superFrame[i]->GetFrame(0)->GetVPlane());
+
+      pref[3 * i + 0] = yplane->GetAbsolutePelPointer(0, 0);
+      pref[3 * i + 1] = uplane->GetAbsolutePelPointer(0, 0);
+      pref[3 * i + 2] = vplane->GetAbsolutePelPointer(0, 0);
+
+      if (i == 0) {
+        pSrcYPlane = yplane;
+        pSrcUPlane = uplane;
+      }
+    }
+
+    psrc[0] = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    psrc[1] = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    psrc[2] = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+
+    pdst[0] = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pdst[1] = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pdst[2] = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    ptmp[0] = reinterpret_cast<tmp_t*>(tmp->GetWritePtr(PLANAR_Y));
+    ptmp[1] = reinterpret_cast<tmp_t*>(tmp->GetWritePtr(PLANAR_U));
+    ptmp[2] = reinterpret_cast<tmp_t*>(tmp->GetWritePtr(PLANAR_V));
+
+    const VECTOR *mv = mvClip->GetVectors(0);
+
+    int nWidth = vi.width;
+    int nHeight = vi.height;
+
+    int nPad = params->nHPad;
+    int nBlkSize = params->nBlkSizeX;
+    int nPel = params->nPel;
+    int nBitsPerPixel = params->nBitsPerPixel;
+
+    int nTh1 = mvClip->GetThSCD1();
+    int nTh2 = mvClip->GetThSCD2();
+
+    const short* ovrwins = OverWins->GetWindow(env);
+    const short* ovrwinsUV = OverWinsUV->GetWindow(env);
+
+    int nSuperPitchY = pSrcYPlane->GetPitch();
+    int nSuperPitchUV = pSrcUPlane->GetPitch();
+    int nImgPitchY = nSuperPitchY * pSrcYPlane->GetExtendedHeight();
+    int nImgPitchUV = nSuperPitchUV * pSrcUPlane->GetExtendedHeight();
+
+    cuda->get(pixel_t())->Compensate(
+      nWidth, nHeight, nBlkX, nBlkY, nPad, nBlkSize, nPel, nBitsPerPixel,
+      nTh1, nTh2, time256, thSAD,
+      ovrwins, ovrwinsUV, mv,
+      psrc, pdst, ptmp, pref,
+      nSrcPitchY, nSrcPitchUV,
+      nSuperPitchY, nSuperPitchUV, nImgPitchY, nImgPitchUV,
+      compensateblock, sceneChange);
+
+    return dst;
+  }
 public:
   KMCompensate(
-    PClip _child, PClip _super, PClip vectors, bool sc, double _recursionPercent,
+    PClip _child, PClip _super, PClip vectors, bool scBehavior, double _recursionPercent,
     int thsad, bool _fields, double _time100, int nSCD1, int nSCD2, bool _isse2, bool _planar,
     bool mt_flag, int trad, bool center_flag, PClip cclip_sptr, int thsad2,
     IScriptEnvironment2* env
   )
     : GenericVideoFilter(_child)
     , params(KMVParam::GetParam(vectors->GetVideoInfo(), env))
-    , scBehavior(sc)
+    , cuda(CreateKDeintCUDA())
     , super(_super)
     , vectors(vectors)
   {
@@ -4955,7 +5061,7 @@ public:
 
     for (int i = 0; i < 2; ++i) {
       superFrame[i] = std::unique_ptr<KMSuperFrame>(
-        new KMSuperFrame(KMVParam::GetParam(super->GetVideoInfo(), env), nullptr));
+        new KMSuperFrame(KMVParam::GetParam(super->GetVideoInfo(), env), cuda.get()));
     }
     mvClip = std::unique_ptr<KMVClip>(
       new KMVClip(KMVParam::GetParam(vectors->GetVideoInfo(), env), nSCD1, nSCD2));
@@ -4963,8 +5069,8 @@ public:
     if (_time100 < 0 || _time100 > 100) {
       env->ThrowError("MCompensate: time must be 0.0 to 100.0");
     }
-    int time256 = int(256 * _time100 / 100);
-    int _thsad = thsad  * mvClip->GetThSCD1() / nSCD1; // PF check todo bits_per_pixel
+    time256 = int(256 * _time100 / 100);
+    thSAD = thsad  * mvClip->GetThSCD1() / nSCD1; // PF check todo bits_per_pixel
 
     const int nOverlapX = params->nOverlapX;
     const int nOverlapY = params->nOverlapY;
@@ -4981,8 +5087,8 @@ public:
         new OverlapWindows(nBlkSizeX >> nLogxRatioUV, nBlkSizeY >> nLogyRatioUV, nOverlapX >> nLogxRatioUV, nOverlapY >> nLogyRatioUV, env));
     }
 
-    core = std::unique_ptr<KMCompensateCoreBase>(CreateCore(false, time256, _thsad, env));
-    coreUV = std::unique_ptr<KMCompensateCoreBase>(CreateCore(true, time256, _thsad, env));
+    core = std::unique_ptr<KMCompensateCoreBase>(CreateCore(false, time256, env));
+    coreUV = std::unique_ptr<KMCompensateCoreBase>(CreateCore(true, time256, env));
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -5000,22 +5106,26 @@ public:
     SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);
 
     if (!usable_flag) {
-      int nref = mvClip->GetRefFrameIndex(n);
-      if (!scBehavior && (nref < vi.num_frames) && (nref >= 0))
-      {
-        return child->GetFrame(nref, env);
-      }
-      else
-      {
-        return child->GetFrame(n, env);
-      }
+      return child->GetFrame(n, env);
     }
 
-    if (params->nPixelSize == 1) {
-      return Proc<uint8_t>(n, env);
+    cuda->SetEnv(nullptr, env);
+
+    if (IS_CUDA) {
+      if (params->nPixelSize == 1) {
+        return ProcCUDA<uint8_t>(n, env);
+      }
+      else {
+        return ProcCUDA<uint16_t>(n, env);
+      }
     }
     else {
-      return Proc<uint16_t>(n, env);
+      if (params->nPixelSize == 1) {
+        return Proc<uint8_t>(n, env);
+      }
+      else {
+        return Proc<uint16_t>(n, env);
+      }
     }
   }
 
@@ -5026,13 +5136,13 @@ public:
       args[0].AsClip(),       // source
       args[1].AsClip(),       // super
       args[2].AsClip(),       // vec
-      args[3].AsBool(true),   // sc
+      true,
       0,     // recursion
-      args[4].AsInt(10000),   // thSAD
+      args[3].AsInt(10000),   // thSAD
       false,  // fields
-      args[5].AsFloat(100), //time in percent
-      args[6].AsInt(400),
-      args[7].AsInt(130),
+      args[4].AsFloat(100), //time in percent
+      args[5].AsInt(400),
+      args[6].AsInt(130),
       true,
       false, // planar
       true,  // mt
@@ -5145,7 +5255,7 @@ void AddFuncMV(IScriptEnvironment2* env)
     KMDegrainX::Create, (void *)2);
 
   env->AddFunction("KMCompensate",
-    "ccc[scbehavior]b[recursion]f[thSAD]i[time]f[thSCD1]i[thSCD2]i",
+    "ccc[thSAD]i[time]f[thSCD1]i[thSCD2]i",
     KMCompensate::Create, 0);
 
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
