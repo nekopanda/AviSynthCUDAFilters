@@ -5155,87 +5155,6 @@ public:
   }
 };
 
-class ImageCompare : GenericVideoFilter
-{
-  PClip child2;
-
-  template <typename pixel_t>
-  void ComparePlanar(pixel_t* d, const pixel_t* a, const pixel_t* b, int width, int height, int pitch, int thresh)
-  {
-    //DebugWriteBitmap("degrain-ref-%d.bmp", (const uint8_t*)a, width, height, pitch, 1);
-    //DebugWriteBitmap("degrain-cuda-%d.bmp", (const uint8_t*)b, width, height, pitch, 1);
-
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
-        int off = x + y * pitch;
-        pixel_t diff = std::abs(a[off] - b[off]);
-        if (diff > thresh) {
-          printf("miss match %d vs %d at (%d,%d)\n", a[off], b[off], x, y);
-        }
-        d[off] = diff;
-      }
-    }
-  }
-
-  template <typename pixel_t>
-  void CompareFrame(PVideoFrame& dst, PVideoFrame& frame1, PVideoFrame& frame2)
-  {
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
-    const pixel_t* f1Y = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(PLANAR_Y));
-    const pixel_t* f1U = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(PLANAR_U));
-    const pixel_t* f1V = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(PLANAR_V));
-    const pixel_t* f2Y = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(PLANAR_Y));
-    const pixel_t* f2U = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(PLANAR_U));
-    const pixel_t* f2V = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(PLANAR_V));
-
-    int nPixelShift = (sizeof(pixel_t) == 1) ? 0 : 1;
-    int nUVShiftX = vi.GetPlaneWidthSubsampling(PLANAR_U);
-    int nUVShiftY = vi.GetPlaneHeightSubsampling(PLANAR_U);
-
-    ComparePlanar<pixel_t>(dstY, f1Y, f2Y,
-      vi.width, vi.height, dst->GetPitch(PLANAR_Y) >> nPixelShift, 2);
-    ComparePlanar<pixel_t>(dstU, f1U, f2U,
-      vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_U) >> nPixelShift, 2);
-    ComparePlanar<pixel_t>(dstV, f1V, f2V,
-      vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_V) >> nPixelShift, 2);
-  }
-
-public:
-  ImageCompare(PClip child1, PClip child2, IScriptEnvironment2* env)
-    : GenericVideoFilter(child1)
-    , child2(child2)
-  {
-    //
-  }
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-  {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
-
-    PVideoFrame frame1 = child->GetFrame(n, env);
-    PVideoFrame frame2 = child2->GetFrame(n, env);
-    PVideoFrame dst = env->NewVideoFrame(vi);
-
-    int nPixelSize = vi.ComponentSize();
-    if (nPixelSize == 1) {
-      CompareFrame<uint8_t>(dst, frame1, frame2);
-    }
-    else {
-      CompareFrame<uint16_t>(dst, frame1, frame2);
-    }
-
-    return dst;
-  }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
-  {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
-    return new ImageCompare(args[0].AsClip(), args[1].AsClip(), env);
-  }
-};
-
 void AddFuncMV(IScriptEnvironment2* env)
 {
   env->AddFunction("KMSuper", "c[pel]i", KMSuper::Create, 0);
@@ -5261,5 +5180,4 @@ void AddFuncMV(IScriptEnvironment2* env)
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck2", "[kmanalyze1]c[kmanalyze2]c[view]c", KMAnalyzeCheck2::Create, 0);
-  env->AddFunction("ImageCompare", "cc", ImageCompare::Create, 0);
 }

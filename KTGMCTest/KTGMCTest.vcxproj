@@ -156,6 +156,11 @@
   <ItemGroup>
     <ClCompile Include="NTGMCTest.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\KTGMC\KTGMC.vcxproj">
+      <Project>{9ec2ba4b-ea05-4242-84da-7a6239dd2691}</Project>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 8.0.targets" />

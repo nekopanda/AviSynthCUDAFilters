@@ -9,6 +9,18 @@
 #include <cuda_device_runtime_api.h>
 
 #include "CommonFunctions.h"
+#include "DeviceLocalData.h"
+
+#ifndef NDEBUG
+//#if 1
+#define DEBUG_SYNC \
+			CUDA_CHECK(cudaGetLastError()); \
+      CUDA_CHECK(cudaDeviceSynchronize())
+#else
+#define DEBUG_SYNC
+#endif
+
+#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
 #pragma region resample
 
@@ -19,41 +31,21 @@ struct ResamplingProgram {
 	int filter_size;
 
 	// Array of Integer indicate starting point of sampling
-	int* pixel_offset;
-	int* dev_pixel_offset;
+	std::unique_ptr<DeviceLocalData<int>> pixel_offset;
 
 	// Array of array of coefficient for each pixel
 	// {{pixel[0]_coeff}, {pixel[1]_coeff}, ...}
-	float* pixel_coefficient_float;
-	float* dev_pixel_coefficient_float;
+  std::unique_ptr<DeviceLocalData<float>> pixel_coefficient_float;
 
-	ResamplingProgram(int filter_size, int source_size, int target_size, double crop_start, double crop_size, IScriptEnvironment2* env)
+	ResamplingProgram(int filter_size, int source_size, int target_size, double crop_start, double crop_size, 
+    int* ppixel_offset, float* ppixel_coefficient_float, IScriptEnvironment2* env)
 		: filter_size(filter_size), source_size(source_size), target_size(target_size), crop_start(crop_start), crop_size(crop_size),
-		pixel_offset(0), pixel_coefficient_float(0), env(env)
+		env(env)
 	{
-		pixel_offset = (int*)env->Allocate(sizeof(int) * target_size, 64, AVS_NORMAL_ALLOC); // 64-byte alignment
-		pixel_coefficient_float = (float*)env->Allocate(sizeof(float) * target_size * filter_size, 64, AVS_NORMAL_ALLOC);
-		if (!pixel_offset || !pixel_coefficient_float) {
-			env->Free(pixel_offset);
-			env->Free(pixel_coefficient_float);
-			env->ThrowError("ResamplingProgram: Could not reserve memory.");
-		}
-		CUDA_CHECK(cudaMalloc((void**)&dev_pixel_offset, sizeof(int) * target_size));
-		CUDA_CHECK(cudaMalloc((void**)&dev_pixel_coefficient_float, sizeof(float) * target_size * filter_size));
-	};
-
-	void toCUDA() {
-		CUDA_CHECK(cudaMemcpy(dev_pixel_offset, pixel_offset,
-			sizeof(int) * target_size, cudaMemcpyHostToDevice));
-		CUDA_CHECK(cudaMemcpy(dev_pixel_coefficient_float, pixel_coefficient_float,
-			sizeof(float) * target_size * filter_size, cudaMemcpyHostToDevice));
-	}
-
-	~ResamplingProgram() {
-		env->Free(pixel_offset);
-		env->Free(pixel_coefficient_float);
-		CUDA_CHECK(cudaFree(dev_pixel_offset));
-		CUDA_CHECK(cudaFree(dev_pixel_coefficient_float));
+		pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
+      new DeviceLocalData<int>(ppixel_offset, target_size, env));
+    pixel_coefficient_float = std::unique_ptr<DeviceLocalData<float>>(
+      new DeviceLocalData<float>(ppixel_coefficient_float, target_size * filter_size, env));
 	};
 };
 
@@ -70,17 +62,19 @@ public:
 	virtual double f(double x) = 0;
 	virtual double support() = 0;
 
-	virtual ResamplingProgram* GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, IScriptEnvironment2* env);
+	virtual std::unique_ptr<ResamplingProgram> GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, IScriptEnvironment2* env);
 };
 
-ResamplingProgram* ResamplingFunction::GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, IScriptEnvironment2* env)
+std::unique_ptr<ResamplingProgram> ResamplingFunction::GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, IScriptEnvironment2* env)
 {
 	double filter_scale = double(target_size) / crop_size;
 	double filter_step = min(filter_scale, 1.0);
 	double filter_support = support() / filter_step;
 	int fir_filter_size = int(ceil(filter_support * 2));
 
-	ResamplingProgram* program = new ResamplingProgram(fir_filter_size, source_size, target_size, crop_start, crop_size, env);
+  std::unique_ptr<int[]> pixel_offset = std::unique_ptr<int[]>(new int[target_size]);
+  std::unique_ptr<float[]> pixel_coefficient_float = std::unique_ptr<float[]>(new float[target_size * fir_filter_size]);
+	//ResamplingProgram* program = new ResamplingProgram(fir_filter_size, source_size, target_size, crop_start, crop_size, env);
 
 	// this variable translates such that the image center remains fixed
 	double pos;
@@ -107,7 +101,7 @@ ResamplingProgram* ResamplingFunction::GetResamplingProgram(int source_size, dou
 		if (start_pos < 0)
 			start_pos = 0;
 
-		program->pixel_offset[i] = start_pos;
+    pixel_offset[i] = start_pos;
 
 		// the following code ensures that the coefficients add to exactly FPScale
 		double total = 0.0;
@@ -130,16 +124,16 @@ ResamplingProgram* ResamplingFunction::GetResamplingProgram(int source_size, dou
 		// Now we generate real coefficient
 		for (int k = 0; k < fir_filter_size; ++k) {
 			double new_value = value + f((start_pos + k - ok_pos) * filter_step) / total;
-			program->pixel_coefficient_float[i*fir_filter_size + k] = float(new_value - value); // no scaling for float
+      pixel_coefficient_float[i*fir_filter_size + k] = float(new_value - value); // no scaling for float
 			value = new_value;
 		}
 
 		pos += pos_step;
 	}
 
-	program->toCUDA();
-
-	return program;
+	return std::unique_ptr<ResamplingProgram>(new ResamplingProgram(
+    fir_filter_size, source_size, target_size, crop_start, crop_size,
+    pixel_offset.get(), pixel_coefficient_float.get(), env));
 }
 
 class MitchellNetravaliFilter : public ResamplingFunction
@@ -185,62 +179,109 @@ __global__ void kl_resample_v(
 		int begin = offset[y];
 		float result = 0;
 		for (int i = 0; i < filter_size; ++i) {
-			result += src[x + (begin + i) * src_pitch] * coef[x * filter_size + i];
+			result += src[x + (begin + i) * src_pitch] * coef[y * filter_size + i];
 		}
 		if (!std::is_floating_point<pixel_t>::value) {  // floats are uncapped
-			result = clamp<float>(result, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
+      auto clamped = clamp<float>(result, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
+			result = pixel_t(clamped + 0.5f);
 		}
+#if 0
+    if (x == 1200 && y == 0) {
+      printf("! %f\n", result);
+    }
+#endif
 		dst[x + y * dst_pitch] = (pixel_t)result;
 	}
 }
 
-class KDeintBob : public GenericVideoFilter {
+template <typename pixel_t, int filter_size>
+void launch_resmaple_v(
+  const pixel_t* src, pixel_t* dst,
+  int src_pitch, int dst_pitch,
+  int width, int height,
+  const int* offset, const float* coef)
+{
+  dim3 threads(32, 16);
+  dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+  kl_resample_v<pixel_t, filter_size> << <blocks, threads >> >(
+    src, dst, src_pitch, dst_pitch, width, height, offset, coef);
+}
+
+class KTGMC_Bob : public GenericVideoFilter {
 	std::unique_ptr<ResamplingProgram> program_e_y;
 	std::unique_ptr<ResamplingProgram> program_e_uv;
 	std::unique_ptr<ResamplingProgram> program_o_y;
 	std::unique_ptr<ResamplingProgram> program_o_uv;
 
 	bool parity;
+  int logUVx;
+  int logUVy;
 
 	// 1フレーム分キャッシュしておく
 	int cacheN;
 	PVideoFrame cache[2];
 
-	void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
+  template <typename pixel_t>
+	void MakeFrameT(bool top, PVideoFrame& src, PVideoFrame& dst,
 		ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
 	{
+    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
 		for (int p = 0; p < 3; ++p) {
-			const BYTE* srcptr = src->GetReadPtr(p);
-			int src_pitch = src->GetPitch(p);
+      const pixel_t* srcptr = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+			int src_pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
 
 			// separate field
 			srcptr += top ? 0 : src_pitch;
 			src_pitch *= 2;
 
-			BYTE* dstptr = dst->GetWritePtr(p);
-			int dst_pitch = dst->GetPitch(p);
+      pixel_t* dstptr = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+			int dst_pitch = dst->GetPitch(planes[p]) / sizeof(pixel_t);
 
 			ResamplingProgram* prog = (p == 0) ? program_y : program_uv;
 
-			dim3 threads(32, 16);
-			dim3 blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
-			kl_resample_v<uint8_t, 4><<<blocks, threads>>>(
-				(uint8_t*)srcptr, (uint8_t*)dstptr,
-				src_pitch, dst_pitch, vi.width, vi.height,
-				prog->dev_pixel_offset, prog->dev_pixel_coefficient_float);
+      int width = vi.width;
+      int height = vi.height;
+      
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
 
-			CUDA_CHECK(cudaGetLastError());
-			CUDA_CHECK(cudaDeviceSynchronize());
+      launch_resmaple_v<pixel_t, 4>(
+				srcptr, dstptr, src_pitch, dst_pitch, width, height,
+				prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env));
+
+      DEBUG_SYNC;
 		}
 	}
 
+  void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
+    ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
+  {
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      MakeFrameT<uint8_t>(top, src, dst, program_y, program_uv, env);
+      break;
+    case 2:
+      MakeFrameT<uint16_t>(top, src, dst, program_y, program_uv, env);
+      break;
+    default:
+      env->ThrowError("[KTGMC_Bob] 未対応フォーマット");
+    }
+  }
+
 public:
-	KDeintBob(PClip _child, IScriptEnvironment* env_)
+  KTGMC_Bob(PClip _child, double b, double c, IScriptEnvironment* env_)
 		: GenericVideoFilter(_child)
 		, parity(_child->GetParity(0))
 		, cacheN(-1)
 	{
 		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    logUVx = vi.GetPlaneWidthSubsampling(PLANAR_U);
+    logUVy = vi.GetPlaneHeightSubsampling(PLANAR_U);
 
 		// フレーム数、FPSを2倍
 		vi.num_frames *= 2;
@@ -248,25 +289,22 @@ public:
 		
 		double shift = parity ? 0.25 : -0.25;
 
-		double b = 0;
-		double c = 0.5;
-
 		int y_height = vi.height;
-		int uv_height = vi.height / 2;
+		int uv_height = vi.height >> logUVy;
 
-		program_e_y = std::unique_ptr<ResamplingProgram>(
-			MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, shift, y_height / 2, y_height, env));
-		program_e_uv = std::unique_ptr<ResamplingProgram>(
-			MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, shift, uv_height / 2, uv_height, env));
-		program_o_y = std::unique_ptr<ResamplingProgram>(
-			MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, -shift, y_height / 2, y_height, env));
-		program_o_uv = std::unique_ptr<ResamplingProgram>(
-			MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, -shift, uv_height / 2, uv_height, env));
+		program_e_y = MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, shift, y_height / 2, y_height, env);
+		program_e_uv = MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, shift, uv_height / 2, uv_height, env);
+		program_o_y = MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, -shift, y_height / 2, y_height, env);
+		program_o_uv = MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, -shift, uv_height / 2, uv_height, env);
 	}
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
 		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KTGMC_Bob] CUDAフレームを入力してください");
+    }
 
 		int srcN = n / 2;
 
@@ -286,13 +324,15 @@ public:
 		cache[0] = bobE;
 		cache[1] = bobO;
 
-		CUDA_CHECK(cudaStreamSynchronize(NULL));
-
 		return cache[n % 2];
 	}
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-		return new KDeintBob(args[0].AsClip(), env);
+		return new KTGMC_Bob(
+      args[0].AsClip(),
+      args[1].AsFloat(0),
+      args[2].AsFloat(0.5),
+      env);
 	}
 };
 
@@ -300,5 +340,5 @@ public:
 
 void AddFuncKernel(IScriptEnvironment2* env)
 {
-	env->AddFunction("KDeintBob", "c", KDeintBob::Create, 0);
+	env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
 }

@@ -62,6 +62,8 @@ protected:
   void AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
   void DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel);
   void CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel);
+
+  void BobCUDATest(TEST_FRAMES tf, bool parity);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -90,8 +92,8 @@ void TestBase::AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chro
 		IScriptEnvironment2* env = CreateScriptEnvironment2();
 
 		AVSValue result;
-		std::string kdeintPath = modulePath + "\\KDeint.dll";
-		env->LoadPlugin(kdeintPath.c_str(), true, &result);
+		std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
 		std::string scriptpath = workDirPath + "\\script.avs";
 
@@ -201,8 +203,8 @@ void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
-    std::string kdeintPath = modulePath + "\\KDeint.dll";
-    env->LoadPlugin(kdeintPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
     std::string scriptpath = workDirPath + "\\script.avs";
 
@@ -329,8 +331,8 @@ void TestBase::CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
-    std::string kdeintPath = modulePath + "\\KDeint.dll";
-    env->LoadPlugin(kdeintPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
     std::string scriptpath = workDirPath + "\\script.avs";
 
@@ -395,9 +397,56 @@ TEST_F(TestBase, CompensateCUDA_Blk32Pel1)
 
 #pragma endregion
 
+void TestBase::BobCUDATest(TEST_FRAMES tf, bool parity)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "Import(\"QTGMC_Bob.avs\")" << std::endl;
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << (parity ? ".AssumeTFF()" : ".AssumeBFF()") << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "ref = src.QTGMC_Bob( 0,0.5 )" << std::endl;
+    out << "cuda = srcuda.KTGMC_Bob( 0,0.5 ).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+#pragma region Bob
+
+TEST_F(TestBase, BobCUDATest_TFF)
+{
+  BobCUDATest(TF_MID, true);
+}
+
+#pragma endregion
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*";
+	::testing::GTEST_FLAG(filter) = "*BobCUDATest_TFF*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
