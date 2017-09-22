@@ -183,9 +183,11 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CudaDebug.h" />
     <ClInclude Include="CudaKernelBase.h" />
     <ClInclude Include="DebugWriter.h" />
     <ClInclude Include="DeviceLocalData.h" />
+    <ClInclude Include="GenericImageFunctions.cuh" />
     <ClInclude Include="MVKernel.h" />
     <ClInclude Include="ReduceKernel.cuh" />
     <ClInclude Include="VectorFunctions.cuh" />

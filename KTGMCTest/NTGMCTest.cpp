@@ -64,6 +64,8 @@ protected:
   void CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel);
 
   void BobCUDATest(TEST_FRAMES tf, bool parity);
+  void BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma);
+  void RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -442,11 +444,141 @@ TEST_F(TestBase, BobCUDATest_TFF)
   BobCUDATest(TF_MID, true);
 }
 
+TEST_F(TestBase, BobCUDATest_BFF)
+{
+  BobCUDATest(TF_MID, false);
+}
+
+#pragma endregion
+
+void TestBase::BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "Import(\"QTGMC_BinomialSoften.avs\")" << std::endl;
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "ref = src.QTGMC_BinomialSoften" << radius << "(" << (chroma ? "true" : "false") << ")" << std::endl;
+    out << "cuda = srcuda.BinomialTemporalSoften(" << radius << ", 28, " << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+#pragma region BinomialSoften
+
+TEST_F(TestBase, BinomialSoftenCUDA_Rad1WithC)
+{
+  BinomialSoftenCUDATest(TF_MID, 1, true);
+}
+
+TEST_F(TestBase, BinomialSoftenCUDA_Rad2WithC)
+{
+  BinomialSoftenCUDATest(TF_MID, 2, true);
+}
+
+TEST_F(TestBase, BinomialSoftenCUDA_Rad1NoC)
+{
+  BinomialSoftenCUDATest(TF_MID, 1, false);
+}
+
+TEST_F(TestBase, BinomialSoftenCUDA_Rad2NoC)
+{
+  BinomialSoftenCUDATest(TF_MID, 2, false);
+}
+
+#pragma endregion
+
+void TestBase::RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "Import(\"QTGMC_BinomialSoften.avs\")" << std::endl;
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    // QTGMCで使われているのは-1だが、比較で一致しなくなるおそれがあるため0（コピー）にする
+    out << "ref = src.RemoveGrain(" << mode << (chroma ? "" : ", 0") << ")" << std::endl;
+    out << "cuda = srcuda.KRemoveGrain(" << mode << (chroma ? "" : ", 0") << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+#pragma region RemoveGrain
+
+TEST_F(TestBase, RemoveGrainCUDA_Mode12WithC)
+{
+  RemoveGrainCUDATest(TF_MID, 12, true);
+}
+
+TEST_F(TestBase, RemoveGrainCUDA_Mode12NoC)
+{
+  RemoveGrainCUDATest(TF_MID, 12, false);
+}
+
+TEST_F(TestBase, RemoveGrainCUDA_Mode20WithC)
+{
+  RemoveGrainCUDATest(TF_MID, 20, true);
+}
+
+TEST_F(TestBase, RemoveGrainCUDA_Mode20NoC)
+{
+  RemoveGrainCUDATest(TF_MID, 20, false);
+}
+
 #pragma endregion
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*BobCUDATest_TFF*";
+	::testing::GTEST_FLAG(filter) = "*RemoveGrainCUDA_Mode12WithC*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

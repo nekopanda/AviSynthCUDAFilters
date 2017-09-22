@@ -10,6 +10,11 @@
 
 #include "CommonFunctions.h"
 #include "DeviceLocalData.h"
+#include "DebugWriter.h"
+#include "CudaDebug.h"
+#include "ReduceKernel.cuh"
+#include "VectorFunctions.cuh"
+#include "GenericImageFunctions.cuh"
 
 #ifndef NDEBUG
 //#if 1
@@ -21,6 +26,16 @@
 #endif
 
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
+
+template <typename T> struct VectorType {};
+
+template <> struct VectorType<unsigned char> {
+  typedef uchar4 type;
+};
+
+template <> struct VectorType<unsigned short> {
+  typedef ushort4 type;
+};
 
 #pragma region resample
 
@@ -207,6 +222,8 @@ void launch_resmaple_v(
     src, dst, src_pitch, dst_pitch, width, height, offset, coef);
 }
 
+#pragma endregion
+
 class KTGMC_Bob : public GenericVideoFilter {
 	std::unique_ptr<ResamplingProgram> program_e_y;
 	std::unique_ptr<ResamplingProgram> program_e_uv;
@@ -277,11 +294,10 @@ public:
 		: GenericVideoFilter(_child)
 		, parity(_child->GetParity(0))
 		, cacheN(-1)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
 	{
 		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
-
-    logUVx = vi.GetPlaneWidthSubsampling(PLANAR_U);
-    logUVy = vi.GetPlaneHeightSubsampling(PLANAR_U);
 
 		// フレーム数、FPSを2倍
 		vi.num_frames *= 2;
@@ -336,9 +352,517 @@ public:
 	}
 };
 
-#pragma endregion
+enum { CALC_SAD_THREADS = 256 };
+
+__global__ void kl_init_sad(float *sad)
+{
+  sad[threadIdx.x] = 0;
+}
+
+template <typename vpixel_t>
+__global__ void kl_calculate_sad(const vpixel_t* pA, const vpixel_t* pB, int width4, int height, int pitch4, float* sad)
+{
+  int y = blockIdx.x;
+
+  float tmpsad = 0;
+  for (int x = threadIdx.x; x < width4; x += blockDim.x) {
+    int4 p = absdiff(pA[x + y * pitch4], pB[x + y * pitch4]);
+    tmpsad += p.x + p.y + p.z + p.w;
+  }
+
+  __shared__ float sbuf[CALC_SAD_THREADS];
+  dev_reduce<float, CALC_SAD_THREADS, AddReducer<float>>(threadIdx.x, tmpsad, sbuf);
+
+  if (threadIdx.x == 0) {
+    atomicAdd(sad, tmpsad);
+  }
+}
+
+template <typename vpixel_t>
+__global__ void kl_binomial_temporal_soften_1(
+  vpixel_t* pDst, const vpixel_t* __restrict__ pSrc,
+  const vpixel_t* __restrict__ pRef0, const vpixel_t* __restrict__ pRef1,
+  const float* __restrict__ sad, float scenechange, int width4, int height, int pitch4)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  __shared__ bool isSC[2];
+  if (threadIdx.x < 2 && threadIdx.y == 0) {
+    isSC[threadIdx.x] = (sad[threadIdx.x] >= scenechange);
+  }
+  __syncthreads();
+
+  if (x < width4 && y < height) {
+    int4 src = to_int(pSrc[x + y * pitch4]);
+    int4 ref0 = isSC[0] ? src : to_int(pRef0[x + y * pitch4]);
+    int4 ref1 = isSC[1] ? src : to_int(pRef1[x + y * pitch4]);
+
+    int4 tmp = (ref0 + src * 2 + ref1 + 2) >> 2;
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+template <typename vpixel_t>
+__global__ void kl_binomial_temporal_soften_2(
+  vpixel_t* pDst, const vpixel_t* __restrict__ pSrc,
+  const vpixel_t* __restrict__ pRef0, const vpixel_t* __restrict__ pRef1,
+  const vpixel_t* __restrict__ pRef2, const vpixel_t* __restrict__ pRef3,
+  const float* __restrict__ sad, float scenechange, int width4, int height, int pitch4)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  __shared__ bool isSC[4];
+  if (threadIdx.x < 4 && threadIdx.y == 0) {
+    isSC[threadIdx.x] = (sad[threadIdx.x] >= scenechange);
+  }
+  __syncthreads();
+
+  if (x < width4 && y < height) {
+    int4 src = to_int(pSrc[x + y * pitch4]);
+    int4 ref0 = isSC[0] ? src : to_int(pRef0[x + y * pitch4]);
+    int4 ref1 = isSC[1] ? src : to_int(pRef1[x + y * pitch4]);
+    int4 ref2 = isSC[2] ? src : to_int(pRef2[x + y * pitch4]);
+    int4 ref3 = isSC[3] ? src : to_int(pRef3[x + y * pitch4]);
+
+    int4 tmp = (ref2 + ref0 * 4 + src * 6 + ref1 * 4 + ref3 + 4) >> 4;
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+class BinomialTemporalSoften : public GenericVideoFilter {
+
+  int radius;
+  int scenechange;
+  bool chroma;
+
+  int logUVx;
+  int logUVy;
+
+  PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+  {
+    ref = clamp(ref, 0, vi.num_frames);
+    return child->GetFrame(ref, env);
+  }
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    PVideoFrame src = GetRefFrame(n, env);
+    PVideoFrame prv1 = GetRefFrame(n - 1, env);
+    PVideoFrame fwd1 = GetRefFrame(n + 1, env);
+    PVideoFrame prv2, fwd2;
+
+    if (radius >= 2) {
+      prv2 = GetRefFrame(n - 2, env);
+      fwd2 = GetRefFrame(n + 2, env);
+    }
+
+    PVideoFrame work;
+    int work_bytes = sizeof(float) * radius * 2 * 3;
+    VideoInfo workvi = VideoInfo();
+    workvi.pixel_type = VideoInfo::CS_BGR32;
+    workvi.width = 2048;
+    workvi.height = nblocks(work_bytes, vi.width * 4);
+    work = env->NewVideoFrame(workvi);
+    float* sad = reinterpret_cast<float*>(work->GetWritePtr());
+
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    kl_init_sad << <1, radius * 2 * 3 >> > (sad);
+    DEBUG_SYNC;
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    for (int p = 0; p < 3; ++p) {
+
+      const vpixel_t* pSrc = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
+      vpixel_t* pDst = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+
+      int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
+      int width = vi.width;
+      int height = vi.height;
+
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
+
+      int width4 = width >> 2;
+      int pitch4 = pitch >> 2;
+
+      if (chroma == false && p > 0) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(pDst, pSrc, width4, height, pitch4);
+        DEBUG_SYNC;
+        continue;
+      }
+
+      const vpixel_t* pPrv1 = reinterpret_cast<const vpixel_t*>(prv1->GetReadPtr(planes[p]));
+      const vpixel_t* pFwd1 = reinterpret_cast<const vpixel_t*>(fwd1->GetReadPtr(planes[p]));
+      const vpixel_t* pPrv2;
+      const vpixel_t* pFwd2;
+
+      float* pSad = sad + p * radius * 2;
+      kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pPrv1, width4, height, pitch4, &pSad[0]);
+      DEBUG_SYNC;
+      kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pFwd1, width4, height, pitch4, &pSad[1]);
+      DEBUG_SYNC;
+
+      if (radius >= 2) {
+        pPrv2 = reinterpret_cast<const vpixel_t*>(prv2->GetReadPtr(planes[p]));
+        pFwd2 = reinterpret_cast<const vpixel_t*>(fwd2->GetReadPtr(planes[p]));
+
+        kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pPrv2, width4, height, pitch4, &pSad[2]);
+        DEBUG_SYNC;
+        kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pFwd2, width4, height, pitch4, &pSad[3]);
+        DEBUG_SYNC;
+      }
+
+      //DataDebug<float> dsad(pSad, 2, env);
+      //dsad.Show();
+
+
+      float fsc = (float)scenechange * width * height;
+
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+
+      switch (radius) {
+      case 1:
+        kl_binomial_temporal_soften_1 << <blocks, threads >> > (
+          pDst, pSrc, pPrv1, pFwd1, pSad, fsc, width4, height, pitch4);
+        DEBUG_SYNC;
+        break;
+      case 2:
+        kl_binomial_temporal_soften_2 << <blocks, threads >> > (
+          pDst, pSrc, pPrv1, pFwd1, pPrv2, pFwd2, pSad, fsc, width4, height, pitch4);
+        DEBUG_SYNC;
+        break;
+      }
+    }
+
+    return dst;
+  }
+
+public:
+  BinomialTemporalSoften(PClip _child, int radius, int scenechange, bool chroma, IScriptEnvironment* env_)
+    : GenericVideoFilter(_child)
+    , radius(radius)
+    , scenechange(scenechange)
+    , chroma(chroma)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (radius != 1 && radius != 2) {
+      env->ThrowError("[BinomialTemporalSoften] radiusは1か2です");
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[BinomialTemporalSoften] CUDAフレームを入力してください");
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return Proc<uint8_t>(n, env);
+    case 2:
+      return Proc<uint16_t>(n, env);
+    default:
+      env->ThrowError("[BinomialTemporalSoften] 未対応フォーマット");
+    }
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new BinomialTemporalSoften(
+      args[0].AsClip(),
+      args[1].AsInt(),
+      args[2].AsInt(0),
+      args[3].AsBool(true),
+      env);
+  }
+};
+
+template <typename pixel_t>
+__global__ void kl_copy_boarder1(
+  pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+  switch (blockIdx.y) {
+  case 0: // top
+    if(x < width) pDst[x] = pSrc[x];
+    break;
+  case 1: // left
+    if (x < height) pDst[x * pitch] = pSrc[x * pitch];
+    break;
+  case 2: // bottom
+    if (x < width) pDst[x + (height - 1) * pitch] = pSrc[x + (height - 1) * pitch];
+    break;
+  case 3: // right
+    if (x < height) pDst[(width - 1) + x * pitch] = pSrc[(width - 1) + x * pitch];
+    break;
+  }
+}
+
+enum {
+  BOX3x3_BLOCK_W = 32,
+  BOX3x3_BLOCK_H = 16,
+  BOX3x3_THREADS_W = 8,
+  BOX3x3_THREADS_H = 18,
+};
+
+template <typename pixel_t, typename Horizontal, typename Vertical>
+__global__ void kl_box3x3_filter(
+  pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
+)
+{
+  enum {
+    SRC_BUF_W = BOX3x3_THREADS_W * 4 + 2 + 1, // +1: to avoid back conflict
+  };
+
+  Horizontal horizontal;
+  Vertical vertical;
+
+  __shared__ pixel_t srcbuf[BOX3x3_THREADS_H][SRC_BUF_W];
+  __shared__ int4 tmpbuf[BOX3x3_THREADS_H][BOX3x3_THREADS_W];
+
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+
+  int xbase = BOX3x3_BLOCK_W * blockIdx.x;
+  int ybase = BOX3x3_BLOCK_H * blockIdx.y;
+
+  int lend = min(width - xbase, BOX3x3_BLOCK_W + 2);
+  if (ybase + ty < height) {
+    for (int lx = tx; lx < lend; lx += BOX3x3_THREADS_W) {
+      srcbuf[ty][lx] = pSrc[(xbase + lx) + (ybase + ty) * pitch];
+#if 0
+      if (xbase + lx == 16 && ybase + ty == 0) {
+        printf("1:%d\n", srcbuf[ty][lx]);
+      }
+#endif
+    }
+  }
+  __syncthreads();
+
+  pixel_t p0 = srcbuf[ty][tx * 4 + 0];
+  pixel_t p1 = srcbuf[ty][tx * 4 + 1];
+  pixel_t p2 = srcbuf[ty][tx * 4 + 2];
+  pixel_t p3 = srcbuf[ty][tx * 4 + 3];
+  pixel_t p4 = srcbuf[ty][tx * 4 + 4];
+  pixel_t p5 = srcbuf[ty][tx * 4 + 5];
+
+  int4 h0 = { p0, p1, p2, p3 };
+  int4 h1 = { p1, p2, p3, p4 };
+  int4 h2 = { p2, p3, p4, p5 };
+
+  tmpbuf[ty][tx] = horizontal(h0, h1, h2);
+  __syncthreads();
+
+  if (ty > 0 && ty < BOX3x3_THREADS_H - 1) {
+    int4 v0 = tmpbuf[ty - 1][tx];
+    int4 v1 = tmpbuf[ty + 0][tx];
+    int4 v2 = tmpbuf[ty + 1][tx];
+
+    int4 d = vertical(v0, v1, v2);
+    
+    srcbuf[ty][tx * 4 + 0] = d.x;
+    srcbuf[ty][tx * 4 + 1] = d.y;
+    srcbuf[ty][tx * 4 + 2] = d.z;
+    srcbuf[ty][tx * 4 + 3] = d.w;
+  }
+  __syncthreads();
+
+  if (ty > 0 && ty < BOX3x3_THREADS_H - 1) {
+    if (ybase + ty < height - 1) {
+      for (int lx = tx; lx < lend - 2; lx += BOX3x3_THREADS_W) {
+        pDst[(xbase + lx + 1) + (ybase + ty) * pitch] = srcbuf[ty][lx];
+#if 0
+        if (xbase + tx + 1 == 16 && ybase + ty == 0) {
+          printf("3:%d\n", srcbuf[ty][lx]);
+        }
+#endif
+      }
+    }
+  }
+}
+
+struct RG11Horizontal {
+  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+    return a + b * 2 + c;
+  }
+};
+struct RG11Vertical {
+  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+    return (a + b * 2 + c + 8) >> 4;
+  }
+};
+
+struct RG20Horizontal {
+  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+    return a + b + c;
+  }
+};
+struct RG20Vertical {
+  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+    return (a + b + c + 4) / 9;
+  }
+};
+
+class KRemoveGrain : public GenericVideoFilter {
+  
+  int mode;
+  int modeU;
+  int modeV;
+
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    int modes[] = { mode, modeU, modeV };
+
+    for (int p = 0; p < 3; ++p) {
+      int mode = modes[p];
+      if (mode == -1) continue;
+
+      const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+
+      int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
+      int width = vi.width;
+      int height = vi.height;
+
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
+
+      int width4 = width >> 2;
+      int pitch4 = pitch >> 2;
+
+      if (mode == 0) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+        DEBUG_SYNC;
+        continue;
+      }
+
+      dim3 threads(BOX3x3_THREADS_W, BOX3x3_THREADS_H);
+      dim3 blocks(nblocks(width, BOX3x3_BLOCK_W), nblocks(height, BOX3x3_BLOCK_H));
+
+      switch (mode) {
+      case 11:
+      case 12:
+        // [1 2 1] horizontal and vertical kernel blur
+        kl_box3x3_filter<pixel_t, RG11Horizontal, RG11Vertical>
+          << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
+        DEBUG_SYNC;
+        break;
+
+      case 20:
+        // TODO: Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
+        kl_box3x3_filter<pixel_t, RG20Horizontal, RG20Vertical>
+          << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
+        DEBUG_SYNC;
+        break;
+
+      default:
+        env->ThrowError("[KRemoveGrain] Unsupported mode %d", modes[p]);
+      }
+
+      {
+        dim3 threads(256);
+        dim3 blocks(nblocks(max(height, width), threads.x), 4);
+        kl_copy_boarder1 << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
+        DEBUG_SYNC;
+      }
+
+    }
+
+    return dst;
+  }
+
+public:
+  KRemoveGrain(PClip _child, int mode, int modeU, int modeV, IScriptEnvironment* env_)
+    : GenericVideoFilter(_child)
+    , mode(mode)
+    , modeU(modeU)
+    , modeV(modeV)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int modes[] = { mode, modeU, modeV };
+    for (int p = 0; p < 3; ++p) {
+      switch (modes[p]) {
+      case -1:
+      case 0:
+      case 11:
+      case 12:
+      case 20:
+        break;
+      default:
+        env->ThrowError("[KRemoveGrain] Unsupported mode %d", modes[p]);
+      }
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KRemoveGrain] CUDAフレームを入力してください");
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return Proc<uint8_t>(n, env);
+    case 2:
+      return Proc<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KRemoveGrain] 未対応フォーマット");
+    }
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    int mode = args[1].AsInt(2);
+    int modeU = args[2].AsInt(mode);
+    int modeV = args[3].AsInt(modeU);
+    return new KRemoveGrain(
+      args[0].AsClip(),
+      mode,
+      modeU,
+      modeV,
+      env);
+  }
+};
 
 void AddFuncKernel(IScriptEnvironment2* env)
 {
-	env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
+  env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
+  env->AddFunction("BinomialTemporalSoften", "ci[scenechange]i[chroma]b", BinomialTemporalSoften::Create, 0);
+  env->AddFunction("KRemoveGrain", "c[mode]i[modeU]i[modeV]i", KRemoveGrain::Create, 0);
 }

@@ -6,64 +6,70 @@
 // int拡張は明示的に書く //
 
 // to_int(uchar4)
-__device__ int4 to_int(uchar4 a) {
+static __device__ int4 to_int(uchar4 a) {
   int4 r = { a.x, a.y, a.z, a.w };
   return r;
 }
 
 // to_int(ushort4)
-__device__ int4 to_int(ushort4 a) {
+static __device__ int4 to_int(ushort4 a) {
   int4 r = { a.x, a.y, a.z, a.w };
   return r;
 }
 
 // to_int(int4)
-__device__ int4 to_int(int4 a) {
+static __device__ int4 to_int(int4 a) {
   return a;
 }
 
-__device__ int4 load_to_int(const unsigned char* p) {
+static __device__ int4 load_to_int(const unsigned char* p) {
   int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
   return r;
 }
 
-__device__ int4 load_to_int(const unsigned short* p) {
+static __device__ int4 load_to_int(const unsigned short* p) {
   int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
   return r;
 }
 
 // int4 + int
-__device__ int4 operator+(int4 a, int b) {
+static __device__ int4 operator+(int4 a, int b) {
   int4 r = { a.x + b, a.y + b, a.z + b, a.w + b };
   return r;
 }
 
 // int4 + int4
-__device__ int4 operator+(int4 a, int4 b) {
+static __device__ int4 operator+(int4 a, int4 b) {
   int4 r = { a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w };
   return r;
 }
 
 // int4 * int
-__device__ int4 operator*(int4 a, int b) {
+static __device__ int4 operator*(int4 a, int b) {
   int4 r = { a.x * b, a.y * b, a.z * b, a.w * b };
   return r;
 }
 
 // int4 * short4
-__device__ int4 operator*(int4 a, short4 b) {
+static __device__ int4 operator*(int4 a, short4 b) {
   int4 r = { a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w };
   return r;
 }
 
 // int4 >> int
-__device__ int4 operator >> (int4 a, int b) {
+static __device__ int4 operator >> (int4 a, int b) {
   int4 r = { a.x >> b, a.y >> b, a.z >> b, a.w >> b };
   return r;
 }
 
+// int4 / int
+static __device__ int4 operator / (int4 a, int b) {
+  int4 r = { a.x / b, a.y / b, a.z / b, a.w / b };
+  return r;
+}
+
 // int4 += int4
-__device__ void operator+=(int4& a, int4 b) {
+static __device__ void operator+=(int4& a, int4 b) {
   a.x += b.x;
   a.y += b.y;
   a.z += b.z;
@@ -71,7 +77,7 @@ __device__ void operator+=(int4& a, int4 b) {
 }
 
 // ushort4 += int4
-__device__ void operator+=(ushort4& a, int4 b) {
+static __device__ void operator+=(ushort4& a, int4 b) {
   a.x += b.x;
   a.y += b.y;
   a.z += b.z;
@@ -79,7 +85,7 @@ __device__ void operator+=(ushort4& a, int4 b) {
 }
 
 // ushort4 += ushort4
-__device__ void operator+=(ushort4& a, ushort4 b) {
+static __device__ void operator+=(ushort4& a, ushort4 b) {
   a.x += b.x;
   a.y += b.y;
   a.z += b.z;
@@ -87,9 +93,31 @@ __device__ void operator+=(ushort4& a, ushort4 b) {
 }
 
 // min(int4, int)
-__device__ int4 min(int4 a, int b) {
+static __device__ int4 min(int4 a, int b) {
   int4 r = { min(a.x, b), min(a.y, b), min(a.z, b), min(a.w, b) };
   return r;
+}
+
+static __device__ int4 absdiff(uchar4 a, uchar4 b) {
+  int4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
+  int4 r2 = {
+    (r.x >= 0) ? r.x : -r.x,
+    (r.y >= 0) ? r.y : -r.y,
+    (r.z >= 0) ? r.x : -r.z,
+    (r.w >= 0) ? r.x : -r.w
+  };
+  return r2;
+}
+
+static __device__ int4 absdiff(ushort4 a, ushort4 b) {
+  int4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
+  int4 r2 = {
+    (r.x >= 0) ? r.x : -r.x,
+    (r.y >= 0) ? r.y : -r.y,
+    (r.z >= 0) ? r.x : -r.z,
+    (r.w >= 0) ? r.x : -r.w
+  };
+  return r2;
 }
 
 // グローバル関数のオーバーロードで書けない処理 //
