@@ -615,107 +615,43 @@ __global__ void kl_copy_boarder1(
   }
 }
 
-enum {
-  BOX3x3_BLOCK_W = 32,
-  BOX3x3_BLOCK_H = 16,
-  BOX3x3_THREADS_W = 8,
-  BOX3x3_THREADS_H = 18,
-};
-
 template <typename pixel_t, typename Horizontal, typename Vertical>
 __global__ void kl_box3x3_filter(
   pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
 )
 {
-  enum {
-    SRC_BUF_W = BOX3x3_THREADS_W * 4 + 2 + 1, // +1: to avoid back conflict
-  };
-
   Horizontal horizontal;
   Vertical vertical;
 
-  __shared__ pixel_t srcbuf[BOX3x3_THREADS_H][SRC_BUF_W];
-  __shared__ int4 tmpbuf[BOX3x3_THREADS_H][BOX3x3_THREADS_W];
+  int x = threadIdx.x + blockDim.x * blockIdx.x;
+  int y = threadIdx.y + blockDim.y * blockIdx.y;
 
-  int tx = threadIdx.x;
-  int ty = threadIdx.y;
-
-  int xbase = BOX3x3_BLOCK_W * blockIdx.x;
-  int ybase = BOX3x3_BLOCK_H * blockIdx.y;
-
-  int lend = min(width - xbase, BOX3x3_BLOCK_W + 2);
-  if (ybase + ty < height) {
-    for (int lx = tx; lx < lend; lx += BOX3x3_THREADS_W) {
-      srcbuf[ty][lx] = pSrc[(xbase + lx) + (ybase + ty) * pitch];
-#if 0
-      if (xbase + lx == 16 && ybase + ty == 0) {
-        printf("1:%d\n", srcbuf[ty][lx]);
-      }
-#endif
-    }
-  }
-  __syncthreads();
-
-  pixel_t p0 = srcbuf[ty][tx * 4 + 0];
-  pixel_t p1 = srcbuf[ty][tx * 4 + 1];
-  pixel_t p2 = srcbuf[ty][tx * 4 + 2];
-  pixel_t p3 = srcbuf[ty][tx * 4 + 3];
-  pixel_t p4 = srcbuf[ty][tx * 4 + 4];
-  pixel_t p5 = srcbuf[ty][tx * 4 + 5];
-
-  int4 h0 = { p0, p1, p2, p3 };
-  int4 h1 = { p1, p2, p3, p4 };
-  int4 h2 = { p2, p3, p4, p5 };
-
-  tmpbuf[ty][tx] = horizontal(h0, h1, h2);
-  __syncthreads();
-
-  if (ty > 0 && ty < BOX3x3_THREADS_H - 1) {
-    int4 v0 = tmpbuf[ty - 1][tx];
-    int4 v1 = tmpbuf[ty + 0][tx];
-    int4 v2 = tmpbuf[ty + 1][tx];
-
-    int4 d = vertical(v0, v1, v2);
-    
-    srcbuf[ty][tx * 4 + 0] = d.x;
-    srcbuf[ty][tx * 4 + 1] = d.y;
-    srcbuf[ty][tx * 4 + 2] = d.z;
-    srcbuf[ty][tx * 4 + 3] = d.w;
-  }
-  __syncthreads();
-
-  if (ty > 0 && ty < BOX3x3_THREADS_H - 1) {
-    if (ybase + ty < height - 1) {
-      for (int lx = tx; lx < lend - 2; lx += BOX3x3_THREADS_W) {
-        pDst[(xbase + lx + 1) + (ybase + ty) * pitch] = srcbuf[ty][lx];
-#if 0
-        if (xbase + tx + 1 == 16 && ybase + ty == 0) {
-          printf("3:%d\n", srcbuf[ty][lx]);
-        }
-#endif
-      }
-    }
+  if (x < width && y < height) {
+    pDst[x + y * pitch] = vertical(
+      horizontal(pSrc[x - 1 + (y - 1) * pitch], pSrc[x + (y - 1) * pitch], pSrc[x + 1 + (y - 1) * pitch]),
+      horizontal(pSrc[x - 1 + y * pitch], pSrc[x + y * pitch], pSrc[x + 1 + y * pitch]),
+      horizontal(pSrc[x - 1 + (y + 1) * pitch], pSrc[x + (y + 1) * pitch], pSrc[x + 1 + (y + 1) * pitch]));
   }
 }
 
 struct RG11Horizontal {
-  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+  __device__ int operator()(int a, int b, int c) {
     return a + b * 2 + c;
   }
 };
 struct RG11Vertical {
-  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+  __device__ int operator()(int a, int b, int c) {
     return (a + b * 2 + c + 8) >> 4;
   }
 };
 
 struct RG20Horizontal {
-  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+  __device__ int operator()(int a, int b, int c) {
     return a + b + c;
   }
 };
 struct RG20Vertical {
-  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+  __device__ int operator()(int a, int b, int c) {
     return (a + b + c + 4) / 9;
   }
 };
@@ -766,22 +702,22 @@ class KRemoveGrain : public GenericVideoFilter {
         continue;
       }
 
-      dim3 threads(BOX3x3_THREADS_W, BOX3x3_THREADS_H);
-      dim3 blocks(nblocks(width, BOX3x3_BLOCK_W), nblocks(height, BOX3x3_BLOCK_H));
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width - 2, threads.x), nblocks(height - 2, threads.y));
 
       switch (mode) {
       case 11:
       case 12:
         // [1 2 1] horizontal and vertical kernel blur
         kl_box3x3_filter<pixel_t, RG11Horizontal, RG11Vertical>
-          << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
         DEBUG_SYNC;
         break;
 
       case 20:
-        // TODO: Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
+        // Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
         kl_box3x3_filter<pixel_t, RG20Horizontal, RG20Vertical>
-          << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
         DEBUG_SYNC;
         break;
 
