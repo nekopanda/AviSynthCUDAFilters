@@ -22,6 +22,18 @@ static __device__ int4 to_int(int4 a) {
   return a;
 }
 
+// to_float(uchar4)
+static __device__ float4 to_float(uchar4 a) {
+  float4 r = { (float)a.x, (float)a.y, (float)a.z, (float)a.w };
+  return r;
+}
+
+// to_float(ushort4)
+static __device__ float4 to_float(ushort4 a) {
+  float4 r = { (float)a.x, (float)a.y, (float)a.z, (float)a.w };
+  return r;
+}
+
 static __device__ int4 load_to_int(const unsigned char* p) {
   int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
   return r;
@@ -38,6 +50,12 @@ static __device__ int4 operator+(int4 a, int b) {
   return r;
 }
 
+// float4 + float
+static __device__ float4 operator+(float4 a, float b) {
+  float4 r = { a.x + b, a.y + b, a.z + b, a.w + b };
+  return r;
+}
+
 // int4 + int4
 static __device__ int4 operator+(int4 a, int4 b) {
   int4 r = { a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w };
@@ -47,6 +65,12 @@ static __device__ int4 operator+(int4 a, int4 b) {
 // int4 * int
 static __device__ int4 operator*(int4 a, int b) {
   int4 r = { a.x * b, a.y * b, a.z * b, a.w * b };
+  return r;
+}
+
+// float4 * float
+static __device__ float4 operator*(float4 a, float b) {
+  float4 r = { a.x * b, a.y * b, a.z * b, a.w * b };
   return r;
 }
 
@@ -76,6 +100,14 @@ static __device__ void operator+=(int4& a, int4 b) {
   a.w += b.w;
 }
 
+// float4 += float4
+static __device__ void operator+=(float4& a, float4 b) {
+  a.x += b.x;
+  a.y += b.y;
+  a.z += b.z;
+  a.w += b.w;
+}
+
 // ushort4 += int4
 static __device__ void operator+=(ushort4& a, int4 b) {
   a.x += b.x;
@@ -95,6 +127,12 @@ static __device__ void operator+=(ushort4& a, ushort4 b) {
 // min(int4, int)
 static __device__ int4 min(int4 a, int b) {
   int4 r = { min(a.x, b), min(a.y, b), min(a.z, b), min(a.w, b) };
+  return r;
+}
+
+// clamp(float4, float, float)
+static __device__ float4 clamp(float4 a, float b, float c) {
+  float4 r = { clamp(a.x, b, c), clamp(a.y, b, c), clamp(a.z, b, c), clamp(a.w, b, c) };
   return r;
 }
 
@@ -147,6 +185,11 @@ template <> struct VHelper<uchar4> {
     uchar4 r = { (uchar)a.x, (uchar)a.y, (uchar)a.z, (uchar)a.w };
     return r;
   }
+  static __device__ uchar4 cast_to(float4 a) {
+    typedef unsigned char uchar;
+    uchar4 r = { (uchar)a.x, (uchar)a.y, (uchar)a.z, (uchar)a.w };
+    return r;
+  }
 };
 
 template <> struct VHelper<ushort4> {
@@ -160,6 +203,11 @@ template <> struct VHelper<ushort4> {
     ushort4 r = { (ushort)a.x, (ushort)a.y, (ushort)a.z, (ushort)a.w };
     return r;
   }
+  static __device__ ushort4 cast_to(float4 a) {
+    typedef unsigned short ushort;
+    ushort4 r = { (ushort)a.x, (ushort)a.y, (ushort)a.z, (ushort)a.w };
+    return r;
+  }
 };
 
 template <> struct VHelper<int4> {
@@ -168,5 +216,13 @@ template <> struct VHelper<int4> {
     return r;
   }
 };
+
+template <> struct VHelper<float4> {
+  static __device__ float4 make(float a) {
+    float4 r = { a, a, a, a };
+    return r;
+  }
+};
+
 
 

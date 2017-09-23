@@ -66,6 +66,7 @@ protected:
   void BobCUDATest(TEST_FRAMES tf, bool parity);
   void BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma);
   void RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma);
+  void GaussResizeCUDATest(TEST_FRAMES tf);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -576,9 +577,56 @@ TEST_F(TestBase, RemoveGrainCUDA_Mode20NoC)
 
 #pragma endregion
 
+void TestBase::GaussResizeCUDATest(TEST_FRAMES tf)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "Import(\"QTGMC_BinomialSoften.avs\")" << std::endl;
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "ref = src.GaussResize(1920,1080,0,0,1920.0001,1080.0001,p=2)" << std::endl;
+    out << "cuda = srcuda.KGaussResize(p=2).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+#pragma region GaussResize
+
+TEST_F(TestBase, GaussResizeTest)
+{
+  GaussResizeCUDATest(TF_MID);
+}
+
+#pragma endregion
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*RemoveGrainCUDA_Mode12WithC*";
+	::testing::GTEST_FLAG(filter) = "*GaussResizeTest*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

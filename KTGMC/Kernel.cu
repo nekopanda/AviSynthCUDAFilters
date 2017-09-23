@@ -64,10 +64,6 @@ struct ResamplingProgram {
 	};
 };
 
-/*********************************
-*** Mitchell-Netravali filter ***
-*********************************/
-
 class ResamplingFunction
 	/**
 	* Pure virtual base class for resampling functions
@@ -151,6 +147,10 @@ std::unique_ptr<ResamplingProgram> ResamplingFunction::GetResamplingProgram(int 
     pixel_offset.get(), pixel_coefficient_float.get(), env));
 }
 
+/*********************************
+*** Mitchell-Netravali filter ***
+*********************************/
+
 class MitchellNetravaliFilter : public ResamplingFunction
 	/**
 	* Mitchell-Netraveli filter, used in BicubicResize
@@ -180,45 +180,189 @@ double MitchellNetravaliFilter::f(double x) {
 	return (x<1) ? (p0 + x*x*(p2 + x*p3)) : (x<2) ? (q0 + x*(q1 + x*(q2 + x*q3))) : 0.0;
 }
 
-template <typename pixel_t, int filter_size>
+/***********************
+*** Gaussian filter ***
+***********************/
+
+/* Solve taps from p*value*value < 9 as pow(2.0, -9.0) == 1.0/512.0 i.e 0.5 bit
+value*value < 9/p       p = param*0.1;
+value*value < 90/param
+value*value < 90/{0.1, 22.5, 30.0, 100.0}
+value*value < {900, 4.0, 3.0, 0.9}
+value       < {30, 2.0, 1.73, 0.949}         */
+
+class GaussianFilter : public ResamplingFunction
+  /**
+  * GaussianFilter, from swscale.
+  **/
+{
+public:
+  GaussianFilter(double p = 30.0);
+  double f(double x);
+  double support() { return 4.0; };
+
+private:
+  double param;
+};
+
+GaussianFilter::GaussianFilter(double p) {
+  param = clamp(p, 0.1, 100.0);
+}
+
+double GaussianFilter::f(double value) {
+  double p = param*0.1;
+  return pow(2.0, -p*value*value);
+}
+
+template <typename vpixel_t, int filter_size>
 __global__ void kl_resample_v(
-	const pixel_t* __restrict__ src, pixel_t* dst,
-	int src_pitch, int dst_pitch,
-	int width, int height,
+	const vpixel_t* __restrict__ src, vpixel_t* dst,
+	int src_pitch4, int dst_pitch4,
+	int width4, int height,
 	const int* __restrict__ offset, const float* __restrict__ coef)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
-	if (x < width && y < height) {
+	if (x < width4 && y < height) {
 		int begin = offset[y];
-		float result = 0;
+    float4 result = { 0 };
 		for (int i = 0; i < filter_size; ++i) {
-			result += src[x + (begin + i) * src_pitch] * coef[y * filter_size + i];
+			result += to_float(src[x + (begin + i) * src_pitch4]) * coef[y * filter_size + i];
 		}
-		if (!std::is_floating_point<pixel_t>::value) {  // floats are uncapped
-      auto clamped = clamp<float>(result, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
-			result = pixel_t(clamped + 0.5f);
-		}
+		result = clamp(result, 0, (sizeof(src[0].x) == 1) ? 255 : 65535);
 #if 0
     if (x == 1200 && y == 0) {
       printf("! %f\n", result);
     }
 #endif
-		dst[x + y * dst_pitch] = (pixel_t)result;
+		dst[x + y * dst_pitch4] = VHelper<vpixel_t>::cast_to(result + 0.5f);
 	}
 }
 
-template <typename pixel_t, int filter_size>
+template <typename vpixel_t, int filter_size>
 void launch_resmaple_v(
+  const vpixel_t* src, vpixel_t* dst,
+  int src_pitch4, int dst_pitch4,
+  int width4, int height,
+  const int* offset, const float* coef)
+{
+  dim3 threads(32, 16);
+  dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+  kl_resample_v<vpixel_t, filter_size> << <blocks, threads >> >(
+    src, dst, src_pitch4, dst_pitch4, width4, height, offset, coef);
+}
+
+enum {
+  RESAMPLE_H_W = 32,
+  RESAMPLE_H_H = 16,
+};
+
+template <typename pixel_t, int filter_size>
+__global__ void kl_resample_h(
+  const pixel_t* __restrict__ src, pixel_t* dst,
+  int src_pitch, int dst_pitch,
+  int width, int height,
+  const int* __restrict__ offset, const float* __restrict__ coef)
+{
+  enum {
+    THREADS = RESAMPLE_H_W * RESAMPLE_H_H,
+    COEF_BUF_LEN = RESAMPLE_H_W * 4 * filter_size,
+    N_READ_LOOP = COEF_BUF_LEN / THREADS
+  };
+
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int tid = tx + ty * RESAMPLE_H_W;
+  int xbase = blockIdx.x * RESAMPLE_H_W * 4;
+  int ybase = blockIdx.y * RESAMPLE_H_H;
+  int x = tx + xbase;
+  int y = ty + ybase;
+
+  __shared__ float scoef[COEF_BUF_LEN];
+  __shared__ pixel_t ssrc[RESAMPLE_H_H][RESAMPLE_H_W * 4 + filter_size + 1];
+
+  int src_base = xbase - filter_size / 2;
+
+  int start_pos = tx + src_base;
+  if (blockIdx.x == 0 || blockIdx.x == gridDim.x - 1) {
+    // x両端の場合は条件いろいろ
+    if (y < height) {
+      if (start_pos + RESAMPLE_H_W * 0 < width) {
+        if (start_pos >= 0) {
+          ssrc[ty][tx + RESAMPLE_H_W * 0] = src[start_pos + RESAMPLE_H_W * 0 + y * src_pitch];
+        }
+      }
+      if (start_pos + RESAMPLE_H_W * 1 < width) {
+        ssrc[ty][tx + RESAMPLE_H_W * 1] = src[start_pos + RESAMPLE_H_W * 1 + y * src_pitch];
+      }
+      if (start_pos + RESAMPLE_H_W * 2 < width) {
+        ssrc[ty][tx + RESAMPLE_H_W * 2] = src[start_pos + RESAMPLE_H_W * 2 + y * src_pitch];
+      }
+      if (start_pos + RESAMPLE_H_W * 3 < width) {
+        ssrc[ty][tx + RESAMPLE_H_W * 3] = src[start_pos + RESAMPLE_H_W * 3 + y * src_pitch];
+      }
+      // 最後の半端部分
+      if (tx < filter_size + 1 && start_pos + RESAMPLE_H_W * 4 < width) {
+        ssrc[ty][tx + RESAMPLE_H_W * 4] = src[start_pos + RESAMPLE_H_W * 4 + y * src_pitch];
+      }
+    }
+    int lend = min((width - xbase) * filter_size, COEF_BUF_LEN);
+    for (int lx = tid; lx < lend; lx += THREADS) {
+      scoef[lx] = coef[xbase * filter_size + lx];
+    }
+  }
+  else {
+    // x両端ではないので条件なし
+    if (y < height) {
+      ssrc[ty][tx + RESAMPLE_H_W * 0] = src[start_pos + RESAMPLE_H_W * 0 + y * src_pitch];
+      ssrc[ty][tx + RESAMPLE_H_W * 1] = src[start_pos + RESAMPLE_H_W * 1 + y * src_pitch];
+      ssrc[ty][tx + RESAMPLE_H_W * 2] = src[start_pos + RESAMPLE_H_W * 2 + y * src_pitch];
+      ssrc[ty][tx + RESAMPLE_H_W * 3] = src[start_pos + RESAMPLE_H_W * 3 + y * src_pitch];
+      // 最後の半端部分
+      if (tx < filter_size + 1 && start_pos + RESAMPLE_H_W * 4 < width) {
+        ssrc[ty][tx + RESAMPLE_H_W * 4] = src[start_pos + RESAMPLE_H_W * 4 + y * src_pitch];
+      }
+    }
+    for (int i = 0; i < N_READ_LOOP; ++i) {
+      scoef[i * THREADS + tid] = coef[xbase * filter_size + i * THREADS + tid];
+    }
+    if (THREADS * N_READ_LOOP + tid < COEF_BUF_LEN) {
+      scoef[THREADS * N_READ_LOOP + tid] = coef[xbase * filter_size + THREADS * N_READ_LOOP + tid];
+    }
+  }
+  __syncthreads();
+
+  if (y < height) {
+    for (int v = 0; v < 4; ++v) {
+      if (x + v * RESAMPLE_H_W < width) {
+        int begin = offset[x + v * RESAMPLE_H_W] - src_base;
+#if 0
+        if (begin < 0 || begin >= RESAMPLE_H_W * 4 + 1) {
+          printf("[resample_v kernel] Unexpected offset %d - %d at %d\n", offset[x + v * RESAMPLE_H_W], src_base, x + v * RESAMPLE_H_W);
+        }
+#endif
+        float result = 0;
+        for (int i = 0; i < filter_size; ++i) {
+          result += ssrc[ty][begin + i] * scoef[(tx + v * RESAMPLE_H_W) * filter_size + i];
+        }
+        result = clamp<float>(result, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
+        dst[x + v * RESAMPLE_H_W + y * dst_pitch] = pixel_t(result + 0.5f);
+      }
+    }
+  }
+}
+
+template <typename pixel_t, int filter_size>
+void launch_resmaple_h(
   const pixel_t* src, pixel_t* dst,
   int src_pitch, int dst_pitch,
   int width, int height,
   const int* offset, const float* coef)
 {
-  dim3 threads(32, 16);
-  dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_resample_v<pixel_t, filter_size> << <blocks, threads >> >(
+  dim3 threads(RESAMPLE_H_W, RESAMPLE_H_H);
+  dim3 blocks(nblocks(width / 4, threads.x), nblocks(height, threads.y));
+  kl_resample_h<pixel_t, filter_size> << <blocks, threads >> >(
     src, dst, src_pitch, dst_pitch, width, height, offset, coef);
 }
 
@@ -242,31 +386,33 @@ class KTGMC_Bob : public GenericVideoFilter {
 	void MakeFrameT(bool top, PVideoFrame& src, PVideoFrame& dst,
 		ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
 	{
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
     const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
 		for (int p = 0; p < 3; ++p) {
-      const pixel_t* srcptr = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
-			int src_pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
+      const vpixel_t* srcptr = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
+			int src_pitch4 = src->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
 
 			// separate field
-			srcptr += top ? 0 : src_pitch;
-			src_pitch *= 2;
+			srcptr += top ? 0 : src_pitch4;
+      src_pitch4 *= 2;
 
-      pixel_t* dstptr = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
-			int dst_pitch = dst->GetPitch(planes[p]) / sizeof(pixel_t);
+      vpixel_t* dstptr = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+			int dst_pitch4 = dst->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
 
 			ResamplingProgram* prog = (p == 0) ? program_y : program_uv;
 
-      int width = vi.width;
+      int width4 = vi.width / 4;
       int height = vi.height;
       
       if (p > 0) {
-        width >>= logUVx;
+        width4 >>= logUVx;
         height >>= logUVy;
       }
 
-      launch_resmaple_v<pixel_t, 4>(
-				srcptr, dstptr, src_pitch, dst_pitch, width, height,
+      launch_resmaple_v<vpixel_t, 4>(
+				srcptr, dstptr, src_pitch4, dst_pitch4, width4, height,
 				prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env));
 
       DEBUG_SYNC;
@@ -796,9 +942,155 @@ public:
   }
 };
 
+class KGaussResize : public GenericVideoFilter {
+  std::unique_ptr<ResamplingProgram> progVert;
+  std::unique_ptr<ResamplingProgram> progVertUV;
+  std::unique_ptr<ResamplingProgram> progHori;
+  std::unique_ptr<ResamplingProgram> progHoriUV;
+
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame tmp = env->NewVideoFrame(vi);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    typedef void (*RESAMPLE_V)(
+      const vpixel_t* src, vpixel_t* dst,
+      int src_pitch4, int dst_pitch4,
+      int width4, int height,
+      const int* offset, const float* coef);
+
+    typedef void(*RESAMPLE_H)(
+      const pixel_t* src, pixel_t* dst,
+      int src_pitch, int dst_pitch,
+      int width, int height,
+      const int* offset, const float* coef);
+
+    for (int p = 0; p < 3; ++p) {
+      const pixel_t* srcptr = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      pixel_t* tmpptr = reinterpret_cast<pixel_t*>(tmp->GetWritePtr(planes[p]));
+      pixel_t* dstptr = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+
+      int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
+      int pitch4 = pitch / 4;
+
+      ResamplingProgram* progV = (p == 0) ? progVert.get() : progVertUV.get();
+      ResamplingProgram* progH = (p == 0) ? progHori.get() : progHoriUV.get();
+
+      int width = vi.width;
+      int height = vi.height;
+
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
+
+      int width4 = width / 4;
+
+      RESAMPLE_V resample_v;
+      RESAMPLE_H resample_h;
+
+      switch (progV->filter_size) {
+      case 8:
+        resample_v = launch_resmaple_v<vpixel_t, 8>;
+        break;
+      case 9:
+        resample_v = launch_resmaple_v<vpixel_t, 9>;
+        break;
+      default:
+        env->ThrowError("[KGaussResize] Unexpected filter_size %d", progV->filter_size);
+        break;
+      }
+      switch (progH->filter_size) {
+      case 8:
+        resample_h = launch_resmaple_h<pixel_t, 8>;
+        break;
+      case 9:
+        resample_h = launch_resmaple_h<pixel_t, 9>;
+        break;
+      default:
+        env->ThrowError("[KGaussResize] Unexpected filter_size %d", progV->filter_size);
+        break;
+      }
+
+      resample_v(
+        (const vpixel_t*)srcptr, (vpixel_t*)tmpptr, pitch4, pitch4, width4, height,
+        progV->pixel_offset->GetData(env), progV->pixel_coefficient_float->GetData(env));
+      DEBUG_SYNC;
+
+      resample_h(
+        tmpptr, dstptr, pitch, pitch, width, height,
+        progH->pixel_offset->GetData(env), progH->pixel_coefficient_float->GetData(env));
+      DEBUG_SYNC;
+    }
+
+    return dst;
+  }
+
+public:
+  KGaussResize(PClip _child, double p, IScriptEnvironment* env_)
+    : GenericVideoFilter(_child)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int width = vi.width;
+    int height = vi.height;
+
+    // QTGMCに合わせる
+    double crop_width = width + 0.0001;
+    double crop_height = height + 0.0001;
+
+    int divUVx = (1 << logUVx);
+    int divUVy = (1 << logUVy);
+
+    progVert = GaussianFilter(p).GetResamplingProgram(height, 0, crop_height, height, env);
+    progVertUV = GaussianFilter(p).GetResamplingProgram(height / divUVy, 0, crop_height / divUVy, height / divUVy, env);
+    progHori = GaussianFilter(p).GetResamplingProgram(width, 0, crop_width, width, env);
+    progHoriUV = GaussianFilter(p).GetResamplingProgram(width / divUVx, 0, crop_width / divUVx, width / divUVx, env);
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KGaussResize] CUDAフレームを入力してください");
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return Proc<uint8_t>(n, env);
+    case 2:
+      return Proc<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KGaussResize] 未対応フォーマット");
+    }
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KGaussResize(
+      args[0].AsClip(),
+      args[1].AsFloat(),
+      env);
+  }
+};
+
 void AddFuncKernel(IScriptEnvironment2* env)
 {
   env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
   env->AddFunction("BinomialTemporalSoften", "ci[scenechange]i[chroma]b", BinomialTemporalSoften::Create, 0);
   env->AddFunction("KRemoveGrain", "c[mode]i[modeU]i[modeV]i", KRemoveGrain::Create, 0);
+  env->AddFunction("KGaussResize", "c[p]f", KGaussResize::Create, 0);
 }
