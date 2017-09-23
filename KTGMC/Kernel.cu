@@ -761,7 +761,6 @@ __global__ void kl_copy_boarder1(
   }
 }
 
-#if 0
 template <typename pixel_t, typename Horizontal, typename Vertical>
 __global__ void kl_box3x3_filter(
   pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
@@ -780,81 +779,24 @@ __global__ void kl_box3x3_filter(
       horizontal(pSrc[x - 1 + (y + 1) * pitch], pSrc[x + (y + 1) * pitch], pSrc[x + 1 + (y + 1) * pitch]));
   }
 }
-#else
 
-
-template <typename pixel_t, typename vpixel_t, typename Horizontal, typename Vertical>
-__global__ void kl_box3x3_filter(
-  pixel_t* pDst,                     // ボーダーを除く
-  const vpixel_t* __restrict__ pSrc, // ボーダー込み
-  int width,                         // ボーダーを除く
-  int width4,                        // ボーダー込み
-  int height,                        // ボーダーを除く
-  int pitch,                         //
-  int pitch4                         //
-)
-{
-  Horizontal horizontal;
-  Vertical vertical;
-
-  int tx = threadIdx.x;
-  int ty = threadIdx.y;
-
-  int xbase4 = blockIdx.x * (RESAMPLE_H_W - 1);
-  int y = blockIdx.y * RESAMPLE_H_H + ty;
-
-  __shared__ union {
-    int s[RESAMPLE_H_H][RESAMPLE_H_W * 4];
-    int4 v[RESAMPLE_H_H][RESAMPLE_H_W];
-  } stmp;
-
-  // １段階目はメモリとの相性がいいベクタ読み込みで垂直方向を処理
-  int src_x = xbase4 + tx;
-  if (src_x < width4 && y < height) {
-    stmp.v[ty][tx] = vertical(
-      to_int(pSrc[src_x + (y + 0) * pitch4]),
-      to_int(pSrc[src_x + (y + 1) * pitch4]),
-      to_int(pSrc[src_x + (y + 2) * pitch4]));
-  }
-  __syncthreads();
-
-  // ２段階目は個別アクセスの効くshared memoryで水平方向を処理
-  if (y < height) {
-    for (int v = 0; v < 4; ++v) {
-      
-      // 最後の2ピクセルは計算できないのでスキップ
-      if (v == 3 && tx >= RESAMPLE_H_W - 2) break;
-
-      int dst_x = xbase4 * 4 + tx + v * RESAMPLE_H_W;
-      if (dst_x < width) {
-        int result = horizontal(
-          stmp.s[ty][tx + 0 + v * RESAMPLE_H_W],
-          stmp.s[ty][tx + 1 + v * RESAMPLE_H_W],
-          stmp.s[ty][tx + 2 + v * RESAMPLE_H_W]);
-        pDst[dst_x + y * pitch] = (pixel_t)result;
-      }
-    }
-  }
-}
-#endif
-
-struct RG11Vertical {
-  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+struct RG11Horizontal {
+  __device__ int operator()(int a, int b, int c) {
     return a + b * 2 + c;
   }
 };
-struct RG11Horizontal {
+struct RG11Vertical {
   __device__ int operator()(int a, int b, int c) {
     return (a + b * 2 + c + 8) >> 4;
   }
 };
 
-struct RG20Vertical {
-  __device__ int4 operator()(int4 a, int4 b, int4 c) {
+struct RG20Horizontal {
+  __device__ int operator()(int a, int b, int c) {
     return a + b + c;
   }
 };
-struct RG20Horizontal {
+struct RG20Vertical {
   __device__ int operator()(int a, int b, int c) {
     return (a + b + c + 4) / 9;
   }
@@ -884,8 +826,8 @@ class KRemoveGrain : public GenericVideoFilter {
       int mode = modes[p];
       if (mode == -1) continue;
 
-      const vpixel_t* pSrc = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
-      vpixel_t* pDst = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+      const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
 
       int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
@@ -901,27 +843,27 @@ class KRemoveGrain : public GenericVideoFilter {
 
       if (mode == 0) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          pDst, pSrc, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
         DEBUG_SYNC;
         continue;
       }
 
-      dim3 threads(RESAMPLE_H_W, RESAMPLE_H_H);
-      dim3 blocks(nblocks(width, RESAMPLE_H_W - 1), nblocks(height - 2, RESAMPLE_H_H));
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width - 2, threads.x), nblocks(height - 2, threads.y));
 
       switch (mode) {
       case 11:
       case 12:
         // [1 2 1] horizontal and vertical kernel blur
-        kl_box3x3_filter<pixel_t, vpixel_t, RG11Horizontal, RG11Vertical>
-          << <blocks, threads >> > ((pixel_t*)pDst + pitch + 1, pSrc, width - 2, width4, height - 2, pitch, pitch4);
+        kl_box3x3_filter<pixel_t, RG11Horizontal, RG11Vertical>
+          << <blocks, threads >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
         DEBUG_SYNC;
         break;
 
       case 20:
         // Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
-        kl_box3x3_filter<pixel_t, vpixel_t, RG20Horizontal, RG20Vertical>
-          << <blocks, threads >> > ((pixel_t*)pDst + pitch + 1, pSrc, width - 2, width4, height - 2, pitch, pitch4);
+        kl_box3x3_filter<pixel_t, RG20Horizontal, RG20Vertical>
+          << <blocks, threads >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
         DEBUG_SYNC;
         break;
 
@@ -932,7 +874,7 @@ class KRemoveGrain : public GenericVideoFilter {
       {
         dim3 threads(256);
         dim3 blocks(nblocks(max(height, width), threads.x), 4);
-        kl_copy_boarder1 << <blocks, threads >> > ((pixel_t*)pDst, (const pixel_t*)pSrc, width, height, pitch);
+        kl_copy_boarder1 << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
       }
 

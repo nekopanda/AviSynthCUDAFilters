@@ -589,13 +589,11 @@ void TestBase::GaussResizeCUDATest(TEST_FRAMES tf, bool chroma)
 
     std::ofstream out(scriptpath);
 
-    out << "Import(\"QTGMC_BinomialSoften.avs\")" << std::endl;
-
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.GaussResize(1920,1080,0,0,1920.0001,1080.0001,p=2)" << std::endl;
-    out << "cuda = srcuda.KGaussResize(p=2," << (chroma ? "" : ", chroma=false") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KGaussResize(p=2" << (chroma ? "" : ", chroma=false") << ").OnCUDA(0)" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -630,7 +628,7 @@ TEST_F(TestBase, GaussResizeTest_NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*GaussResizeTest*";
+	::testing::GTEST_FLAG(filter) = "*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
