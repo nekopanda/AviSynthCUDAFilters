@@ -28,7 +28,7 @@ void OnCudaError(cudaError_t err) {
 DeviceLocalBase::DeviceLocalBase(const void* init_data, size_t length, IScriptEnvironment2* env)
   : length(length)
 {
-  numDevices = env->GetProperty(AEP_NUM_DEVICES);
+  numDevices = (int)env->GetProperty(AEP_NUM_DEVICES);
   dataPtrs = new std::atomic<void*>[numDevices]();
   void* ptr = new uint8_t[length];
   memcpy(ptr, init_data, length);
@@ -50,7 +50,7 @@ DeviceLocalBase::~DeviceLocalBase()
 void* DeviceLocalBase::GetData_(IScriptEnvironment2* env)
 {
   // double checked locking pattern
-  int devid = env->GetProperty(AEP_DEVICE_ID);
+  int devid = (int)env->GetProperty(AEP_DEVICE_ID);
   void* ptr = dataPtrs[devid].load(std::memory_order_acquire);
   if (ptr) return ptr;
 
@@ -99,6 +99,7 @@ class ImageCompare : GenericVideoFilter
 {
   PClip child2;
 
+  const bool chroma;
   const int thresh;
 
   template <typename pixel_t>
@@ -139,17 +140,21 @@ class ImageCompare : GenericVideoFilter
 
     ComparePlanar<pixel_t>(dstY, f1Y, f2Y,
       vi.width, vi.height, dst->GetPitch(PLANAR_Y) >> nPixelShift, env);
-    ComparePlanar<pixel_t>(dstU, f1U, f2U,
-      vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_U) >> nPixelShift, env);
-    ComparePlanar<pixel_t>(dstV, f1V, f2V,
-      vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_V) >> nPixelShift, env);
+
+    if (chroma) {
+      ComparePlanar<pixel_t>(dstU, f1U, f2U,
+        vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_U) >> nPixelShift, env);
+      ComparePlanar<pixel_t>(dstV, f1V, f2V,
+        vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_V) >> nPixelShift, env);
+    }
   }
 
 public:
-  ImageCompare(PClip child1, PClip child2, int thresh, IScriptEnvironment2* env)
+  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, IScriptEnvironment2* env)
     : GenericVideoFilter(child1)
     , child2(child2)
     , thresh(thresh)
+    , chroma(chroma)
   {
     //
   }
@@ -180,6 +185,7 @@ public:
       args[0].AsClip(),
       args[1].AsClip(),
       args[2].AsInt(2), // thresh
+      args[3].AsBool(true), // thresh
       env);
   }
 };
@@ -192,7 +198,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
 	AVS_linkage = vectors;
 	//init_console();
 
-  env->AddFunction("ImageCompare", "cc[thresh]i", ImageCompare::Create, 0);
+  env->AddFunction("ImageCompare", "cc[thresh]i[chroma]b", ImageCompare::Create, 0);
 
 	AddFuncKernel(env);
   AddFuncMV(env);
