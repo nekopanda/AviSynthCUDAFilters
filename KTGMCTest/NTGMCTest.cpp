@@ -66,7 +66,7 @@ protected:
   void BobCUDATest(TEST_FRAMES tf, bool parity);
   void BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma);
   void RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma);
-  void GaussResizeCUDATest(TEST_FRAMES tf);
+  void GaussResizeCUDATest(TEST_FRAMES tf, bool chroma);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -532,11 +532,10 @@ void TestBase::RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma)
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
-    // QTGMCで使われているのは-1だが、比較で一致しなくなるおそれがあるため0（コピー）にする
-    out << "ref = src.RemoveGrain(" << mode << (chroma ? "" : ", 0") << ")" << std::endl;
-    out << "cuda = srcuda.KRemoveGrain(" << mode << (chroma ? "" : ", 0") << ").OnCUDA(0)" << std::endl;
+    out << "ref = src.RemoveGrain(" << mode << (chroma ? "" : ", -1") << ")" << std::endl;
+    out << "cuda = srcuda.KRemoveGrain(" << mode << (chroma ? "" : ", -1") << ").OnCUDA(0)" << std::endl;
 
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
     out.close();
 
@@ -577,7 +576,7 @@ TEST_F(TestBase, RemoveGrainCUDA_Mode20NoC)
 
 #pragma endregion
 
-void TestBase::GaussResizeCUDATest(TEST_FRAMES tf)
+void TestBase::GaussResizeCUDATest(TEST_FRAMES tf, bool chroma)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -596,9 +595,9 @@ void TestBase::GaussResizeCUDATest(TEST_FRAMES tf)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.GaussResize(1920,1080,0,0,1920.0001,1080.0001,p=2)" << std::endl;
-    out << "cuda = srcuda.KGaussResize(p=2).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KGaussResize(p=2," << (chroma ? "" : ", chroma=false") << ").OnCUDA(0)" << std::endl;
 
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
     out.close();
 
@@ -617,9 +616,14 @@ void TestBase::GaussResizeCUDATest(TEST_FRAMES tf)
 
 #pragma region GaussResize
 
-TEST_F(TestBase, GaussResizeTest)
+TEST_F(TestBase, GaussResizeTest_WithC)
 {
-  GaussResizeCUDATest(TF_MID);
+  GaussResizeCUDATest(TF_MID, true);
+}
+
+TEST_F(TestBase, GaussResizeTest_NoC)
+{
+  GaussResizeCUDATest(TF_MID, false);
 }
 
 #pragma endregion
