@@ -59,15 +59,15 @@ protected:
 
   void GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env);
 
-  void AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
-  void DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel);
-  void DegrainBinomialCUDATest(TEST_FRAMES tf, int N, int blksize, int pel);
-  void CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel);
+  void AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
+  void DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel);
+  void DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel);
+  void CompensateTest(TEST_FRAMES tf, int blksize, int pel);
 
-  void BobCUDATest(TEST_FRAMES tf, bool parity);
-  void BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma);
-  void RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma);
-  void GaussResizeCUDATest(TEST_FRAMES tf, bool chroma);
+  void BobTest(TEST_FRAMES tf, bool parity);
+  void BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma);
+  void RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma);
+  void GaussResizeTest(TEST_FRAMES tf, bool chroma);
 
   void InpandVerticalX2Test(TEST_FRAMES tf, bool chroma);
   void ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma);
@@ -98,7 +98,7 @@ void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
 
 #pragma region Analyze
 
-void TestBase::AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
+void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
 {
 	try {
 		IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -140,76 +140,76 @@ void TestBase::AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chro
 	}
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch1)
+TEST_F(TestBase, Analyze_Blk32NoCPel1Batch1)
 {
-  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 1);
+  AnalyzeTest(TF_MID, true, 32, false, 1, 1);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch2)
+TEST_F(TestBase, Analyze_Blk32NoCPel1Batch2)
 {
-  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 2);
+  AnalyzeTest(TF_MID, true, 32, false, 1, 2);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch3)
+TEST_F(TestBase, Analyze_Blk32NoCPel1Batch3)
 {
-  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 3);
+  AnalyzeTest(TF_MID, true, 32, false, 1, 3);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1Batch8)
+TEST_F(TestBase, Analyze_Blk32NoCPel1Batch8)
 {
-  AnalyzeCUDATest(TF_MID, true, 32, false, 1, 8);
+  AnalyzeTest(TF_MID, true, 32, false, 1, 8);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel2)
+TEST_F(TestBase, Analyze_Blk16WithCPel2)
 {
-	AnalyzeCUDATest(TF_MID, true, 16, true, 2, 4);
+	AnalyzeTest(TF_MID, true, 16, true, 2, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk16WithCPel1)
+TEST_F(TestBase, Analyze_Blk16WithCPel1)
 {
-	AnalyzeCUDATest(TF_MID, true, 16, true, 1, 4);
+	AnalyzeTest(TF_MID, true, 16, true, 1, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel2)
+TEST_F(TestBase, Analyze_Blk16NoCPel2)
 {
-	AnalyzeCUDATest(TF_MID, true, 16, false, 2, 4);
+	AnalyzeTest(TF_MID, true, 16, false, 2, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk16NoCPel1)
+TEST_F(TestBase, Analyze_Blk16NoCPel1)
 {
-	AnalyzeCUDATest(TF_MID, true, 16, false, 1, 4);
+	AnalyzeTest(TF_MID, true, 16, false, 1, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel2)
+TEST_F(TestBase, Analyze_Blk32WithCPel2)
 {
-	AnalyzeCUDATest(TF_MID, true, 32, true, 2, 4);
+	AnalyzeTest(TF_MID, true, 32, true, 2, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32WithCPel1)
+TEST_F(TestBase, Analyze_Blk32WithCPel1)
 {
-	AnalyzeCUDATest(TF_MID, true, 32, true, 1, 4);
+	AnalyzeTest(TF_MID, true, 32, true, 1, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel2)
+TEST_F(TestBase, Analyze_Blk32NoCPel2)
 {
-	AnalyzeCUDATest(TF_MID, true, 32, false, 2, 4);
+	AnalyzeTest(TF_MID, true, 32, false, 2, 4);
 }
 
-TEST_F(TestBase, AnalyzeCUDA_Blk32NoCPel1)
+TEST_F(TestBase, Analyze_Blk32NoCPel1)
 {
-	AnalyzeCUDATest(TF_MID, true, 32, false, 1, 4);
+	AnalyzeTest(TF_MID, true, 32, false, 1, 4);
 }
 
 TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
 {
-  AnalyzeCUDATest(TF_MID, false, 16, true, 2, 4);
+  AnalyzeTest(TF_MID, false, 16, true, 2, 4);
 }
 
 #pragma endregion
 
 #pragma region Degrain
 
-void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
+void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -295,47 +295,47 @@ void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
   }
 }
 
-TEST_F(TestBase, DegrainCUDA_1Blk16Pel2)
+TEST_F(TestBase, Degrain_1Blk16Pel2)
 {
-  DegrainCUDATest(TF_MID, 1, 16, 2);
+  DegrainTest(TF_MID, 1, 16, 2);
 }
 
-TEST_F(TestBase, DegrainCUDA_1Blk16Pel1)
+TEST_F(TestBase, Degrain_1Blk16Pel1)
 {
-  DegrainCUDATest(TF_MID, 1, 16, 1);
+  DegrainTest(TF_MID, 1, 16, 1);
 }
 
-TEST_F(TestBase, DegrainCUDA_1Blk32Pel2)
+TEST_F(TestBase, Degrain_1Blk32Pel2)
 {
-  DegrainCUDATest(TF_MID, 1, 32, 2);
+  DegrainTest(TF_MID, 1, 32, 2);
 }
 
-TEST_F(TestBase, DegrainCUDA_1Blk32Pel1)
+TEST_F(TestBase, Degrain_1Blk32Pel1)
 {
-  DegrainCUDATest(TF_MID, 1, 32, 1);
+  DegrainTest(TF_MID, 1, 32, 1);
 }
 
-TEST_F(TestBase, DegrainCUDA_2Blk16Pel2)
+TEST_F(TestBase, Degrain_2Blk16Pel2)
 {
-  DegrainCUDATest(TF_MID, 2, 16, 2);
+  DegrainTest(TF_MID, 2, 16, 2);
 }
 
-TEST_F(TestBase, DegrainCUDA_2Blk16Pel1)
+TEST_F(TestBase, Degrain_2Blk16Pel1)
 {
-  DegrainCUDATest(TF_MID, 2, 16, 1);
+  DegrainTest(TF_MID, 2, 16, 1);
 }
 
-TEST_F(TestBase, DegrainCUDA_2Blk32Pel2)
+TEST_F(TestBase, Degrain_2Blk32Pel2)
 {
-  DegrainCUDATest(TF_MID, 2, 32, 2);
+  DegrainTest(TF_MID, 2, 32, 2);
 }
 
-TEST_F(TestBase, DegrainCUDA_2Blk32Pel1)
+TEST_F(TestBase, Degrain_2Blk32Pel1)
 {
-  DegrainCUDATest(TF_MID, 2, 32, 1);
+  DegrainTest(TF_MID, 2, 32, 1);
 }
 
-void TestBase::DegrainBinomialCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
+void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -391,16 +391,16 @@ void TestBase::DegrainBinomialCUDATest(TEST_FRAMES tf, int N, int blksize, int p
   }
 }
 
-TEST_F(TestBase, DegrainBinomialCUDA_2Blk32Pel1)
+TEST_F(TestBase, DegrainBinomial_2Blk32Pel1)
 {
-  DegrainBinomialCUDATest(TF_MID, 2, 32, 1);
+  DegrainBinomialTest(TF_MID, 2, 32, 1);
 }
 
 #pragma endregion
 
 #pragma region Compensate
 
-void TestBase::CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel)
+void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -448,31 +448,31 @@ void TestBase::CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel)
   }
 }
 
-TEST_F(TestBase, CompensateCUDA_Blk16Pel2)
+TEST_F(TestBase, Compensate_Blk16Pel2)
 {
-  CompensateCUDATest(TF_MID, 16, 2);
+  CompensateTest(TF_MID, 16, 2);
 }
 
-TEST_F(TestBase, CompensateCUDA_Blk16Pel1)
+TEST_F(TestBase, Compensate_Blk16Pel1)
 {
-  CompensateCUDATest(TF_MID, 16, 1);
+  CompensateTest(TF_MID, 16, 1);
 }
 
-TEST_F(TestBase, CompensateCUDA_Blk32Pel2)
+TEST_F(TestBase, Compensate_Blk32Pel2)
 {
-  CompensateCUDATest(TF_MID, 32, 2);
+  CompensateTest(TF_MID, 32, 2);
 }
 
-TEST_F(TestBase, CompensateCUDA_Blk32Pel1)
+TEST_F(TestBase, Compensate_Blk32Pel1)
 {
-  CompensateCUDATest(TF_MID, 32, 1);
+  CompensateTest(TF_MID, 32, 1);
 }
 
 #pragma endregion
 
 #pragma region Bob
 
-void TestBase::BobCUDATest(TEST_FRAMES tf, bool parity)
+void TestBase::BobTest(TEST_FRAMES tf, bool parity)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -510,21 +510,21 @@ void TestBase::BobCUDATest(TEST_FRAMES tf, bool parity)
   }
 }
 
-TEST_F(TestBase, BobCUDATest_TFF)
+TEST_F(TestBase, BobTest_TFF)
 {
-  BobCUDATest(TF_MID, true);
+  BobTest(TF_MID, true);
 }
 
-TEST_F(TestBase, BobCUDATest_BFF)
+TEST_F(TestBase, BobTest_BFF)
 {
-  BobCUDATest(TF_MID, false);
+  BobTest(TF_MID, false);
 }
 
 #pragma endregion
 
 #pragma region BinomialSoften
 
-void TestBase::BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma)
+void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -562,31 +562,31 @@ void TestBase::BinomialSoftenCUDATest(TEST_FRAMES tf, int radius, bool chroma)
   }
 }
 
-TEST_F(TestBase, BinomialSoftenCUDA_Rad1WithC)
+TEST_F(TestBase, BinomialSoften_Rad1WithC)
 {
-  BinomialSoftenCUDATest(TF_MID, 1, true);
+  BinomialSoftenTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, BinomialSoftenCUDA_Rad2WithC)
+TEST_F(TestBase, BinomialSoften_Rad2WithC)
 {
-  BinomialSoftenCUDATest(TF_MID, 2, true);
+  BinomialSoftenTest(TF_MID, 2, true);
 }
 
-TEST_F(TestBase, BinomialSoftenCUDA_Rad1NoC)
+TEST_F(TestBase, BinomialSoften_Rad1NoC)
 {
-  BinomialSoftenCUDATest(TF_MID, 1, false);
+  BinomialSoftenTest(TF_MID, 1, false);
 }
 
-TEST_F(TestBase, BinomialSoftenCUDA_Rad2NoC)
+TEST_F(TestBase, BinomialSoften_Rad2NoC)
 {
-  BinomialSoftenCUDATest(TF_MID, 2, false);
+  BinomialSoftenTest(TF_MID, 2, false);
 }
 
 #pragma endregion
 
 #pragma region RemoveGrain
 
-void TestBase::RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma)
+void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -624,31 +624,31 @@ void TestBase::RemoveGrainCUDATest(TEST_FRAMES tf, int mode, bool chroma)
   }
 }
 
-TEST_F(TestBase, RemoveGrainCUDA_Mode12WithC)
+TEST_F(TestBase, RemoveGrain_Mode12WithC)
 {
-  RemoveGrainCUDATest(TF_MID, 12, true);
+  RemoveGrainTest(TF_MID, 12, true);
 }
 
-TEST_F(TestBase, RemoveGrainCUDA_Mode12NoC)
+TEST_F(TestBase, RemoveGrain_Mode12NoC)
 {
-  RemoveGrainCUDATest(TF_MID, 12, false);
+  RemoveGrainTest(TF_MID, 12, false);
 }
 
-TEST_F(TestBase, RemoveGrainCUDA_Mode20WithC)
+TEST_F(TestBase, RemoveGrain_Mode20WithC)
 {
-  RemoveGrainCUDATest(TF_MID, 20, true);
+  RemoveGrainTest(TF_MID, 20, true);
 }
 
-TEST_F(TestBase, RemoveGrainCUDA_Mode20NoC)
+TEST_F(TestBase, RemoveGrain_Mode20NoC)
 {
-  RemoveGrainCUDATest(TF_MID, 20, false);
+  RemoveGrainTest(TF_MID, 20, false);
 }
 
 #pragma endregion
 
 #pragma region GaussResize
 
-void TestBase::GaussResizeCUDATest(TEST_FRAMES tf, bool chroma)
+void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();
@@ -686,12 +686,12 @@ void TestBase::GaussResizeCUDATest(TEST_FRAMES tf, bool chroma)
 
 TEST_F(TestBase, GaussResizeTest_WithC)
 {
-  GaussResizeCUDATest(TF_MID, true);
+  GaussResizeTest(TF_MID, true);
 }
 
 TEST_F(TestBase, GaussResizeTest_NoC)
 {
-  GaussResizeCUDATest(TF_MID, false);
+  GaussResizeTest(TF_MID, false);
 }
 
 #pragma endregion
@@ -1000,7 +1000,7 @@ TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*DegrainBinomialCUDA_2Blk32Pel1*";
+	::testing::GTEST_FLAG(filter) = "*DegrainBinomial_2Blk32Pel1*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

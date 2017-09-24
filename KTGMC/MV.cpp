@@ -464,7 +464,7 @@ class KMPlane : public KMPlaneBase
 	int nBitsPerPixel;
 public:
 
-	KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, IKDeintCUDA* cuda)
+	KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, IMVCUDA* cuda)
 		: kernel(cuda->get(pixel_t()))
 		, pPlane(new pixel_t*[nPel * nPel])
     , nPel(nPel)
@@ -627,7 +627,7 @@ public:
 class KMFrame
 {
 	const KMVParam* param;
-	IKDeintCUDA* cuda;
+	IMVCUDA* cuda;
 
   std::unique_ptr<KMPlaneBase> pYPlane;
   std::unique_ptr<KMPlaneBase> pUPlane;
@@ -649,7 +649,7 @@ class KMFrame
   }
 
 public:
-	KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, IKDeintCUDA* cuda)
+	KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, IMVCUDA* cuda)
     : param(param)
 		, cuda(cuda)
   {
@@ -724,11 +724,11 @@ class KMSuperFrame
 {
   const KMVParam* param;
   std::unique_ptr<std::unique_ptr<KMFrame>[]> pFrames;
-	IKDeintCUDA* cuda;
+	IMVCUDA* cuda;
 
 public:
   // xRatioUV PF 160729
-	KMSuperFrame(const KMVParam* param, IKDeintCUDA* cuda)
+	KMSuperFrame(const KMVParam* param, IMVCUDA* cuda)
     : param(param)
     , pFrames(new std::unique_ptr<KMFrame>[param->nLevels])
 		, cuda(cuda)
@@ -789,7 +789,7 @@ class KMSuper : public GenericVideoFilter
 {
   KMVParam params;
 
-  std::unique_ptr<IKDeintCUDA> cuda;
+  std::unique_ptr<IMVCUDA> cuda;
 
   std::unique_ptr<KMSuperFrame> pSrcGOF;
 
@@ -2196,7 +2196,7 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
 	}
 
 public:
-	PlaneOfBlocksCUDA(MVPlaneParam p, IKDeintCUDA* cuda, IScriptEnvironment2* env)
+	PlaneOfBlocksCUDA(MVPlaneParam p, IMVCUDA* cuda, IScriptEnvironment2* env)
 		: p(p)
 		, kernel(cuda->get(pixel_t()))
 	{ }
@@ -2348,7 +2348,7 @@ public:
 
 class GroupOfPlanes
 {
-	IKDeintCUDA* cuda;
+	IMVCUDA* cuda;
 
 	const std::vector<LevelInfo> linfo;
   const int nLevelCount;
@@ -2372,7 +2372,7 @@ public:
     int penaltyZero, int pglobal, int badSAD,
     int badrange, bool meander, bool tryMany,
 
-    IKDeintCUDA* cuda,
+    IMVCUDA* cuda,
     IScriptEnvironment2 *env)
 		: cuda(cuda)
 		, linfo(linfo)
@@ -2544,7 +2544,7 @@ class KMAnalyse : public GenericVideoFilter
 {
 private:
   KMVParam params;
-	std::unique_ptr<IKDeintCUDA> cuda;
+	std::unique_ptr<IMVCUDA> cuda;
   std::unique_ptr<GroupOfPlanes> pAnalyzer;
 	std::unique_ptr<KMSuperFrame> pSrcSF[ANALYZE_MAX_BATCH];
 	std::unique_ptr<KMSuperFrame> pRefSF[ANALYZE_MAX_BATCH];
@@ -2961,7 +2961,7 @@ class KMPartialSuper : public GenericVideoFilter
 {
   const KMVParam* superParams;
   KMVParam params;
-  std::unique_ptr<IKDeintCUDA> cuda;
+  std::unique_ptr<IMVCUDA> cuda;
 
   template <typename pixel_t>
   PVideoFrame Proc(int n, IScriptEnvironment2* env)
@@ -4211,7 +4211,7 @@ public:
 class KMDegrainX : public GenericVideoFilter
 {
   const KMVParam *params;
-  std::unique_ptr<IKDeintCUDA> cuda;
+  std::unique_ptr<IMVCUDA> cuda;
 
   const int delta;
   const int YUVplanes;
@@ -4868,7 +4868,7 @@ public:
 class KMCompensate : public GenericVideoFilter
 {
   const KMVParam *params;
-  std::unique_ptr<IKDeintCUDA> cuda;
+  std::unique_ptr<IMVCUDA> cuda;
 
   PClip super;
   PClip vectors;

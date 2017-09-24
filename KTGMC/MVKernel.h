@@ -83,7 +83,7 @@ public:
     void* _compensateblock, int* sceneChange) = 0;
 };
 
-class IKDeintCUDA
+class IMVCUDA
 {
 public:
   virtual void SetEnv(cudaStream_t stream, IScriptEnvironment2* env) = 0;
@@ -92,4 +92,4 @@ public:
   virtual IKDeintKernel<uint16_t>* get(uint16_t) = 0;
 };
 
-IKDeintCUDA* CreateKDeintCUDA();
+IMVCUDA* CreateKDeintCUDA();

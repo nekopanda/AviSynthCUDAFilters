@@ -3005,7 +3005,7 @@ public:
 // IKDeintCUDAImpl
 /////////////////////////////////////////////////////////////////////////////
 
-class IKDeintCUDAImpl : public IKDeintCUDA
+class IMVCUDAImpl : public IMVCUDA
 {
   KDeintKernel<uint8_t> k8;
   KDeintKernel<uint16_t> k16;
@@ -3024,7 +3024,7 @@ public:
   virtual IKDeintKernel<uint16_t>* get(uint16_t) { return &k16; }
 };
 
-IKDeintCUDA* CreateKDeintCUDA()
+IMVCUDA* CreateKDeintCUDA()
 {
-  return new IKDeintCUDAImpl();
+  return new IMVCUDAImpl();
 }
