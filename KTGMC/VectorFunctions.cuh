@@ -62,6 +62,12 @@ static __device__ int4 operator+(int4 a, int4 b) {
   return r;
 }
 
+// int4 - int4
+static __device__ int4 operator-(int4 a, int4 b) {
+  int4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
+  return r;
+}
+
 // int4 * int
 static __device__ int4 operator*(int4 a, int b) {
   int4 r = { a.x * b, a.y * b, a.z * b, a.w * b };
@@ -127,6 +133,18 @@ static __device__ void operator+=(ushort4& a, ushort4 b) {
 // min(int4, int)
 static __device__ int4 min(int4 a, int b) {
   int4 r = { min(a.x, b), min(a.y, b), min(a.z, b), min(a.w, b) };
+  return r;
+}
+
+// min(int4, int4)
+static __device__ int4 min(int4 a, int4 b) {
+  int4 r = { min(a.x, b.x), min(a.y, b.y), min(a.z, b.z), min(a.w, b.w) };
+  return r;
+}
+
+// max(int4, int4)
+static __device__ int4 max(int4 a, int4 b) {
+  int4 r = { max(a.x, b.x), max(a.y, b.y), max(a.z, b.z), max(a.w, b.w) };
   return r;
 }
 

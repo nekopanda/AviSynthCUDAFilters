@@ -1090,10 +1090,685 @@ public:
   }
 };
 
+class KMasktoolFilterBase : public GenericVideoFilter {
+protected:
+  int numChilds;
+  PClip childs[4];
+
+  int Y, U, V;
+  int logUVx;
+  int logUVy;
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env) { }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env) { }
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    PVideoFrame src0 = childs[0]->GetFrame(n, env);
+    PVideoFrame src1 = (numChilds >= 2) ? childs[1]->GetFrame(n, env) : PVideoFrame();
+    PVideoFrame src2 = (numChilds >= 3) ? childs[2]->GetFrame(n, env) : PVideoFrame();
+    PVideoFrame src3 = (numChilds >= 4) ? childs[3]->GetFrame(n, env) : PVideoFrame();
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    int modes[] = { Y, U, V };
+
+    for (int p = 0; p < 3; ++p) {
+      int mode = modes[p];
+      if (mode == 1) continue;
+
+      const pixel_t* pSrc0 = reinterpret_cast<const pixel_t*>(src0->GetReadPtr(planes[p]));
+      const pixel_t* pSrc1 = (numChilds >= 2) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p])) : nullptr;
+      const pixel_t* pSrc2 = (numChilds >= 3) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p])) : nullptr;
+      const pixel_t* pSrc3 = (numChilds >= 4) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p])) : nullptr;
+      pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+
+      int pitch = src0->GetPitch(planes[p]) / sizeof(pixel_t);
+      int width = vi.width;
+      int height = vi.height;
+
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
+
+      int width4 = width >> 2;
+      int pitch4 = pitch >> 2;
+
+      if (mode == 0) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+        DEBUG_SYNC;
+        continue;
+      }
+
+      switch (modes[p]) {
+      case 2:
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+        DEBUG_SYNC;
+        break;
+      case 3:
+        ProcPlane(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
+        break;
+      case 4:
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc1, width4, height, pitch4);
+        DEBUG_SYNC;
+        break;
+      case 5:
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc2, width4, height, pitch4);
+        DEBUG_SYNC;
+        break;
+      }
+    }
+
+    return dst;
+  }
+
+public:
+  KMasktoolFilterBase(PClip child, int Y, int U, int V, IScriptEnvironment* env_)
+    : GenericVideoFilter(child)
+    , numChilds(1)
+    , Y(Y), U(U), V(V)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    childs[0] = child;
+  }
+
+  KMasktoolFilterBase(PClip child0, PClip child1, int Y, int U, int V, IScriptEnvironment* env_)
+    : GenericVideoFilter(child0)
+    , numChilds(2)
+    , Y(Y), U(U), V(V)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    childs[0] = child0;
+    childs[1] = child1;
+  }
+
+  KMasktoolFilterBase(PClip child0, PClip child1, PClip child2, int Y, int U, int V, IScriptEnvironment* env_)
+    : GenericVideoFilter(child0)
+    , numChilds(3)
+    , Y(Y), U(U), V(V)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    childs[0] = child0;
+    childs[1] = child1;
+    childs[2] = child2;
+  }
+
+  KMasktoolFilterBase(PClip child0, PClip child1, PClip child2, PClip child3, int Y, int U, int V, IScriptEnvironment* env_)
+    : GenericVideoFilter(child0)
+    , numChilds(4)
+    , Y(Y), U(U), V(V)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    childs[0] = child0;
+    childs[1] = child1;
+    childs[2] = child2;
+    childs[3] = child3;
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KMasktoolFilterBase] CUDAフレームを入力してください");
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return Proc<uint8_t>(n, env);
+    case 2:
+      return Proc<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KMasktoolFilterBase] 未対応フォーマット");
+    }
+    return PVideoFrame();
+  }
+};
+
+template <typename vpixel_t>
+__global__ void kl_makediff(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pA,
+  const vpixel_t* __restrict__ pB, 
+  int width4, int height, int pitch4, int range_half
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto tmp = to_int(pA[x + y * pitch4]) - to_int(pB[x + y * pitch4]) + range_half;
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+class KMakeDiff : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    int bits = vi.BitsPerComponent();
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_makediff<<<blocks, threads>>>(
+      (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4, 1 << (bits - 1));
+    DEBUG_SYNC;
+  }
+
+public:
+  KMakeDiff(PClip src0, PClip src1, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src0, src1, y, u, v, env_)
+  { }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KMakeDiff(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      args[2].AsInt(3),
+      args[3].AsInt(1),
+      args[4].AsInt(1),
+      env);
+  }
+};
+
+// 上下2ライン分は除いて渡す
+template <typename vpixel_t, typename F>
+__global__ void kl_box5_v(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc, 
+  int width4, int height, int pitch4
+)
+{
+  F f;
+
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto v0 = to_int(pSrc[x + (y - 2) * pitch4]);
+    auto v1 = to_int(pSrc[x + (y - 1) * pitch4]);
+    auto v2 = to_int(pSrc[x + (y + 0) * pitch4]);
+    auto v3 = to_int(pSrc[x + (y + 1) * pitch4]);
+    auto v4 = to_int(pSrc[x + (y + 2) * pitch4]);
+    auto tmp = f(v0, v1, v2, v3, v4);
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+// 上下2ライン分だけ処理する
+// threads: (X,4), blocks(nblocks(width4,X))
+template <typename vpixel_t, typename F>
+__global__ void kl_box5_v_border(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc,
+  int width4, int height, int pitch4
+)
+{
+  F f;
+
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int ty = threadIdx.y;
+
+  int y;
+  if (ty < 2) {
+    y = ty;
+  }
+  else {
+    y = height - (ty - 2) - 1;
+  }
+
+  if (x < width4) {
+    auto v2 = to_int(pSrc[x + (y + 0) * pitch4]);
+    auto v0 = (y - 2 >= 0) ? to_int(pSrc[x + (y - 2) * pitch4]) : v2;
+    auto v1 = (y - 1 >= 0) ? to_int(pSrc[x + (y - 1) * pitch4]) : v2;
+    auto v3 = (y + 1 < height) ? to_int(pSrc[x + (y + 1) * pitch4]) : v2;
+    auto v4 = (y + 2 < height) ? to_int(pSrc[x + (y + 2) * pitch4]) : v2;
+    auto tmp = f(v0, v1, v2, v3, v4);
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+struct Min5 {
+  __device__ int4 operator()(int4 a, int4 b, int4 c, int4 d, int4 e) {
+    return min(min(min(a, b), min(c, d)), e);
+  }
+};
+struct Max5 {
+  __device__ int4 operator()(int4 a, int4 b, int4 c, int4 d, int4 e) {
+    return max(max(max(a, b), max(c, d)), e);
+  }
+};
+
+template <typename F>
+class KXpandVerticalX2 : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    {
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
+      kl_box5_v<vpixel_t, F> << <blocks, threads >> >(
+        (vpixel_t*)(pDst + pitch * 2), (const vpixel_t*)(pSrc0 + pitch * 2), width4, height - 4, pitch4);
+      DEBUG_SYNC;
+    }
+    {
+      dim3 threads(32, 4);
+      dim3 blocks(nblocks(width4, threads.x));
+      kl_box5_v_border<vpixel_t, F> << <blocks, threads >> >(
+        (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+      DEBUG_SYNC;
+    }
+  }
+
+public:
+  KXpandVerticalX2(PClip src0, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src0, y, u, v, env_)
+  { }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KXpandVerticalX2<F>(
+      args[0].AsClip(),
+      args[1].AsInt(3),
+      args[2].AsInt(1),
+      args[3].AsInt(1),
+      env);
+  }
+};
+
+template <typename vpixel_t, typename F>
+__global__ void kl_logic1(
+  vpixel_t* pDst, 
+  const vpixel_t* __restrict__ pSrc, 
+  int width4, int height, int pitch4
+)
+{
+  F f;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    int4 src = to_int(pSrc[x + y * pitch4]);
+    auto tmp = f(src);
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+template <typename vpixel_t, typename F>
+__global__ void kl_logic2(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc0, 
+  const vpixel_t* __restrict__ pSrc1,
+  int width4, int height, int pitch4
+)
+{
+  F f;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    int4 src0 = to_int(pSrc0[x + y * pitch4]);
+    int4 src1 = to_int(pSrc1[x + y * pitch4]);
+    auto tmp = f(src0, src1);
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+template <typename vpixel_t, typename F>
+__global__ void kl_logic3(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc0, 
+  const vpixel_t* __restrict__ pSrc1,
+  const vpixel_t* __restrict__ pSrc2, 
+  int width4, int height, int pitch4
+)
+{
+  F f;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    int4 src0 = to_int(pSrc0[x + y * pitch4]);
+    int4 src1 = to_int(pSrc1[x + y * pitch4]);
+    int4 src2 = to_int(pSrc2[x + y * pitch4]);
+    auto tmp = f(src0, src1, src2);
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+struct LogicMin {
+  __device__ int4 operator()(int4 a, int4 b) {
+    return min(a, b);
+  }
+};
+struct LogicMax {
+  __device__ int4 operator()(int4 a, int4 b) {
+    return max(a, b);
+  }
+};
+
+template <typename F>
+class KLogic1 : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_logic1<vpixel_t, F> << <blocks, threads >> >(
+      (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+    DEBUG_SYNC;
+  }
+
+public:
+  KLogic1(PClip src0, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src0, y, u, v, env_)
+  { }
+};
+
+template <typename F>
+class KLogic2 : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_logic2<vpixel_t, F> << <blocks, threads >> >(
+      (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4);
+    DEBUG_SYNC;
+  }
+
+public:
+  KLogic2(PClip src0, PClip src1, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src0, src1, y, u, v, env_)
+  { }
+};
+
+template <typename F>
+class KLogic3 : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_logic3<vpixel_t, F> << <blocks, threads >> >((vpixel_t*)pDst, 
+      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, (const vpixel_t*)pSrc2, width4, height, pitch4);
+    DEBUG_SYNC;
+  }
+
+public:
+  KLogic3(PClip src0, PClip src1, PClip src2, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src0, src1, src2, y, u, v, env_)
+  { }
+};
+
+static AVSValue __cdecl KLogicCreate(AVSValue args, void* user_data, IScriptEnvironment* env) {
+
+  PClip src0 = args[0].AsClip();
+  PClip src1 = args[1].AsClip();
+  int Y = args[3].AsInt(3);
+  int U = args[4].AsInt(1);
+  int V = args[5].AsInt(1);
+
+  auto modestr = std::string(args[2].AsString());
+  if (modestr == "min") {
+    return new KLogic2<LogicMin>(src0, src1, Y, U, V, env);
+  }
+  else if (modestr == "max") {
+    return new KLogic2<LogicMax>(src0, src1, Y, U, V, env);
+  }
+  else {
+    env->ThrowError("[KLogicCreate] Unsupported mode %s", modestr.c_str());
+  }
+
+  return AVSValue();
+}
+
+__device__ int dev_bobshimmerfixes_merge(
+  int src, int diff, int c1, int c2, int scale
+)
+{
+  const int h = (128 << scale);
+  diff = (diff < (129 << scale)) ? diff : (c1 < h) ? h : c1;
+  diff = (diff > (127 << scale)) ? diff : (c2 > h) ? h : c2;
+  int dst = src + diff - h;
+  return clamp(dst, 0, (255 << scale));
+}
+
+template <typename vpixel_t>
+__global__ void kl_bobshimmerfixes_merge(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc,
+  const vpixel_t* __restrict__ pDiff,
+  const vpixel_t* __restrict__ pChoke1,
+  const vpixel_t* __restrict__ pChoke2,
+  int width4, int height, int pitch4,
+  int scale
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto src = to_int(pSrc[x + y * pitch4]);
+    auto diff = to_int(pDiff[x + y * pitch4]);
+    auto c1 = to_int(pChoke1[x + y * pitch4]);
+    auto c2 = to_int(pChoke2[x + y * pitch4]);
+    int4 tmp = {
+      dev_bobshimmerfixes_merge(src.x, diff.x, c1.x, c2.x, scale),
+      dev_bobshimmerfixes_merge(src.y, diff.y, c1.y, c2.y, scale),
+      dev_bobshimmerfixes_merge(src.z, diff.z, c1.z, c2.z, scale),
+      dev_bobshimmerfixes_merge(src.w, diff.w, c1.w, c2.w, scale)
+    };
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+class KTGMC_BobShimmerFixesMerge : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc, const pixel_t* pDiff, const pixel_t* pChoke1, const pixel_t* pChoke2,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    int scale = vi.BitsPerComponent() - 8;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+      (const vpixel_t*)pSrc, (const vpixel_t*)pDiff,
+      (const vpixel_t*)pChoke1, (const vpixel_t*)pChoke2,
+      width4, height, pitch4, scale);
+    DEBUG_SYNC;
+  }
+
+public:
+  KTGMC_BobShimmerFixesMerge(PClip src, PClip diff, PClip choke1, PClip choke2, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src, diff, choke1, choke2, y, u, v, env_)
+  { }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_BobShimmerFixesMerge(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      args[2].AsClip(),
+      args[3].AsClip(),
+      args[4].AsInt(3),
+      args[5].AsInt(1),
+      args[6].AsInt(1),
+      env);
+  }
+};
+
+
 void AddFuncKernel(IScriptEnvironment2* env)
 {
   env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
   env->AddFunction("BinomialTemporalSoften", "ci[scenechange]i[chroma]b", BinomialTemporalSoften::Create, 0);
   env->AddFunction("KRemoveGrain", "c[mode]i[modeU]i[modeV]i", KRemoveGrain::Create, 0);
   env->AddFunction("KGaussResize", "c[p]f[chroma]b", KGaussResize::Create, 0);
+
+  env->AddFunction("KInpandVerticalX2", "c[y]i[u]i[v]i", KXpandVerticalX2<Min5>::Create, 0);
+  env->AddFunction("KExpandVerticalX2", "c[y]i[u]i[v]i", KXpandVerticalX2<Max5>::Create, 0);
+
+  env->AddFunction("KMakeDiff", "cc[y]i[u]i[v]i", KMakeDiff::Create, 0);
+  env->AddFunction("KLogic", "cc[mode]s[y]i[u]i[v]i", KLogicCreate, 0);
+  env->AddFunction("KTGMC_BobShimmerFixesMerge", "cccc[y]i[u]i[v]i", KLogicCreate, 0);
 }
