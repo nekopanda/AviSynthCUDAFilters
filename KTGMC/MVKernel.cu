@@ -1657,10 +1657,31 @@ static __device__ int dev_degrain_weight(int thSAD, int blockSAD)
   return (int)(256.0f*(sq_thSAD - sq_blockSAD) / (sq_thSAD + sq_blockSAD));
 }
 
-template<int delta>
+// binomial対応は4まで（それ以降は外側の重みが0になるので意味がない）
+template<int delta, bool binomial>
 static __device__ void dev_norm_weights(int &WSrc, int *WRefB, int *WRefF)
 {
   WSrc = 256;
+  if (binomial) {
+    if (delta == 1) {
+      WSrc *= 2;
+    }
+    else if (delta == 2) {
+      WSrc *= 6;
+      WRefB[0] *= 4; WRefF[0] *= 4;
+    }
+    else if (delta == 3) {
+      WSrc *= 20;
+      WRefB[0] *= 15; WRefF[0] *= 15;
+      WRefB[1] *= 6; WRefF[1] *= 6;
+    }
+    else if (delta == 4) {
+      WSrc *= 70;
+      WRefB[0] *= 56; WRefF[0] *= 56;
+      WRefB[1] *= 28; WRefF[1] *= 28;
+      WRefB[2] *= 8; WRefF[2] *= 8;
+    }
+  }
   int WSum;
   if (delta == 6)
     WSum = WRefB[0] + WRefF[0] + WSrc + WRefB[1] + WRefF[1] + WRefB[2] + WRefF[2] + WRefB[3] + WRefF[3] + WRefB[4] + WRefF[4] + WRefB[5] + WRefF[5] + 1;
@@ -1710,7 +1731,7 @@ static __device__ void dev_norm_weights(int &WSrc, int *WRefB, int *WRefF)
     WSrc = 256 - WRefB[0] - WRefF[0];
 }
 
-template <typename pixel_t, typename vpixel_t, int N, int NPEL, int SHIFT>
+template <typename pixel_t, typename vpixel_t, int N, int NPEL, int SHIFT, bool BINOMIAL>
 static __global__ void kl_prepare_degrain(
   int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
   const short* ovrwins,
@@ -1790,7 +1811,7 @@ static __global__ void kl_prepare_degrain(
     }
 
     // weight
-    dev_norm_weights<N>(WSrc, WRefB, WRefF);
+    dev_norm_weights<N, BINOMIAL>(WSrc, WRefB, WRefF);
 
     b.WSrc = WSrc;
     for (int i = 0; i < N; ++i) {
@@ -2513,7 +2534,7 @@ public:
     }
   }
 
-  template <typename vpixel_t, int N, int NPEL, int SHIFT>
+  template <typename vpixel_t, int N, int NPEL, int SHIFT, bool BINOMIAL>
   void launch_prepare_degrain(
     int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
     const short* ovrwins,
@@ -2525,7 +2546,7 @@ public:
   {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
-    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT> << <blocks, threads >> > (
+    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT, BINOMIAL> << <blocks, threads >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nPitchSuper, nImgPitch);
     DebugSync();
   }
@@ -2557,7 +2578,7 @@ public:
     int nWidth, int nHeight,
     int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV, bool* isUsableB, bool* isUsableF,
-    int nTh1, int nTh2, int thSAD, int thSADC,
+    int nTh1, int nTh2, int thSAD, int thSADC, bool binomial,
     const short* ovrwins, const short* overwinsUV,
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
@@ -2571,7 +2592,7 @@ public:
     int nWidth, int nHeight,
     int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV, bool* isUsableB, bool* isUsableF,
-    int nTh1, int nTh2, int thSAD, int thSADC,
+    int nTh1, int nTh2, int thSAD, int thSADC, bool binomial,
     const short* ovrwins, const short* overwinsUV,
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
@@ -2627,12 +2648,24 @@ public:
 
     switch (nPel) {
     case 1:
-      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 0>;
-      prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 1>;
+      if (binomial) {
+        prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 0, true>;
+        prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 1, true>;
+      }
+      else {
+        prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 0, false>;
+        prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 1, 1, false>;
+      }
       break;
     case 2:
-      prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 0>;
-      prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 1>;
+      if (binomial) {
+        prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 0, true>;
+        prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 1, true>;
+      }
+      else {
+        prepare_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 0, false>;
+        prepareuv_func = &Me::launch_prepare_degrain<vpixel_t, N, 2, 1, false>;
+      }
       break;
     default:
       env->ThrowError("[Degrain] 未対応Pel");
@@ -2736,7 +2769,7 @@ public:
     int N, int nWidth, int nHeight, int nBlkX, int nBlkY, int nPad, int nBlkSize, int nPel, int nBitsPerPixel,
     bool* enableYUV,
     bool* isUsableB, bool* isUsableF,
-    int nTh1, int nTh2, int thSAD, int thSADC,
+    int nTh1, int nTh2, int thSAD, int thSADC, bool binomial,
     const short* ovrwins, const short* overwinsUV,
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
@@ -2776,7 +2809,7 @@ public:
     (this->*degrain)(
       nWidth, nHeight, nBlkX, nBlkY, nPad, nBlkSize, nPel, nBitsPerPixel,
       enableYUV, isUsableB, isUsableF,
-      nTh1, nTh2, thSAD, thSADC,
+      nTh1, nTh2, thSAD, thSADC, binomial,
       ovrwins, overwinsUV, mvB, mvF,
       pSrc, pDst, pTmp, pRefB, pRefF,
       nPitchY, nPitchUV, nPitchSuperY, nPitchSuperUV, nImgPitchY, nImgPitchUV,

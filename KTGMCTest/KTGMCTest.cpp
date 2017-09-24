@@ -61,6 +61,7 @@ protected:
 
   void AnalyzeCUDATest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
   void DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel);
+  void DegrainBinomialCUDATest(TEST_FRAMES tf, int N, int blksize, int pel);
   void CompensateCUDATest(TEST_FRAMES tf, int blksize, int pel);
 
   void BobCUDATest(TEST_FRAMES tf, bool parity);
@@ -221,6 +222,8 @@ void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
 
     std::ofstream out(scriptpath);
 
+    // シーンチェンジ判定されるとテストできないのでしきい値は10倍にしてある
+
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
     out << "s = src.KMSuper(pel = " << pel << ")" << std::endl;
@@ -247,12 +250,12 @@ void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
           ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1.OnCPU(0))" << std::endl;
       }
       if (N == 1) {
-        out << "degref = src.KMDegrain1(s, mvb.OnCUDA(0), mvf.OnCUDA(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+        out << "degref = src.KMDegrain1(s, mvb.OnCUDA(0), mvf.OnCUDA(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
       }
       else if (N == 2) {
-        out << "degref = src.KMDegrain2(s, mvb.OnCUDA(0), mvf.OnCUDA(0), mvb1.OnCUDA(0), mvf1.OnCUDA(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+        out << "degref = src.KMDegrain2(s, mvb.OnCUDA(0), mvf.OnCUDA(0), mvb1.OnCUDA(0), mvf1.OnCUDA(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
       }
     }
     else {
@@ -267,12 +270,12 @@ void TestBase::DegrainCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
           ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1)" << std::endl;
       }
       if (N == 1) {
-        out << "degref = src.KMDegrain1(s, mvb, mvf, thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+        out << "degref = src.KMDegrain1(s, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
       }
       else if (N == 2) {
-        out << "degref = src.KMDegrain2(s, mvb, mvf, mvb1, mvf1, thSAD = 640, thSCD1 = 180, thSCD2 = 98)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain2(scuda, mvb.OnCPU(0), mvf.OnCPU(0), mvb1.OnCPU(0), mvf1.OnCPU(0), thSAD = 640, thSCD1 = 180, thSCD2 = 98).OnCUDA(0)" << std::endl;
+        out << "degref = src.KMDegrain2(s, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb.OnCPU(0), mvf.OnCPU(0), mvb1.OnCPU(0), mvf1.OnCPU(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
       }
     }
     out << "ImageCompare(degref, degcuda)" << std::endl;
@@ -330,6 +333,67 @@ TEST_F(TestBase, DegrainCUDA_2Blk32Pel2)
 TEST_F(TestBase, DegrainCUDA_2Blk32Pel1)
 {
   DegrainCUDATest(TF_MID, 2, 32, 1);
+}
+
+void TestBase::DegrainBinomialCUDATest(TEST_FRAMES tf, int N, int blksize, int pel)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "s = src.KMSuper(pel = " << pel << ")" << std::endl;
+    out << "scuda = s.OnCPU(0)" << std::endl;
+    out << "pmvb = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "pmvf = s.KMPartialSuper().KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "pmvb1 = s.KMPartialSuper().KMAnalyse(isb = true, delta = 2, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "pmvf1 = s.KMPartialSuper().KMAnalyse(isb = false, delta = 2, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "mvb = scuda.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb.OnCPU(0))" << std::endl;
+    out << "mvf = scuda.KMAnalyse(isb = false, delta = 1, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf.OnCPU(0))" << std::endl;
+    out << "mvb1 = scuda.KMAnalyse(isb = true, delta = 2, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb1.OnCPU(0))" << std::endl;
+    out << "mvf1 = scuda.KMAnalyse(isb = false, delta = 2, chroma = false, blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1.OnCPU(0))" << std::endl;
+
+    out << "bindeg = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980, binomial = true).OnCUDA(0)" << std::endl;
+    out << "deg1 = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+    out << "deg2 = srcuda.KMDegrain1(scuda, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+    out << "binref = deg1.Merge(deg2, 0.2).Merge(src, 0.0625)" << std::endl;
+
+    out << "ImageCompare(binref, bindeg, 6)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, DegrainBinomialCUDA_2Blk32Pel1)
+{
+  DegrainBinomialCUDATest(TF_MID, 2, 32, 1);
 }
 
 #pragma endregion
@@ -936,7 +1000,7 @@ TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*BobShimmerFixesMergeTest*";
+	::testing::GTEST_FLAG(filter) = "*DegrainBinomialCUDA_2Blk32Pel1*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

@@ -4226,6 +4226,8 @@ class KMDegrainX : public GenericVideoFilter
   int thSAD;
   int thSADC;
 
+  bool binomial;
+
   std::unique_ptr<OverlapWindows> OverWins;
   std::unique_ptr<OverlapWindows> OverWinsUV;
 
@@ -4454,7 +4456,7 @@ class KMDegrainX : public GenericVideoFilter
     cuda->get(pixel_t())->Degrain(
       delta, nWidth, nHeight, nBlkX, nBlkY, nPad, nBlkSize, nPel, nBitsPerPixel,
       enableYUV, isUsableB, isUsableF,
-      nTh1, nTh2, thSAD, thSADC,
+      nTh1, nTh2, thSAD, thSADC, binomial,
       ovrwins, ovrwinsUV,
       mvB, mvF,
       psrc, pdst, ptmp, prefB, prefF,
@@ -4470,11 +4472,12 @@ public:
     PClip mvbw, PClip mvfw, PClip mvbw2, PClip mvfw2,
     int _thSAD, int _thSADC, int _YUVplanes, int _nLimit, int _nLimitC,
     int _nSCD1, int _nSCD2, bool _isse2, bool _planar, bool _lsb_flag,
-    bool _mt_flag, int _delta, IScriptEnvironment2* env)
+    bool _mt_flag, int _delta, bool binomial, IScriptEnvironment2* env)
     : GenericVideoFilter(child)
     , params(KMVParam::GetParam(mvbw->GetVideoInfo(), env))
     , cuda(CreateKDeintCUDA())
     , delta(_delta)
+    , binomial(binomial)
     , YUVplanes(_YUVplanes)
     , super(super)
     , OverWins()
@@ -4642,6 +4645,7 @@ public:
       false, // lsb
       true,  // mt
       delta,
+      args[11 + param_index_shift].AsBool(false),    // binomial
       env
     );
   }
@@ -5166,11 +5170,11 @@ void AddFuncMV(IScriptEnvironment2* env)
     KMAnalyse::Create, 0);
 
   env->AddFunction("KMDegrain1",
-    "cccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i",
+    "cccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i[binomial]b",
     KMDegrainX::Create, (void *)1);
 
   env->AddFunction("KMDegrain2",
-    "cccccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i",
+    "cccccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i[binomial]b",
     KMDegrainX::Create, (void *)2);
 
   env->AddFunction("KMCompensate",
