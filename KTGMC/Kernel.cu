@@ -1770,5 +1770,5 @@ void AddFuncKernel(IScriptEnvironment2* env)
 
   env->AddFunction("KMakeDiff", "cc[y]i[u]i[v]i", KMakeDiff::Create, 0);
   env->AddFunction("KLogic", "cc[mode]s[y]i[u]i[v]i", KLogicCreate, 0);
-  env->AddFunction("KTGMC_BobShimmerFixesMerge", "cccc[y]i[u]i[v]i", KLogicCreate, 0);
+  env->AddFunction("KTGMC_BobShimmerFixesMerge", "cccc[y]i[u]i[v]i", KTGMC_BobShimmerFixesMerge::Create, 0);
 }

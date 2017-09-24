@@ -936,7 +936,7 @@ TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*BobShimmerFixesMergeTest_Rep3WithC*";
+	::testing::GTEST_FLAG(filter) = "*BobShimmerFixesMergeTest*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
