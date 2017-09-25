@@ -2218,6 +2218,109 @@ public:
   }
 };
 
+__device__ float dev_tweak_search_clip(
+  float repair, float bobbed, float blur, float scale, float invscale
+)
+{
+  // リテラルをスケールさせるのは面倒なので値の方をスケールさせる
+  repair *= invscale;
+  bobbed *= invscale;
+  blur *= invscale;
+
+  //float tweaked = ((repair + 3) < bobbed) ? (repair + 3) : ((repair - 3) > bobbed) ? (repair - 3) : bobbed;
+  // 等価な処理に書き変え
+  float tweaked = clamp(bobbed, repair - 3, repair + 3);
+  
+  float ret = ((blur + 7) < tweaked) ? (blur + 2) : ((blur - 7) > tweaked) ? (blur - 2) : (((blur * 51) + (tweaked * 49)) * (1.0f / 100.0f));
+
+  return ret * scale;
+}
+
+template <typename vpixel_t>
+__global__ void kl_tweak_search_clip (
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pRepair,
+  const vpixel_t* __restrict__ pBobbed,
+  const vpixel_t* __restrict__ pBlur,
+  int width4, int height, int pitch4,
+  float scale, float invscale
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto repair = to_float(pRepair[x + y * pitch4]);
+    auto bobbed = to_float(pBobbed[x + y * pitch4]);
+    auto blur = to_float(pBlur[x + y * pitch4]);
+    float4 d = {
+      dev_tweak_search_clip(repair.x, bobbed.x, blur.x, scale, invscale),
+      dev_tweak_search_clip(repair.y, bobbed.y, blur.y, scale, invscale),
+      dev_tweak_search_clip(repair.z, bobbed.z, blur.z, scale, invscale),
+      dev_tweak_search_clip(repair.w, bobbed.w, blur.w, scale, invscale)
+    };
+    auto tmp = clamp(d + 0.5f, 0, ((sizeof(pRepair[0].x) == 1) ? 255 : 65535));
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(to_int(tmp));
+  }
+}
+
+class KTGMC_TweakSearchClip : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(int p, uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(int p, uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pRepair, const pixel_t* pBobbed, const pixel_t* pBlur,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    int bits = vi.BitsPerComponent();
+    float scale = (float)(1 << (bits - 8));
+    float invscale = 1.f / scale;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_tweak_search_clip<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+      (const vpixel_t*)pRepair, (const vpixel_t*)pBobbed, (const vpixel_t*)pBlur,
+      width4, height, pitch4, scale, invscale);
+    DEBUG_SYNC;
+  }
+
+public:
+  KTGMC_TweakSearchClip(PClip repair, PClip bobbed, PClip blur, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(repair, bobbed, blur, y, u, v, env_)
+  { }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_TweakSearchClip(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      args[2].AsClip(),
+      args[3].AsInt(3),
+      args[4].AsInt(1),
+      args[5].AsInt(1),
+      env);
+  }
+};
+
 
 void AddFuncKernel(IScriptEnvironment2* env)
 {
@@ -2237,6 +2340,7 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KTGMC_Resharpen", "cc[sharpAdj]f[y]i[u]i[v]i", KTGMC_Resharpen::Create, 0);
   env->AddFunction("KTGMC_LimitOverSharpen", "cccc[ovs]i[y]i[u]i[v]i", KTGMC_LimitOverSharpen::Create, 0);
   env->AddFunction("KTGMC_ToFullRange", "c[y]i[u]i[v]i", KTGMC_ToFullRange::Create, 0);
+  env->AddFunction("KTGMC_TweakSearchClip", "ccc[y]i[u]i[v]i", KTGMC_TweakSearchClip::Create, 0);
 
   env->AddFunction("KMerge", "cc[weight]f", KMerge::CreateMerge, 0);
   env->AddFunction("KMergeLuma", "cc[weight]f", KMerge::CreateMergeLuma, 0);

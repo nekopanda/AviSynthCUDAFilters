@@ -79,6 +79,7 @@ protected:
   void ResharpenTest(TEST_FRAMES tf);
   void LimitOverSharpenTest(TEST_FRAMES tf);
   void ToFullRangeTest(TEST_FRAMES tf, bool chroma);
+  void TweakSearchClipTest(TEST_FRAMES tf, bool chroma);
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
 };
@@ -1206,6 +1207,64 @@ TEST_F(TestBase, ToFullRangeTest_NoC)
 
 #pragma endregion
 
+#pragma region TweakSearchClip
+
+void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    int rc = (chroma ? 3 : 1);
+
+    out << "repair0 = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "bobbed = repair0.RemoveGrain(20)" << std::endl;
+    out << "spatialBlur = bobbed.RemoveGrain(20)" << std::endl;
+    out << "repair0cuda = repair0.OnCPU(0)" << std::endl;
+    out << "bobbedcuda = bobbed.OnCPU(0)" << std::endl;
+    out << "spatialBlurcuda = spatialBlur.OnCPU(0)" << std::endl;
+
+    out << "tweaked = mt_lutxy( repair0, bobbed, \"x 3 scalef + y < x 3 scalef + x 3 scalef - y > x 3 scalef - y ? ?\", u=" << rc << ",v=" << rc << ")" << std::endl;
+    out << "ref = spatialBlur.mt_lutxy( tweaked, \"x 7 scalef + y < x 2 scalef + x 7 scalef - y > x 2 scalef - x 51 * y 49 * + 100 / ? ?\", u=" << rc << ",v=" << rc << ")" << std::endl;
+
+    out << "cuda = repair0cuda.KTGMC_TweakSearchClip(bobbedcuda, spatialBlurcuda, u=" << rc << ",v=" << rc << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, TweakSearchClipTest_WithC)
+{
+  TweakSearchClipTest(TF_MID, true);
+}
+
+TEST_F(TestBase, TweakSearchClipTest_NoC)
+{
+  TweakSearchClipTest(TF_MID, false);
+}
+
+#pragma endregion
+
 #pragma region Merge
 
 void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
@@ -1266,7 +1325,7 @@ TEST_F(TestBase, MergeTest_NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.ToFullRangeTest_WithC*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
