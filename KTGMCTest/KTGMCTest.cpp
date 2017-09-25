@@ -73,7 +73,14 @@ protected:
   void ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma);
   void MakeDiffTest(TEST_FRAMES tf, bool chroma);
   void LogicTest(TEST_FRAMES tf, const char* mode, bool chroma);
+
   void BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma);
+  void VResharpenTest(TEST_FRAMES tf);
+  void ResharpenTest(TEST_FRAMES tf);
+  void LimitOverSharpenTest(TEST_FRAMES tf);
+  void ToFullRangeTest(TEST_FRAMES tf, bool chroma);
+
+  void MergeTest(TEST_FRAMES tf, bool chroma);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -545,7 +552,7 @@ void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
     out << "ref = src.QTGMC_BinomialSoften" << radius << "(" << (chroma ? "true" : "false") << ")" << std::endl;
     out << "cuda = srcuda.BinomialTemporalSoften(" << radius << ", 28, " << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
 
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
     out.close();
 
@@ -998,9 +1005,268 @@ TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
 
 #pragma endregion
 
+#pragma region VResharpen
+
+void TestBase::VResharpenTest(TEST_FRAMES tf)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "ref = Merge(mt_inpand(src,mode=\"vertical\",U=3,V=3), mt_expand(src,mode=\"vertical\",U=3,V=3))" << std::endl;
+    out << "cuda = srcuda.KTGMC_VResharpen(U=3, V=3).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, VResharpenTest_WithC)
+{
+  VResharpenTest(TF_MID);
+}
+
+#pragma endregion
+
+#pragma region Resharpen
+
+void TestBase::ResharpenTest(TEST_FRAMES tf)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src1 = src.RemoveGrain(20)" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "sr1cuda = src1.OnCPU(0)" << std::endl;
+
+    out << "ref = src.mt_lutxy(src1,\"clamp_f x x y - 0.700000 * +\",U=3,V=3)" << std::endl;
+    out << "cuda = srcuda.KTGMC_Resharpen(sr1cuda, 0.70000, U=3, V=3).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, ResharpenTest_WithC)
+{
+  ResharpenTest(TF_MID);
+}
+
+#pragma endregion
+
+#pragma region LimitOverSharpen
+
+void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src1 = src.RemoveGrain(20)" << std::endl;
+    out << "src2 = src1.RemoveGrain(20)" << std::endl;
+    out << "src3 = src2.RemoveGrain(20)" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "sr1cuda = src1.OnCPU(0)" << std::endl;
+    out << "sr2cuda = src2.OnCPU(0)" << std::endl;
+    out << "sr3cuda = src3.OnCPU(0)" << std::endl;
+    
+    out << "tMax = src1.mt_logic(src2, \"max\", U = 3, V = 3).mt_logic(src3, \"max\", U = 3, V = 3)" << std::endl;
+    out << "tMin = src1.mt_logic(src2, \"min\", U = 3, V = 3).mt_logic(src3, \"min\", U = 3, V = 3)" << std::endl;
+    out << "ref = src.mt_clamp( tMax,tMin, 0,0, U=3,V=3 )" << std::endl;
+
+    out << "cuda = srcuda.KTGMC_LimitOverSharpen(sr1cuda, sr2cuda, sr3cuda, 0, U=3, V=3).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, LimitOverSharpenTest_WithC)
+{
+  LimitOverSharpenTest(TF_MID);
+}
+
+#pragma endregion
+
+#pragma region ToFullRange
+
+void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    int rc = (chroma ? 3 : 1);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out <<
+      "ref = src.mt_lut(yexpr=\"0.000000 1.062500 0.066406 x 16 - 219 / 0 1 clip 0.062500 + / - * x 16 - 219 / 0 1 clip 1 0.000000 - * + 255 * \"," << 
+      "expr=\"x 128 - 128 * 112 / 128 + \",y=3,u=" << rc << ",v=" << rc << ")" << std::endl;
+
+    out << "cuda = srcuda.KTGMC_ToFullRange(u=" << rc << ",v=" << rc << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, ToFullRangeTest_WithC)
+{
+  ToFullRangeTest(TF_MID, true);
+}
+
+TEST_F(TestBase, ToFullRangeTest_NoC)
+{
+  ToFullRangeTest(TF_MID, false);
+}
+
+#pragma endregion
+
+#pragma region Merge
+
+void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src1 = src.RemoveGrain(20)" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "sr1cuda = src1.OnCPU(0)" << std::endl;
+
+    if (chroma) {
+      out << "ref = src.Merge(src1, 0.844)" << std::endl;
+      out << "cuda = srcuda.KMerge(sr1cuda, 0.844).OnCUDA(0)" << std::endl;
+    }
+    else {
+      out << "ref = src.MergeLuma(src1, 0.844)" << std::endl;
+      out << "cuda = srcuda.KMergeLuma(sr1cuda, 0.844).OnCUDA(0)" << std::endl;
+    }
+
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, MergeTest_WithC)
+{
+  MergeTest(TF_MID, true);
+}
+
+TEST_F(TestBase, MergeTest_NoC)
+{
+  MergeTest(TF_MID, false);
+}
+
+#pragma endregion
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "*DegrainBinomial_2Blk32Pel1*";
+	::testing::GTEST_FLAG(filter) = "TestBase.ToFullRangeTest_WithC*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

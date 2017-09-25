@@ -22,6 +22,12 @@ static __device__ int4 to_int(int4 a) {
   return a;
 }
 
+// to_int(int4)
+static __device__ int4 to_int(float4 a) {
+  int4 r = { (int)a.x, (int)a.y, (int)a.z, (int)a.w };
+  return r;
+}
+
 // to_float(uchar4)
 static __device__ float4 to_float(uchar4 a) {
   float4 r = { (float)a.x, (float)a.y, (float)a.z, (float)a.w };
@@ -62,9 +68,21 @@ static __device__ int4 operator+(int4 a, int4 b) {
   return r;
 }
 
+// float4 + float4
+static __device__ float4 operator+(float4 a, float4 b) {
+  float4 r = { a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w };
+  return r;
+}
+
 // int4 - int4
 static __device__ int4 operator-(int4 a, int4 b) {
   int4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
+  return r;
+}
+
+// float4 - float4
+static __device__ float4 operator-(float4 a, float4 b) {
+  float4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
   return r;
 }
 
