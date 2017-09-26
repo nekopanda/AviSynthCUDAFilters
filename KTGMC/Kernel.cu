@@ -577,7 +577,7 @@ __global__ void kl_binomial_temporal_soften_2(
   }
 }
 
-class BinomialTemporalSoften : public GenericVideoFilter {
+class KBinomialTemporalSoften : public GenericVideoFilter {
 
   int radius;
   int scenechange;
@@ -693,7 +693,7 @@ class BinomialTemporalSoften : public GenericVideoFilter {
   }
 
 public:
-  BinomialTemporalSoften(PClip _child, int radius, int scenechange, bool chroma, IScriptEnvironment* env_)
+  KBinomialTemporalSoften(PClip _child, int radius, int scenechange, bool chroma, IScriptEnvironment* env_)
     : GenericVideoFilter(_child)
     , radius(radius)
     , scenechange(scenechange)
@@ -704,7 +704,7 @@ public:
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 
     if (radius != 1 && radius != 2) {
-      env->ThrowError("[BinomialTemporalSoften] radiusは1か2です");
+      env->ThrowError("[KBinomialTemporalSoften] radiusは1か2です");
     }
   }
 
@@ -713,7 +713,7 @@ public:
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 
     if (!IS_CUDA) {
-      env->ThrowError("[BinomialTemporalSoften] CUDAフレームを入力してください");
+      env->ThrowError("[KBinomialTemporalSoften] CUDAフレームを入力してください");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -723,13 +723,13 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[BinomialTemporalSoften] 未対応フォーマット");
+      env->ThrowError("[KBinomialTemporalSoften] 未対応フォーマット");
     }
     return PVideoFrame();
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    return new BinomialTemporalSoften(
+    return new KBinomialTemporalSoften(
       args[0].AsClip(),
       args[1].AsInt(),
       args[2].AsInt(0),
@@ -2325,7 +2325,7 @@ public:
 void AddFuncKernel(IScriptEnvironment2* env)
 {
   env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
-  env->AddFunction("BinomialTemporalSoften", "ci[scenechange]i[chroma]b", BinomialTemporalSoften::Create, 0);
+  env->AddFunction("KBinomialTemporalSoften", "ci[scenechange]i[chroma]b", KBinomialTemporalSoften::Create, 0);
   env->AddFunction("KRemoveGrain", "c[mode]i[modeU]i[modeV]i", KRemoveGrain::Create, 0);
   env->AddFunction("KGaussResize", "c[p]f[chroma]b", KGaussResize::Create, 0);
 

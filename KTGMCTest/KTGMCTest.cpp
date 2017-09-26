@@ -551,7 +551,7 @@ void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.QTGMC_BinomialSoften" << radius << "(" << (chroma ? "true" : "false") << ")" << std::endl;
-    out << "cuda = srcuda.BinomialTemporalSoften(" << radius << ", 28, " << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KBinomialTemporalSoften(" << radius << ", 28, " << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1325,7 +1325,7 @@ TEST_F(TestBase, MergeTest_NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.*";
+	::testing::GTEST_FLAG(filter) = "TestBase.TweakSearchClipTest_WithC*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
