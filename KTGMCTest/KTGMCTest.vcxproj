@@ -154,6 +154,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ProjectReference Include="..\KNNEDI3\nnedi3.vcxproj">
+      <Project>{03456684-151d-49b2-ba66-037255a57811}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\KTGMC\KTGMC.vcxproj">
       <Project>{9ec2ba4b-ea05-4242-84da-7a6239dd2691}</Project>
     </ProjectReference>

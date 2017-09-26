@@ -82,6 +82,8 @@ protected:
   void TweakSearchClipTest(TEST_FRAMES tf, bool chroma);
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
+
+  void NNEDI3Test(TEST_FRAMES tf, bool chroma);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -1319,6 +1321,58 @@ TEST_F(TestBase, MergeTest_WithC)
 TEST_F(TestBase, MergeTest_NoC)
 {
   MergeTest(TF_MID, false);
+}
+
+#pragma endregion
+
+#pragma region NNEDI3
+
+void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
+{
+  try {
+    IScriptEnvironment2* env = CreateScriptEnvironment2();;
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src1 = src.RemoveGrain(20)" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "sr1cuda = src1.OnCPU(0)" << std::endl;
+
+    out << "ref = src.KNNEDI3(clip18,field=-2,nsize=1,nns=1,qual=1,threads=0,U=True,V=True)" << std::endl;
+    out << "cuda = srcuda.KTGMC_Resharpen(sr1cuda, 0.70000, U=3, V=3).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env);
+    }
+
+    env->DeleteScriptEnvironment();
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, NNEDI3Test_WithC)
+{
+  NNEDI3Test(TF_MID, true);
+}
+
+TEST_F(TestBase, NNEDI3Test_NoC)
+{
+  NNEDI3Test(TF_MID, false);
 }
 
 #pragma endregion
