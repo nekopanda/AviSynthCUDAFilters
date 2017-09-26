@@ -176,7 +176,6 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\common\DebugWriter.cpp" />
     <ClCompile Include="KDeint.cpp" />
     <ClCompile Include="MV.cpp" />
   </ItemGroup>
@@ -189,7 +188,6 @@
   <ItemGroup>
     <ClInclude Include="CudaDebug.h" />
     <ClInclude Include="CudaKernelBase.h" />
-    <ClInclude Include="DeviceLocalData.h" />
     <ClInclude Include="GenericImageFunctions.cuh" />
     <ClInclude Include="MVKernel.h" />
     <ClInclude Include="ReduceKernel.cuh" />

@@ -62,11 +62,3 @@ __host__ __device__ T clamp(T n, T min, T max)
 
 void OnCudaError(cudaError_t err);
 #endif
-
-
-struct VECTOR
-{
-  int x;
-  int y;
-  int sad;
-};

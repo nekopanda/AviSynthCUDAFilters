@@ -134,6 +134,9 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 static ThreadPoolInterface *poolInterface;
 
+// common‚Ìcpp‚ðŽæ‚è“ü‚ê‚é
+#include "DebugWriter.cpp"
+
 int roundds(const double f)
 {
 	if (f-floor(f) >= 0.5)
@@ -1005,8 +1008,9 @@ void evalFunc_1_32(void *ps);
 void evalFunc_2_32(void *ps);
 
 
-PVideoFrame __stdcall nnedi3::GetFrame(int n, IScriptEnvironment *env)
+PVideoFrame __stdcall nnedi3::GetFrame(int n, IScriptEnvironment *env_)
 {
+  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 	int field_n;
 
 	if (field>1)
@@ -1015,6 +1019,11 @@ PVideoFrame __stdcall nnedi3::GetFrame(int n, IScriptEnvironment *env)
 		else field_n = field == 3 ? 1 : 0;
 	}
 	else field_n = field;
+
+  if (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA) {
+    env->ThrowError("–¢ŽÀ‘•");
+  }
+
 	copyPad(field>1?(n>>1):n,field_n,env);
 	
 	const uint8_t PlaneMax=(grey) ? 1:(isAlphaChannel) ? 4:3;

@@ -1381,12 +1381,10 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "src1 = src.RemoveGrain(20)" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
-    out << "sr1cuda = src1.OnCPU(0)" << std::endl;
 
-    out << "ref = src.KNNEDI3(clip18,field=-2,nsize=1,nns=1,qual=1,threads=0,U=True,V=True)" << std::endl;
-    out << "cuda = srcuda.KTGMC_Resharpen(sr1cuda, 0.70000, U=3, V=3).OnCUDA(0)" << std::endl;
+    out << "ref = src.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,opt=1,threads=1,U=True,V=True)" << std::endl;
+    out << "cuda = srcuda.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,opt=1,threads=1,U=True,V=True).OnCUDA(0)" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -1405,12 +1403,12 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, DISABLED_NNEDI3Test_WithC)
+TEST_F(TestBase, NNEDI3Test_WithC)
 {
   NNEDI3Test(TF_MID, true);
 }
 
-TEST_F(TestBase, DISABLED_NNEDI3Test_NoC)
+TEST_F(TestBase, NNEDI3Test_NoC)
 {
   NNEDI3Test(TF_MID, false);
 }
@@ -1419,7 +1417,7 @@ TEST_F(TestBase, DISABLED_NNEDI3Test_NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.*";
+	::testing::GTEST_FLAG(filter) = "TestBase.NNEDI3Test_WithC*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

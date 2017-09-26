@@ -9,6 +9,13 @@ enum {
 	ANALYZE_MAX_BATCH = 8
 };
 
+struct VECTOR
+{
+  int x;
+  int y;
+  int sad;
+};
+
 template <typename pixel_t>
 class IKDeintKernel
 {
