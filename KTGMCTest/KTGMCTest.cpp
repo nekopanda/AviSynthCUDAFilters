@@ -114,8 +114,10 @@ void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, 
 		IScriptEnvironment2* env = CreateScriptEnvironment2();
 
 		AVSValue result;
-		std::string ktgmcPath = modulePath + "\\KTGMC.dll";
-		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
 		std::string scriptpath = workDirPath + "\\script.avs";
 
@@ -225,6 +227,8 @@ void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -351,6 +355,8 @@ void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -416,6 +422,8 @@ void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -488,6 +496,8 @@ void TestBase::BobTest(TEST_FRAMES tf, bool parity)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -540,6 +550,8 @@ void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -602,6 +614,8 @@ void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -664,6 +678,8 @@ void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -714,6 +730,8 @@ void TestBase::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -769,6 +787,8 @@ void TestBase::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -824,6 +844,8 @@ void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -881,6 +903,8 @@ void TestBase::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -948,6 +972,8 @@ void TestBase::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1016,6 +1042,8 @@ void TestBase::VResharpenTest(TEST_FRAMES tf)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1061,6 +1089,8 @@ void TestBase::ResharpenTest(TEST_FRAMES tf)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1108,6 +1138,8 @@ void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1162,6 +1194,8 @@ void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1217,6 +1251,8 @@ void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1275,6 +1311,8 @@ void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();
 
     AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
@@ -1333,7 +1371,9 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
     IScriptEnvironment2* env = CreateScriptEnvironment2();;
 
     AVSValue result;
-    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KNNEDI3.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
     std::string scriptpath = workDirPath + "\\script.avs";
@@ -1365,12 +1405,12 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, NNEDI3Test_WithC)
+TEST_F(TestBase, DISABLED_NNEDI3Test_WithC)
 {
   NNEDI3Test(TF_MID, true);
 }
 
-TEST_F(TestBase, NNEDI3Test_NoC)
+TEST_F(TestBase, DISABLED_NNEDI3Test_NoC)
 {
   NNEDI3Test(TF_MID, false);
 }
@@ -1379,7 +1419,7 @@ TEST_F(TestBase, NNEDI3Test_NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.TweakSearchClipTest_WithC*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
