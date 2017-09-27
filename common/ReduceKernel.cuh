@@ -155,3 +155,44 @@ __device__ void dev_reduce2(int tid, K& key, V& value, K* kbuf, V* vbuf)
     dev_reduce2_warp<K, V, MAX, REDUCER>(tid, key, value);
   }
 }
+
+// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚İ‘Î‰
+template <typename T, int MAX, typename REDUCER>
+__device__ void dev_scan_warp(int tid, T& value)
+{
+  REDUCER red;
+  // warp shuffle‚Åscan
+  if (MAX >= 2) if (tid >= 1) red(value, __shfl_up(value, 1));
+  if (MAX >= 4) if (tid >= 2) red(value, __shfl_up(value, 2));
+  if (MAX >= 8) if (tid >= 4) red(value, __shfl_up(value, 4));
+  if (MAX >= 16) if (tid >= 8) red(value, __shfl_up(value, 8));
+  if (MAX >= 32) if (tid >= 16) red(value, __shfl_up(value, 16));
+}
+
+// MAX‚Í2‚×‚«‚Ì‚İ‘Î‰
+// buf‚Íshared memory„§ ’·‚³: MAX/32
+template <typename T, int MAX, typename REDUCER>
+__device__ void dev_scan(int tid, T& value, T* buf)
+{
+  REDUCER red;
+  int wid = tid & 31;
+  // ‚Ü‚¸warp“à‚Åscan
+  dev_scan_warp<T, MAX, REDUCER>(wid, value);
+  if (MAX >= 64) {
+    // warp‚²‚Æ‚ÌŒ‹‰Ê‚ğsharedƒƒ‚ƒŠ‚ğ‰î‚µ‚ÄW–ñ
+    if (wid == 31) buf[tid >> 5] = value;
+    __syncthreads();
+    if (tid < MAX / 32) {
+      // warp‚²‚Æ‚ÌŒ‹‰Ê‚ğwarp“à‚Å‚³‚ç‚Éscan
+      T v2 = buf[tid];
+      dev_scan_warp<T, MAX / 32, REDUCER>(wid, v2);
+      // sharedƒƒ‚ƒŠ‚ğ‰î‚µ‚Ä•ª”z
+      buf[tid] = v2;
+    }
+    __syncthreads();
+    // warp‚²‚Æ‚ÌscanŒ‹‰Ê‚ğ‘«‚·
+    if(tid >= 32) red(value, buf[(tid >> 5) - 1]);
+    __syncthreads();
+  }
+}
+

@@ -190,8 +190,6 @@
     <ClInclude Include="CudaKernelBase.h" />
     <ClInclude Include="GenericImageFunctions.cuh" />
     <ClInclude Include="MVKernel.h" />
-    <ClInclude Include="ReduceKernel.cuh" />
-    <ClInclude Include="VectorFunctions.cuh" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

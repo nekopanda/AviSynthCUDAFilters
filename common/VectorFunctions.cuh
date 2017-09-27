@@ -17,6 +17,12 @@ static __device__ int4 to_int(ushort4 a) {
   return r;
 }
 
+// to_int(short4)
+static __device__ int4 to_int(short4 a) {
+  int4 r = { a.x, a.y, a.z, a.w };
+  return r;
+}
+
 // to_int(int4)
 static __device__ int4 to_int(int4 a) {
   return a;
@@ -36,6 +42,12 @@ static __device__ float4 to_float(uchar4 a) {
 
 // to_float(ushort4)
 static __device__ float4 to_float(ushort4 a) {
+  float4 r = { (float)a.x, (float)a.y, (float)a.z, (float)a.w };
+  return r;
+}
+
+// to_float(int4)
+static __device__ float4 to_float(int4 a) {
   float4 r = { (float)a.x, (float)a.y, (float)a.z, (float)a.w };
   return r;
 }
@@ -98,6 +110,12 @@ static __device__ float4 operator*(float4 a, float b) {
   return r;
 }
 
+// float4 * float4
+static __device__ float4 operator*(float4 a, float4 b) {
+  float4 r = { a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w };
+  return r;
+}
+
 // int4 * short4
 static __device__ int4 operator*(int4 a, short4 b) {
   int4 r = { a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w };
@@ -105,14 +123,20 @@ static __device__ int4 operator*(int4 a, short4 b) {
 }
 
 // int4 >> int
-static __device__ int4 operator >> (int4 a, int b) {
+static __device__ int4 operator>>(int4 a, int b) {
   int4 r = { a.x >> b, a.y >> b, a.z >> b, a.w >> b };
   return r;
 }
 
 // int4 / int
-static __device__ int4 operator / (int4 a, int b) {
+static __device__ int4 operator/(int4 a, int b) {
   int4 r = { a.x / b, a.y / b, a.z / b, a.w / b };
+  return r;
+}
+
+// float4 / float4
+static __device__ float4 operator/(float4 a, float4 b) {
+  float4 r = { a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w };
   return r;
 }
 
@@ -169,6 +193,17 @@ static __device__ int4 max(int4 a, int4 b) {
 // clamp(float4, float, float)
 static __device__ float4 clamp(float4 a, float b, float c) {
   float4 r = { clamp(a.x, b, c), clamp(a.y, b, c), clamp(a.z, b, c), clamp(a.w, b, c) };
+  return r;
+}
+
+// clamp(int4, int, int)
+static __device__ int4 clamp(int4 a, int b, int c) {
+  int4 r = { clamp(a.x, b, c), clamp(a.y, b, c), clamp(a.z, b, c), clamp(a.w, b, c) };
+  return r;
+}
+
+static __device__ float4 abs(float4 a) {
+  float4 r = { fabsf(a.x), fabsf(a.y), fabsf(a.z), fabsf(a.w) };
   return r;
 }
 

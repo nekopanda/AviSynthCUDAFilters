@@ -9,6 +9,13 @@
 #define __device__
 #endif
 
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
 #define PI 3.1415926535897932384626433832795
 
 inline static int nblocks(int n, int block)

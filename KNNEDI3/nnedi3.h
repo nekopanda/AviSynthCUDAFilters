@@ -26,9 +26,12 @@
 #include <float.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <memory>
 #include "avisynth.h"
 #include "PlanarFrame.h"
 #include "ThreadPoolInterface.h"
+#include "DeviceLocalData.h"
+#include "nnedi3_kernel.h"
 
 #define NUM_NSIZE 7
 #define NUM_NNS 5
@@ -37,9 +40,6 @@ const int ydiaTable[NUM_NSIZE] = {6,6,6,6,4,4,4};
 const int nnsTable[NUM_NNS] = {16,32,64,128,256};
 const int nnsTablePow2[NUM_NNS] = {4,5,6,7,8};
 
-#ifndef clamp
-#define clamp(n,vmin,vmax) ((n>vmin)?((n<vmax)?n:vmax):vmin)
-#endif
 #define CB2(n) clamp(n,0,254)
 
 #define PLANE_MAX 4
@@ -87,6 +87,11 @@ protected:
 	uint8_t pixelsize; // AVS16
 	uint8_t bits_per_pixel;
 
+  // CUDA—p
+  int weight1pitch;
+  std::unique_ptr<DeviceLocalData<int16_t>> dweights0;
+  std::unique_ptr<DeviceLocalData<int16_t>> dweights1;
+
 	void calcStartEnd2(PVideoFrame dst);
 	void copyPad(int n,int fn,IScriptEnvironment *env);
 
@@ -95,6 +100,8 @@ protected:
 	static void StaticThreadpool(void *ptr);
 
 	void FreeData(void);
+
+  PVideoFrame GetFrameCUDA(int n, int fn, IScriptEnvironment2 *env);
 
 public:
 	nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,int _nsize,int _nns,int _qual,int _etype,

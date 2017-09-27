@@ -13,7 +13,7 @@ DeviceLocalBase::DeviceLocalBase(const void* init_data, size_t length, IScriptEn
 
 DeviceLocalBase::~DeviceLocalBase()
 {
-  delete[] dataPtrs[0].load(std::memory_order_relaxed);
+  delete[] (uint8_t*)(dataPtrs[0].load(std::memory_order_relaxed));
   for (int i = 1; i < numDevices; ++i) {
     void* ptr = dataPtrs[i].load(std::memory_order_relaxed);
     if (ptr != nullptr) {

@@ -134,6 +134,8 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 static ThreadPoolInterface *poolInterface;
 
+#include "CommonFunctions.h"
+
 // commonのcppを取り入れる
 #include "DebugWriter.cpp"
 
@@ -170,10 +172,12 @@ void shufflePreScrnL2L3(float *wf, float *rf, const int opt)
 
 
 nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,int _nsize,int _nns,int _qual,int _etype,int _pscrn,
-	uint8_t _threads,int _opt,int _fapprox,bool _sleep,int range_mode,bool _avsp, IScriptEnvironment *env) :
+	uint8_t _threads,int _opt,int _fapprox,bool _sleep,int range_mode,bool _avsp, IScriptEnvironment *env_) :
 	GenericVideoFilter(_child),field(_field),dh(_dh),Y(_Y),U(_U),V(_V),A(_A),nsize(_nsize),nns(_nns),qual(_qual),
 	etype(_etype),pscrn(_pscrn),threads(_threads),opt(_opt),fapprox(_fapprox),sleep(_sleep),avsp(_avsp)
 {
+  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
 	if ((field<-2) || (field>3)) env->ThrowError("nnedi3: field must be set to -2, -1, 0, 1, 2, or 3!");
 	if ((threads<0) || (threads>MAX_MT_THREADS)) env->ThrowError("nnedi3: threads must be between 0 and %d inclusive!",MAX_MT_THREADS);
 	if (dh && ((field<-1) || (field>1))) env->ThrowError("nnedi3: field must be set to -1, 0, or 1 when dh=true!");
@@ -182,7 +186,7 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 	if ((qual<1) || (qual>2)) env->ThrowError("nnedi3: qual must be set to 1 or 2!\n");
 	if ((opt<0) || (opt>7)) env->ThrowError("nnedi3: opt must be in [0,7]!");
 	if ((fapprox<0) || (fapprox>15)) env->ThrowError("nnedi3: fapprox must be [0,15]!\n");
-	if ((pscrn<0) || (pscrn>4)) env->ThrowError("nnedi3: pscrn must be [0,4]!\n");
+	if ((pscrn<2) || (pscrn>4)) env->ThrowError("nnedi3: pscrn must be [2,4]!\n");
 	if ((etype<0) || (etype>1)) env->ThrowError("nnedi3: etype must be [0,1]!\n");
 	if ((range_mode<0) || (range_mode>4)) env->ThrowError("nnedi3: range must be [0,4]!\n");
 	
@@ -345,6 +349,9 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 		FreeData();
 		env->ThrowError("nnedi3: Error while allocating planar dstPF!");
 	}
+
+  // CUDA版は強制的にopt=1
+  opt = 1;
 
 	if (opt==0)
 	{
@@ -511,7 +518,7 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 		}
 
 		// 16 bit pixels will be shifted by 1 for the prescreener.
-		const int prescreener_bits = min(bits_per_pixel,15);
+		const int prescreener_bits = min<int>(bits_per_pixel,15);
 		const double half = (((int)1 << prescreener_bits)-1)/2.0;
 
 		// Factor mean removal and 1.0/half scaling
@@ -533,6 +540,22 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 			j_a+=64;
 		}
 		memcpy(wf+4,bdw+4*64,(dims0new-4*64)*sizeof(float));
+
+    {
+      // アクセスする順番に並び替える
+      std::unique_ptr<int16_t[]> bws =
+        std::unique_ptr<int16_t[]>(new int16_t[dims0new * 2]);
+      float* bwf = (float*)&bws[4*64];
+
+      memcpy(bws.get(), ws, dims0new * 2 * sizeof(int16_t));
+
+      for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 64; j++)
+          bws[i + j * 4] = ws[(i << 3) + ((j >> 3) << 5) + (j & 7)];
+
+      dweights0 = std::unique_ptr<DeviceLocalData<int16_t>>(
+        new DeviceLocalData<int16_t>(bws.get(), dims0new * 2, env));
+    }
 	}
 	else // using old prescreener
 	{
@@ -555,7 +578,7 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 			float *wf = (float *)&ws[4*48];
 
 			// 16 bit pixels will be shifted by 1 for the prescreener.
-			const int prescreener_bits = min(bits_per_pixel,15);
+			const int prescreener_bits = min<int>(bits_per_pixel,15);
 			const double half = (((int)1 << prescreener_bits)-1)/2.0;
 
 			// Factor mean removal and 1.0/half scaling
@@ -861,6 +884,36 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 		}
 		free(mean);
 	}
+
+  if (int16_predictor) {
+    // CUDA対応はint16だけ
+    weight1pitch = dims1 * 2;
+
+    std::unique_ptr<int16_t[]> tmp = 
+      std::unique_ptr<int16_t[]>(new int16_t[weight1pitch * 2]);
+
+    for (int i = 0; i < 2; ++i) {
+      int16_t* dst = tmp.get() + weight1pitch * i;
+      const int16_t* src = (int16_t*)weights1[i];
+      memcpy(dst, src, weight1pitch * sizeof(int16_t));
+
+      const int nnst = nnsTable[nns];
+      const int nnst2 = nnst << 1;
+      const int asize = xdiaTable[nsize] * ydiaTable[nsize];
+
+      // CUDA用に並べ替え
+      for (int j = 0; j<nnst2; j++)
+      {
+        for (int k = 0; k < asize; k++) {
+          int src_j = (j >> 1) + ((j & 1) ? nnst : 0);
+          dst[j + k * nnst2] = src[k + src_j * asize];
+        }
+      }
+    }
+
+    dweights1 = std::unique_ptr<DeviceLocalData<int16_t>>(
+      new DeviceLocalData<int16_t>(tmp.get(), weight1pitch * 2, env));
+  }
 	
 	int hslice[PLANE_MAX],hremain[PLANE_MAX];
 	int srow[PLANE_MAX] = {6,6,6,6};
@@ -1021,7 +1074,7 @@ PVideoFrame __stdcall nnedi3::GetFrame(int n, IScriptEnvironment *env_)
 	else field_n = field;
 
   if (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA) {
-    env->ThrowError("未実装");
+    return GetFrameCUDA(field>1 ? (n >> 1) : n, field_n, env);
   }
 
 	copyPad(field>1?(n>>1):n,field_n,env);
@@ -1370,6 +1423,100 @@ void nnedi3::calcStartEnd2(PVideoFrame dst)
 }
 
 
+PVideoFrame nnedi3::GetFrameCUDA(int n, int fn, IScriptEnvironment2 *env)
+{
+  const int off = 1 - fn;
+  PVideoFrame src = child->GetFrame(n, env);
+
+  const uint8_t PlaneMax = (grey) ? 1 : (isAlphaChannel) ? 4 : 3;
+  int plane[4];
+  if (isRGBPfamily)
+  {
+    plane[0] = PLANAR_G;
+    plane[1] = PLANAR_B;
+    plane[2] = PLANAR_R;
+    plane[3] = PLANAR_A;
+  }
+  else
+  {
+    plane[0] = PLANAR_Y;
+    plane[1] = PLANAR_U;
+    plane[2] = PLANAR_V;
+    plane[3] = PLANAR_A;
+  }
+
+  int refw = vi.width;
+  int refh = (vi.height >> 1);
+
+  VideoInfo refvi = vi;
+  refvi.width = refw + 32 * 2;
+  refvi.height = refh + 3 * 2;
+  PVideoFrame ref = env->NewVideoFrame(refvi);
+
+  int nnBytes, blockBytes;
+  GetWorkBytes(refw, refh, nnBytes, blockBytes);
+  int work_bytes = nnBytes + blockBytes;
+  VideoInfo workvi = VideoInfo();
+  workvi.pixel_type = VideoInfo::CS_BGR32;
+  workvi.width = 2048;
+  workvi.height = nblocks(work_bytes, vi.width * 4);
+  PVideoFrame work = env->NewVideoFrame(workvi);
+
+  uint8_t* nnWork = work->GetWritePtr(0);
+  uint8_t* blockWork = &nnWork[nnBytes];
+
+  PVideoFrame dst = env->NewVideoFrame(vi);
+
+  if (!vi.IsPlanar())
+  {
+    env->ThrowError("[KNNEDI3] Unsupported format");
+  }
+
+  PS_INFO *pss = pssInfo;
+  bool enable[4] = { pss->Y, pss->U, pss->V, pss->A };
+
+  for (uint8_t b = 0; b < PlaneMax; b++) {
+    if (enable[b]) {
+      int width = (refw >> vi.GetPlaneWidthSubsampling(plane[b]));
+      int height = (refh >> vi.GetPlaneHeightSubsampling(plane[b]));
+
+      uint8_t* refptr = ref->GetWritePtr(plane[b]);
+      int refpitch = ref->GetPitch(plane[b]);
+
+      // Pad分を進める
+      refptr += 3 * refpitch + 32 * pixelsize;
+
+      uint8_t* dstptr = dst->GetWritePtr(plane[b]);
+      int dstpitch = dst->GetPitch(plane[b]);
+
+      const uint8_t* srcptr = src->GetReadPtr(plane[b]);
+      int srcpitch = src->GetPitch(plane[b]);
+
+      if (!dh) {
+        // フィールド分進める
+        srcptr += srcpitch * off;
+        srcpitch *= 2;
+      }
+
+      // refを作成
+      CopyPadCUDA(pixelsize, refptr, refpitch, srcptr, srcpitch, width, height, env);
+
+      // 補間じゃないピクセルはコピーしておく
+      // TODO: dhのときはどっちにコピーするんだ？？
+      BitBltCUDA(dstptr + dstpitch * off, dstpitch * 2, srcptr, srcpitch, width, height, env);
+
+      // 補完処理本体
+      EvalCUDA(pixelsize, bits_per_pixel,
+        dstptr + dstpitch * fn, dstpitch * 2, refptr - refpitch * off, refpitch, width, height,
+        dweights0->GetData(env), dweights1->GetData(env), weight1pitch,
+        nnWork, blockWork, pss->plane_range[b], pss->qual, pss->nns, pss->xdia, pss->ydia, env);
+    }
+  }
+
+  return dst;
+}
+
+
 void elliott_C(float *data, const int n)
 {
 	for (int i=0; i<n; i++)
@@ -1494,7 +1641,7 @@ int processLine0_C(const uint8_t *tempu, int width, uint8_t *dstp, const uint8_t
 
 	for (int x=0; x<width; x++)
 	{
-		if (tempu[x]!=0) dstp[x]=(uint8_t)clamp(((19*((int16_t)(src2[x])+(int16_t)(src4[x]))-3*((int16_t)(src3p[x])+(int16_t)(src6[x]))+16)>>5),val_min,val_max);
+		if (tempu[x]!=0) dstp[x]=(uint8_t)clamp<int>(((19*((int16_t)(src2[x])+(int16_t)(src4[x]))-3*((int16_t)(src3p[x])+(int16_t)(src6[x]))+16)>>5),val_min,val_max);
 		else count++;
 	}
 	return count;
@@ -1874,7 +2021,7 @@ int processLine0_C_16(const uint8_t *tempu,int width, uint8_t *dstp,const uint8_
 
 	for (int x=0; x<width; x++)
 	{
-		if (tempu[x]!=0) dst0[x]=(uint16_t)clamp(((19*((int32_t)src2[x]+(int32_t)src4[x])-3*((int32_t)src0[x]+(int32_t)src6[x])+16)>>5),val_min,val_max);
+		if (tempu[x]!=0) dst0[x]=(uint16_t)clamp<int>(((19*((int32_t)src2[x]+(int32_t)src4[x])-3*((int32_t)src0[x]+(int32_t)src6[x])+16)>>5),val_min,val_max);
 		else count++;
 	}
 	return count;
