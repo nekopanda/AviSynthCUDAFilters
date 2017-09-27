@@ -83,7 +83,7 @@ protected:
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
 
-  void NNEDI3Test(TEST_FRAMES tf, bool chroma);
+  void NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -1365,7 +1365,7 @@ TEST_F(TestBase, MergeTest_NoC)
 
 #pragma region NNEDI3
 
-void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
+void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn)
 {
   try {
     IScriptEnvironment2* env = CreateScriptEnvironment2();;
@@ -1380,13 +1380,19 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
 
     std::ofstream out(scriptpath);
 
+    const char* UV = (chroma ? "True" : "False");
+
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
-    out << "ref = src.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,opt=1,threads=1,U=True,V=True)" << std::endl;
-    out << "cuda = srcuda.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,opt=1,threads=1,U=True,V=True).OnCUDA(0)" << std::endl;
+    out <<
+      "ref = src.KNNEDI3(field=-2,nsize=" << nsize << ",nns=" << nns << ",qual=" << qual << "," <<
+      "pscrn=" << pscrn << ",opt=1,threads=1,U=" << UV << ",V=" << UV << ")" << std::endl;
+    out <<
+      "cuda = srcuda.KNNEDI3(field=-2,nsize=" << nsize << ",nns=" << nns << ",qual=" << qual << "," <<
+      "pscrn=" << pscrn << ",opt=1,threads=1,U=" << UV << ",V=" << UV << ").OnCUDA(0)" << std::endl;
 
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
     out.close();
 
@@ -1403,21 +1409,76 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, NNEDI3Test_WithC)
+TEST_F(TestBase, NNEDI3Test_NS0NN0Q1PS2)
 {
-  NNEDI3Test(TF_MID, true);
+  NNEDI3Test(TF_MID, true, 0, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS1NN0Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 1, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS2NN0Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 2, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS3NN0Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 3, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS4NN0Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 4, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS5NN0Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 5, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS6NN0Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 6, 0, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS0NN1Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 0, 1, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS0NN2Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 0, 2, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS0NN3Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 0, 3, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS0NN4Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 0, 4, 1, 2);
+}
+
+TEST_F(TestBase, NNEDI3Test_NS0NN0Q2PS2)
+{
+  NNEDI3Test(TF_MID, true, 0, 0, 2, 2);
 }
 
 TEST_F(TestBase, NNEDI3Test_NoC)
 {
-  NNEDI3Test(TF_MID, false);
+  NNEDI3Test(TF_MID, false, 0, 0, 1, 2);
 }
 
 #pragma endregion
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.NNEDI3Test_WithC*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

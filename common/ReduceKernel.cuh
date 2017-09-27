@@ -162,11 +162,26 @@ __device__ void dev_scan_warp(int tid, T& value)
 {
   REDUCER red;
   // warp shuffle‚Åscan
-  if (MAX >= 2) if (tid >= 1) red(value, __shfl_up(value, 1));
-  if (MAX >= 4) if (tid >= 2) red(value, __shfl_up(value, 2));
-  if (MAX >= 8) if (tid >= 4) red(value, __shfl_up(value, 4));
-  if (MAX >= 16) if (tid >= 8) red(value, __shfl_up(value, 8));
-  if (MAX >= 32) if (tid >= 16) red(value, __shfl_up(value, 16));
+  if (MAX >= 2) {
+    T tmp = __shfl_up(value, 1);
+    if (tid >= 1) red(value, tmp);
+  }
+  if (MAX >= 4) {
+    T tmp = __shfl_up(value, 2);
+    if (tid >= 2) red(value, tmp);
+  }
+  if (MAX >= 8) {
+    T tmp = __shfl_up(value, 4);
+    if (tid >= 4) red(value, tmp);
+  }
+  if (MAX >= 16) {
+    T tmp = __shfl_up(value, 8);
+    if (tid >= 8) red(value, tmp);
+  }
+  if (MAX >= 32) {
+    T tmp = __shfl_up(value, 16);
+    if (tid >= 16) red(value, tmp);
+  }
 }
 
 // MAX‚Í2‚×‚«‚Ì‚Ý‘Î‰ž

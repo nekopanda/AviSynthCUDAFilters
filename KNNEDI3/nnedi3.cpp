@@ -894,20 +894,26 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 
     for (int i = 0; i < 2; ++i) {
       int16_t* dst = tmp.get() + weight1pitch * i;
-      const int16_t* src = (int16_t*)weights1[i];
+      const int16_t* src = reinterpret_cast<const int16_t*>(weights1[i]);
       memcpy(dst, src, weight1pitch * sizeof(int16_t));
 
       const int nnst = nnsTable[nns];
       const int nnst2 = nnst << 1;
       const int asize = xdiaTable[nsize] * ydiaTable[nsize];
 
+      float *dwf = reinterpret_cast<float*>(&dst[asize*nnst2]);
+      const float *swf = reinterpret_cast<const float*>(&src[asize*nnst2]);
+
       // CUDA用に並べ替え
       for (int j = 0; j<nnst2; j++)
       {
+        int src_j = (j >> 1) + ((j & 1) ? nnst : 0);
         for (int k = 0; k < asize; k++) {
-          int src_j = (j >> 1) + ((j & 1) ? nnst : 0);
           dst[j + k * nnst2] = src[k + src_j * asize];
         }
+        int off = ((src_j >> 2) << 3) + (src_j & 3);
+        dwf[j] = swf[off];
+        dwf[j + nnst2] = swf[off + 4];
       }
     }
 
@@ -1448,9 +1454,12 @@ PVideoFrame nnedi3::GetFrameCUDA(int n, int fn, IScriptEnvironment2 *env)
   int refw = vi.width;
   int refh = (vi.height >> 1);
 
+  // 必要なPadは左右32pix,上下3pixだが、
+  // UVがサブサンプリングで半分になってしまうので
+  // 2倍の幅を取る
   VideoInfo refvi = vi;
-  refvi.width = refw + 32 * 2;
-  refvi.height = refh + 3 * 2;
+  refvi.width = refw + 64 * 2;
+  refvi.height = refh + 6 * 2;
   PVideoFrame ref = env->NewVideoFrame(refvi);
 
   int nnBytes, blockBytes;
@@ -1459,7 +1468,7 @@ PVideoFrame nnedi3::GetFrameCUDA(int n, int fn, IScriptEnvironment2 *env)
   VideoInfo workvi = VideoInfo();
   workvi.pixel_type = VideoInfo::CS_BGR32;
   workvi.width = 2048;
-  workvi.height = nblocks(work_bytes, vi.width * 4);
+  workvi.height = nblocks(work_bytes, workvi.width * 4);
   PVideoFrame work = env->NewVideoFrame(workvi);
 
   uint8_t* nnWork = work->GetWritePtr(0);
@@ -1477,14 +1486,19 @@ PVideoFrame nnedi3::GetFrameCUDA(int n, int fn, IScriptEnvironment2 *env)
 
   for (uint8_t b = 0; b < PlaneMax; b++) {
     if (enable[b]) {
-      int width = (refw >> vi.GetPlaneWidthSubsampling(plane[b]));
-      int height = (refh >> vi.GetPlaneHeightSubsampling(plane[b]));
+      int xsub = vi.GetPlaneWidthSubsampling(plane[b]);
+      int ysub = vi.GetPlaneHeightSubsampling(plane[b]);
+
+      int width = refw >> xsub;
+      int height = refh >> ysub;
+      int hpad = 64 >> xsub;
+      int vpad = 6 >> ysub;
 
       uint8_t* refptr = ref->GetWritePtr(plane[b]);
       int refpitch = ref->GetPitch(plane[b]);
 
       // Pad分を進める
-      refptr += 3 * refpitch + 32 * pixelsize;
+      refptr += vpad * refpitch + hpad * pixelsize;
 
       uint8_t* dstptr = dst->GetWritePtr(plane[b]);
       int dstpitch = dst->GetPitch(plane[b]);

@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include "DebugWriter.h"
+
 static void init_console()
 {
   AllocConsole();

@@ -2880,7 +2880,7 @@ public:
 		VideoInfo workvi = VideoInfo();
 		workvi.pixel_type = VideoInfo::CS_BGR32;
 		workvi.width = 2048;
-		workvi.height = nblocks(work_bytes, vi.width * 4);
+		workvi.height = nblocks(work_bytes, workvi.width * 4);
 		work = env->NewVideoFrame(workvi);
 
 		//if (cuda->IsEnabled()) {
@@ -4376,7 +4376,7 @@ class KMDegrainX : public GenericVideoFilter
     VideoInfo workvi = VideoInfo();
     workvi.pixel_type = VideoInfo::CS_BGR32;
     workvi.width = 2048;
-    workvi.height = nblocks(work_bytes, vi.width * 4);
+    workvi.height = nblocks(work_bytes, workvi.width * 4);
     PVideoFrame work = env->NewVideoFrame(workvi);
 
     uint8_t* degrainblock = work->GetWritePtr();
@@ -4975,7 +4975,7 @@ class KMCompensate : public GenericVideoFilter
     VideoInfo workvi = VideoInfo();
     workvi.pixel_type = VideoInfo::CS_BGR32;
     workvi.width = 2048;
-    workvi.height = nblocks(work_bytes, vi.width * 4);
+    workvi.height = nblocks(work_bytes, workvi.width * 4);
     PVideoFrame work = env->NewVideoFrame(workvi);
 
     uint8_t* compensateblock = work->GetWritePtr();
