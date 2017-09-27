@@ -100,7 +100,9 @@ enum {
 template <typename vpixel_t>
 __global__ void kl_prescreening(
   vpixel_t* dst, int dstpitch4,
-  const vpixel_t* ref, int refpitch4, const short4* ws, const float4* wf, uchar2* workNN, int* numblocks,
+  const vpixel_t* __restrict__ ref, int refpitch4,
+  const short4* __restrict__ ws, const float4* __restrict__ wf,
+  uchar2* workNN, int* numblocks,
   int width4, int height, int val_min, int val_max)
 {
   int tx = threadIdx.x;
@@ -210,7 +212,7 @@ __global__ void kl_prescreening(
 
 enum {
   NN_BLOCK_W = 16,
-  NN_BLOCK_H = 8,
+  NN_BLOCK_H = 32,
 };
 
 template <typename pixel_t> struct ReadPixel8x6 {
@@ -297,8 +299,9 @@ __device__ float dev_expf(float f)
 }
 
 template <typename pixel_t, int QUAL, int NN, typename READ>
-__global__ void kl_compute_nn(pixel_t* dst, int dstpitch, const pixel_t* ref, int refpitch, uchar2* workNN, int* numblocks,
-  const short2* weights, int wspitch, const float2* wf, int wfpitch, int val_min, int val_max)
+__global__ void kl_compute_nn(pixel_t* dst, int dstpitch,
+  const pixel_t* __restrict__ ref, int refpitch, const uchar2* __restrict__ workNN, const int* __restrict__ numblocks,
+  const short2* __restrict__ weights, int wspitch, const float2* __restrict__ wf, int wfpitch, int val_min, int val_max)
 {
   int bid = blockIdx.x + blockIdx.y * gridDim.x;
   int workoff = bid * PRE_BLOCK_W * 4 * PRE_BLOCK_H;

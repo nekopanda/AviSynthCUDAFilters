@@ -350,9 +350,6 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 		env->ThrowError("nnedi3: Error while allocating planar dstPF!");
 	}
 
-  // CUDA版は強制的にopt=1
-  opt = 1;
-
 	if (opt==0)
 	{
 		const int CPUF=env->GetCPUFlags();
@@ -695,6 +692,10 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 		}
 	}
 
+  // CUDA用weight1
+  std::unique_ptr<float[]> weight1cuda =
+    std::unique_ptr<float[]>(new float[dims1 * 2]);
+
 	// Adjust prediction weights
 	for (int i=0; i<2; i++)
 	{
@@ -782,6 +783,9 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 				j_a+=asize;
 				j_d++;
 			}
+
+      // CUDA用に並べ替え前のデータを取っておく
+      memcpy(weight1cuda.get() + i * dims1, weights1[i], dims1 * sizeof(float));
 
 			if ((opt>1) && (bits_per_pixel<=14)) // shuffle weight order for asm
 			{
@@ -894,7 +898,7 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 
     for (int i = 0; i < 2; ++i) {
       int16_t* dst = tmp.get() + weight1pitch * i;
-      const int16_t* src = reinterpret_cast<const int16_t*>(weights1[i]);
+      const int16_t* src = reinterpret_cast<const int16_t*>(weight1cuda.get() + dims1 * i);
       memcpy(dst, src, weight1pitch * sizeof(int16_t));
 
       const int nnst = nnsTable[nns];

@@ -1385,9 +1385,10 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int q
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
+    // opt>1だと一致しなくなるのでopt=1（SIMDなし）を指定
     out <<
       "ref = src.KNNEDI3(field=-2,nsize=" << nsize << ",nns=" << nns << ",qual=" << qual << "," <<
-      "pscrn=" << pscrn << ",opt=1,threads=1,U=" << UV << ",V=" << UV << ")" << std::endl;
+      "pscrn=" << pscrn << ",opt=1,U=" << UV << ",V=" << UV << ")" << std::endl;
     out <<
       "cuda = srcuda.KNNEDI3(field=-2,nsize=" << nsize << ",nns=" << nns << ",qual=" << qual << "," <<
       "pscrn=" << pscrn << ",opt=1,threads=1,U=" << UV << ",V=" << UV << ").OnCUDA(0)" << std::endl;
@@ -1469,6 +1470,12 @@ TEST_F(TestBase, NNEDI3Test_NS0NN0Q2PS2)
   NNEDI3Test(TF_MID, true, 0, 0, 2, 2);
 }
 
+// 性能評価用
+TEST_F(TestBase, NNEDI3Test_NS1NN1Q1PS2)
+{
+  NNEDI3Test(TF_MID, true, 1, 1, 1, 2);
+}
+
 TEST_F(TestBase, NNEDI3Test_NoC)
 {
   NNEDI3Test(TF_MID, false, 0, 0, 1, 2);
@@ -1478,7 +1485,7 @@ TEST_F(TestBase, NNEDI3Test_NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.*";
+	::testing::GTEST_FLAG(filter) = "TestBase.NNEDI3Test_NS1NN1Q1PS2*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
