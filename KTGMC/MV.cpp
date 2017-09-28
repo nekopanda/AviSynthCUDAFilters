@@ -794,22 +794,17 @@ class KMSuper : public GenericVideoFilter
   std::unique_ptr<KMSuperFrame> pSrcGOF;
 
 public:
-  KMSuper(PClip child, int nPel, IScriptEnvironment2* env)
+  KMSuper(PClip child, int nHPad, int nVPad, int nPel, int nLevels, bool chroma, int nSharp, int nRfilter, IScriptEnvironment2* env)
     : GenericVideoFilter(child)
     , params(KMVParam::SUPER_FRAME)
     , cuda(CreateKDeintCUDA())
   {
     // ¡‚ÌŠ‘Î‰ž‚µ‚Ä‚¢‚é‚ÌƒRƒŒ‚¾‚¯
-    int nHPad = 8;
-    int nVPad = 8;
-    int nLevels = 0;
-    bool chroma = true;
-    int nSharp = 2;
-    int nRfilter = 2;
-
-		if (nPel != 1 && nPel != 2) {
-			env->ThrowError("pel must be 1 or 2");
-		}
+    if (nHPad != 8) env->ThrowError("[KMSuper] hpad must be 8.");
+    if (nVPad != 8) env->ThrowError("[KMSuper] vpad must be 8.");
+    if (nSharp != 2) env->ThrowError("[KMSuper] sharp must be 2.");
+    if (nRfilter != 2) env->ThrowError("[KMSuper] rfilter must be 2.");
+    if (nPel != 1 && nPel != 2) env->ThrowError("[KMSuper] pel must be 1 or 2");
 
     params.nWidth = vi.width;
     params.nHeight = vi.height;
@@ -891,7 +886,16 @@ public:
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
-    return new KMSuper(args[0].AsClip(), args[1].AsInt(2), env);
+    return new KMSuper(
+      args[0].AsClip(),
+      args[1].AsInt(8), // hpad
+      args[2].AsInt(8), // vpad
+      args[3].AsInt(2), // pel
+      args[4].AsInt(0), // levels
+      args[5].AsBool(true), // chroma
+      args[6].AsInt(2), // sharp
+      args[7].AsInt(2), // rfilter
+      env);
   }
 };
 
@@ -3083,6 +3087,8 @@ class KMSuperCheck : public GenericVideoFilter
   PClip kmsuper;
   PClip mvsuper;
 
+  std::unique_ptr<IMVCUDA> cuda;
+
   const KMVParam* params;
 
   std::unique_ptr<KMSuperFrame> pKSF;
@@ -3128,8 +3134,8 @@ class KMSuperCheck : public GenericVideoFilter
           for (int x = 0; x < w; ++x) {
             pixel_t kv = kptr[x + y * nPitch];
             pixel_t mv = mptr[x + y * nPitch];
-            //if (std::abs(kv - mv) > 1) {
-            if (kv != mv) {
+            if (std::abs(kv - mv) > 1) {
+            //if (kv != mv) {
               env->ThrowError("ERROR !!!");
             }
           }
@@ -3154,9 +3160,10 @@ public:
     : GenericVideoFilter(view)
     , kmsuper(kmsuper)
     , mvsuper(mvsuper)
+    , cuda(CreateKDeintCUDA())
     , params(KMVParam::GetParam(kmsuper->GetVideoInfo(), env))
-    , pKSF(new KMSuperFrame(params, nullptr))
-		, pMSF(new KMSuperFrame(params, nullptr))
+    , pKSF(new KMSuperFrame(params, cuda.get()))
+		, pMSF(new KMSuperFrame(params, cuda.get()))
   {
   }
 
@@ -5195,7 +5202,7 @@ public:
 
 void AddFuncMV(IScriptEnvironment2* env)
 {
-  env->AddFunction("KMSuper", "c[pel]i", KMSuper::Create, 0);
+  env->AddFunction("KMSuper", "c[hpad]i[vpad]i[pel]i[levels]i[chroma]b[sharp]i[filter]i", KMSuper::Create, 0);
 
   env->AddFunction("KMPartialSuper", "c[drop]i", KMPartialSuper::Create, 0);
 

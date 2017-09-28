@@ -396,6 +396,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	ReuseGlobals   = (PrevGlobals == "Reuse")
 	ProgSADMask    = (InputType != 2 && InputType != 3) ? 0.0 : ProgSADMask
 	rgBlur         = (Precise) ? 11 : 12
+	analyzeBatch   = 8
 
 	# Get maximum temporal radius needed
 	maxTR = (temporalSL)       ? SLRad : 0
@@ -458,16 +459,11 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# The bobbed clip will shimmer due to being derived from alternating fields. Temporally smooth over the neighboring frames using a binomial kernel. Binomial
 	# kernels give equal weight to even and odd frames and hence average away the shimmer. The two kernels used are [1 2 1] and [1 4 6 4 1] for radius 1 and 2.
 	# These kernels are approximately Gaussian kernels, which work well as a prefilter before motion analysis (hence the original name for this script)
-	# Create linear weightings of neighbors first                                                 -2    -1     0    1     2
-	ts1 = (!IsClip(srchClip) && TR0 > 0) ? bobbed.TemporalSoften( 1, 255,CMts, 28, 2 ) : NOP()  # 0.00  0.33  0.33  0.33  0.00
-	ts2 = (!IsClip(srchClip) && TR0 > 1) ? bobbed.TemporalSoften( 2, 255,CMts, 28, 2 ) : NOP()  # 0.20  0.20  0.20  0.20  0.20
-
-	# Combine linear weightings to give binomial weightings - TR0=0: (1), TR0=1: (1:2:1), TR0=2: (1:4:6:4:1)
 	binomial0 = IsClip(srchClip) ? NOP() : \
 	TR0 == -1 && defined(EdiExt) ? isyuy2(EdiExt) ? EdiExt.nonyuy2clipin(true) : EdiExt : \
 	            (TR0 == 0)       ? bobbed : \
-	            (TR0 == 1)       ? (ChromaMotion ? ts1.Merge( bobbed, 0.25 ) : ts1.MergeLuma( bobbed, 0.25 )) : \
-	                               (ChromaMotion ? ts1.Merge( ts2, 0.357 ).Merge( bobbed, 0.125 ) : ts1.MergeLuma( ts2, 0.357 ).MergeLuma( bobbed, 0.125 ))
+	            (TR0 == 1)       ? bobbed.KBinomialTemporalSoften(1, 28, ChromaMotion) : \
+	                               bobbed.KBinomialTemporalSoften(2, 28, ChromaMotion)
 
 	# Remove areas of difference between temporal blurred motion search clip and bob that are not due to bob-shimmer - removes general motion blur
 	repair0 = (IsClip(srchClip) || Rep0 == 0) ? binomial0 : binomial0.KTGMC_KeepOnlyBobShimmerFixes( bobbed, Rep0, (RepChroma && ChromaMotion) )
@@ -476,19 +472,19 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# a slight change in an edge from frame to frame will give a high SAD due to the higher contrast of edges
 	spatialBlur = (IsClip(srchClip) || SrchClipPP == 0) ? NOP() : \
 	              (SrchClipPP == 1) ? repair0.BilinearResize( w/2, h/2 ).RemoveGrain( 12,CMrg).BilinearResize( w, h ) : \
-	                                  repair0.RemoveGrain( 12,CMrg).GaussResize( w,h, 0,0, w+epsilon,h+epsilon, p=2 )
+	                                  repair0.KRemoveGrain( 12,CMrg).KGaussResize( p=2, chroma=ChromaMotion )
 
-	spatialBlur = (IsClip(spatialBlur) && SrchClipPP > 1) ? (ChromaMotion ? spatialBlur.Merge( repair0, 0.1 ) : spatialBlur.MergeLuma( repair0, 0.1 )) : spatialBlur
-	tweaked     = (!IsClip(srchClip) && SrchClipPP > 1) ? mt_lutxy( repair0, bobbed, "x 3 scalef + y < x 3 scalef + x 3 scalef - y > x 3 scalef - y ? ?", U=CMmt,V=CMmt ) : NOP()
+	spatialBlur = (IsClip(spatialBlur) && SrchClipPP > 1) ? (ChromaMotion ? spatialBlur.KMerge( repair0, 0.1 ) : spatialBlur.KMergeLuma( repair0, 0.1 )) : spatialBlur
 	srchcheck   = IsClip(srchClip)
 	srchClip    = srchcheck         ? srchClip : \
 	              (SrchClipPP == 0) ? repair0 : \
 	              (SrchClipPP < 3)  ? spatialBlur : \
-	                                  spatialBlur.mt_lutxy( tweaked, "x 7 scalef + y < x 2 scalef + x 7 scalef - y > x 2 scalef - x 51 * y 49 * + 100 / ? ?", U=CMmt,V=CMmt )
-	srchClip    = tv_range && !srchcheck ? srchClip.Dither_Luma_Rebuild(S0=Str,c=Amp,slice=false,lsb=lsb,uv=CMmt) : srchClip
+	                                  repair0.KTGMC_TweakSearchClip( bobbed, spatialBlur, U=CMmt,V=CMmt )
+	srchClip    = tv_range && !srchcheck ? srchClip.KTGMC_ToFullRange( U=CMmt,V=CMmt ) : srchClip
+	return srchClip
 	# Calculate forward and backward motion vectors from motion search clip
 	srchSuper = IsClip(srchSuper) ? srchSuper : \
-	            (maxTR > 0)       ? srchClip.MSuper( pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion ) : NOP()
+	            (maxTR > 0)       ? srchClip.KMSuper( pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion ) : NOP()
 	bVec5 = IsClip(bVec5) ? bVec5 : \
 	        (maxTR > 4)   ? srchSuper.MAnalyse( isb=true,  delta=5, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
 	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
@@ -808,31 +804,6 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 #---------------------------------------
 # Helpers
 
-# Same as Bob, but keeps the field order the same.
-function KTGMC_Bob(clip cp, float "b", float "c", int "height" )
-{
-  ssispmt = Findstr(VersionString(), "AviSynth+") != 0 && Findstr(VersionString(), "r1576") == 0
-  h = Default(height, cp.Height)
-  w = cp.Width
-  shift = GetParity(cp) ? 0.25 : -0.25
-
-  c420 = ssispmt ? Is420(cp) : IsYV12(cp)
-
-  c420 ? cp.SeparateFields() : nop()
-
-  oeven=c420 ? SelectEven() : nop()
-  oodd=c420 ? SelectOdd() : nop()
-
-  even=c420 ? ssispmt ? oeven.ConvertToY().BicubicResize(w, h, b, c, 0, shift, w, Height()).AssumeFrameBased() : oeven.ConvertToY8().BicubicResize(w, h, b, c, 0, shift, w, Height()).AssumeFrameBased() : nop()
-  odd=c420 ? ssispmt ? oodd.ConvertToY().BicubicResize(w, h, b, c, 0, -shift, w, Height()).AssumeFrameBased() : oodd.ConvertToY8().BicubicResize(w, h, b, c, 0, -shift, w, Height()).AssumeFrameBased() : nop()
-
-  evenChr=c420 ? Interleave(ssispmt ? oeven.ExtractU() : oeven.UToY8(), ssispmt ? oeven.ExtractV() : oeven.VToY8()).BicubicResize(w/2, h/2, b, c, 0, shift, w/2, Height()/2).AssumeFrameBased() : nop()
-  oddChr=c420 ? Interleave(ssispmt ? oodd.ExtractU() : oodd.UToY8(), ssispmt ? oodd.ExtractV() :oodd.VToY8()).BicubicResize(w/2, h/2, b, c, 0, -shift, w/2, Height()/2).AssumeFrameBased() : nop()
-
-  c420 ? YToUV(Interleave(evenChr.SelectEven(), oddChr.SelectEven()),Interleave(evenChr.SelectOdd(), oddChr.SelectOdd()),Interleave(even, odd)) : cp.Bob( b,c, h )
-  GetParity(cp) ? AssumeTFF() : AssumeBFF()
-}
-
 
 # Interpolate input clip using method given in EdiMode. Use Fallback or Bob as result if mode not in list. If ChromaEdi string if set then interpolate chroma
 # separately with that method (only really useful for EEDIx). The function is used as main algorithm starting point and for first two source-match stages
@@ -883,7 +854,7 @@ function KTGMC_inflate( clip c, int "Y", int "U", int "V" )
 	rgY = (mtY == 3) ? 20 : -1
 	rgU = (mtU == 3) ? 20 : -1
 	rgV = (mtV == 3) ? 20 : -1
-	mt_logic( c, c.RemoveGrain( rgY, rgU, rgV ), "max", Y=mtY,U=mtU,V=mtV )
+	KLogic( c, c.KRemoveGrain( rgY, rgU, rgV ), "max", Y=mtY,U=mtU,V=mtV )
 }
 
 function KTGMC_deflate( clip c, int "Y", int "U", int "V" )
@@ -895,7 +866,7 @@ function KTGMC_deflate( clip c, int "Y", int "U", int "V" )
 	rgY = (mtY == 3) ? 20 : -1
 	rgU = (mtU == 3) ? 20 : -1
 	rgV = (mtV == 3) ? 20 : -1
-	mt_logic( c, c.RemoveGrain( rgY, rgU, rgV ), "min", Y=mtY,U=mtU,V=mtV )
+	KLogic( c, c.KRemoveGrain( rgY, rgU, rgV ), "min", Y=mtY,U=mtU,V=mtV )
 }
 
 # Helper function: Compare processed clip with reference clip: only allow thin, horizontal areas of difference, i.e. bob shimmer fixes
@@ -915,17 +886,15 @@ function KTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chro
 	RCrg  = Chroma ? 3 : 1
 	RCrgo = Chroma ? 3 : 2
 
-	diff = mt_makediff(Ref, Input, U=3,V=3 )
+	diff = KMakeDiff(Ref, Input, U=3,V=3 )
 
 	# Areas of positive difference                                                                # ed = 0 1 2 3 4 5 6 7
-	choke1 =                        diff.  mt_inpand( mode="vertical", U=RCrg,V=RCrg )            #      x x x x x x x x    1 pixel   \
-	choke1 = (ed > 2)             ? choke1.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke1   #      . . . x x x x x    1 pixel    |  Deflate to remove thin areas
+	choke1 =                        diff.  KInpandVerticalX2( U=RCrg,V=RCrg )                     #      x x x x x x x x    1 pixel   \
 	choke1 = (ed > 5)             ? choke1.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke1   #      . . . . . . x x    1 pixel   /
 	choke1 = (ed % 3 != 0)        ? choke1.KTGMC_deflate( U=RCrg,V=RCrg )              : choke1   #      . x x . x x . x    A bit more deflate & some horizonal effect
 	choke1 = (ed == 2 || ed == 5) ? choke1.RemoveGrain( 4              )               : choke1   #      . . x . . x . .    Local median
                                                                                                                       
-	choke1 =                        choke1.mt_expand( mode="vertical", U=RCrg,V=RCrg )            #      x x x x x x x x    1 pixel  \
-	choke1 = (ed > 1)             ? choke1.mt_expand( mode="vertical", U=RCrg,V=RCrg ) : choke1   #      . . x x x x x x    1 pixel   | Reflate again
+	choke1 =                        choke1.KExpandVerticalX2( U=RCrg,V=RCrg )                     #      x x x x x x x x    1 pixel  \
 	choke1 = (ed > 4)             ? choke1.mt_expand( mode="vertical", U=RCrg,V=RCrg ) : choke1   #      . . . . . x x x    1 pixel  /
 
 	# Over-dilation - extra reflation up to about 1 pixel
@@ -935,13 +904,11 @@ function KTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chro
 	                                choke1.mt_expand ( U=RCrg,V=RCrg )
 
 	# Areas of negative difference (similar to above)
-	choke2 =                        diff.  mt_expand( mode="vertical", U=RCrg,V=RCrg )         
-	choke2 = (ed > 2)             ? choke2.mt_expand( mode="vertical", U=RCrg,V=RCrg ) : choke2
+	choke2 =                        diff.  KExpandVerticalX2( U=RCrg,V=RCrg )         
 	choke2 = (ed > 5)             ? choke2.mt_expand( mode="vertical", U=RCrg,V=RCrg ) : choke2
 	choke2 = (ed % 3 != 0)        ? choke2.KTGMC_inflate( U=RCrg,V=RCrg )              : choke2
 	choke2 = (ed == 2 || ed == 5) ? choke2.RemoveGrain( 4              )               : choke2
-	choke2 =                        choke2.mt_inpand( mode="vertical", U=RCrg,V=RCrg )
-	choke2 = (ed > 1)             ? choke2.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke2
+	choke2 =                        choke2.KInpandVerticalX2( U=RCrg,V=RCrg )
 	choke2 = (ed > 4)             ? choke2.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke2
 	choke2 = (od == 0)            ? choke2 : \
 	         (od == 1)            ? choke2.KTGMC_deflate( U=RCrg,V=RCrg )  : \
@@ -949,9 +916,7 @@ function KTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chro
 	                                choke2.mt_inpand ( U=RCrg,V=RCrg )
 
 	# Combine above areas to find those areas of difference to restore
-	restore = diff.mt_lutxy( choke1, "x 129 scalef < x y range_half < range_half y ? ?", U=RCrg,V=RCrg ).mt_lutxy( choke2, "x 127 scalef > x y range_half > range_half y ? ?", U=RCrg,V=RCrg )
-
-	return Input.mt_adddiff( restore, U=RCrgo,V=RCrgo )
+	return Input.KTGMC_BobShimmerFixesMerge(diff, choke1, choke2, U=RCrgo,V=RCrgo )
 }
 
 

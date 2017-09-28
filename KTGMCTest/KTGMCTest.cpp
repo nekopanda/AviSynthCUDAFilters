@@ -68,6 +68,7 @@ protected:
 
   void GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env);
 
+  void MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level);
   void AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
   void DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel);
   void DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel);
@@ -117,6 +118,71 @@ void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
     break;
   }
 }
+
+#pragma region MSuper
+
+void TestBase::MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    const char* chromastr = chroma ? "true" : "false";
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "ref = src.MSuper(chroma = " << chromastr << ", pel = " << pel << ", levels = " << level << ")" << std::endl;
+    out << "cuda = src.OnCPU(0).KMSuper(chroma = " << chromastr << ", pel = " << pel << ", levels = " << level << ").OnCUDA(0)" << std::endl;
+    out << "KMSuperCheck(cuda, ref, src)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, MSuper_WithCPel1Level0)
+{
+  MSuperTest(TF_MID, true, 1, 0);
+}
+
+TEST_F(TestBase, MSuper_WithCPel2Level0)
+{
+  MSuperTest(TF_MID, true, 2, 0);
+}
+
+TEST_F(TestBase, MSuper_WithCPel1Level1)
+{
+  MSuperTest(TF_MID, true, 1, 1);
+}
+
+TEST_F(TestBase, MSuper_WithCPel2Level1)
+{
+  MSuperTest(TF_MID, true, 2, 1);
+}
+
+TEST_F(TestBase, MSuper_NoCPel1Level0)
+{
+  MSuperTest(TF_MID, false, 1, 0);
+}
+
+#pragma endregion
 
 #pragma region Analyze
 

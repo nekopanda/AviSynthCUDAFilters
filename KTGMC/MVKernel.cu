@@ -62,7 +62,7 @@ __global__ void kl_pad_frame_h(pixel_t* ptr, int pitch, int hPad, int width, int
       ptr[x + y * pitch] = ptr[hPad + y * pitch];
     }
     else {
-      ptr[(hPad + width + x) + y * pitch] = ptr[(hPad + width) + y * pitch];
+      ptr[(hPad + width + x) + y * pitch] = ptr[(hPad + width - 1) + y * pitch];
     }
   }
 }
@@ -81,7 +81,7 @@ __global__ void kl_pad_frame_v(pixel_t* ptr, int pitch, int vPad, int width, int
       ptr[x + y * pitch] = ptr[x + vPad * pitch];
     }
     else {
-      ptr[x + (vPad + height + y) * pitch] = ptr[x + (vPad + height) * pitch];
+      ptr[x + (vPad + height + y) * pitch] = ptr[x + (vPad + height - 1) * pitch];
     }
   }
 }
