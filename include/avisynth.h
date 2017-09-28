@@ -951,6 +951,11 @@ enum CachePolicyHint {
   CACHE_IS_MTGUARD_REQ,
   CACHE_IS_MTGUARD_ANS,
 
+  CACHE_AVSPLUS_CUDA_CONSTANTS = 600,
+
+  CACHE_GET_DEV_TYPE,           // Device types a filter can return
+  CACHE_GET_CHILD_DEV_TYPE,    // Device types a fitler can receive (internal use only)
+
   CACHE_USER_CONSTANTS = 1000       // Smaller values are reserved for the core
 
 };
@@ -1350,8 +1355,8 @@ enum AvsAllocType
 };
 
 enum AvsDeviceType {
-  DEV_TYPE_CPU = 0,
-  DEV_TYPE_CUDA = 1,
+  DEV_TYPE_CPU = 1,
+  DEV_TYPE_CUDA = 2,
 };
 
 /* -----------------------------------------------------------------------------

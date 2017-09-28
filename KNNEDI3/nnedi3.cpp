@@ -1026,6 +1026,9 @@ int __stdcall nnedi3::SetCacheHints(int cachehints,int frame_range)
   {
   case CACHE_GET_MTMODE :
     return MT_MULTI_INSTANCE;
+  case CACHE_GET_DEV_TYPE:
+    // CPU, CUDA‘Î‰ž
+    return DEV_TYPE_CPU | DEV_TYPE_CUDA;
   default :
     return 0;
   }

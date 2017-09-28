@@ -12,6 +12,7 @@
 #include <fstream>
 #include <string>
 #include <iostream>
+#include <memory>
 
 std::string GetDirectoryName(const std::string& filename)
 {
@@ -23,6 +24,14 @@ std::string GetDirectoryName(const std::string& filename)
 	}
 	return directory;
 }
+
+struct ScriptEnvironmentDeleter {
+  void operator()(IScriptEnvironment* env) {
+    env->DeleteScriptEnvironment();
+  }
+};
+
+typedef std::unique_ptr<IScriptEnvironment2, ScriptEnvironmentDeleter> PEnv;
 
 // テスト対象となるクラス Foo のためのフィクスチャ
 class TestBase : public ::testing::Test {
@@ -84,6 +93,9 @@ protected:
   void MergeTest(TEST_FRAMES tf, bool chroma);
 
   void NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn);
+
+  // AviSynth+CUDAのテストだけどここに置く
+  void DeviceCheckTest();
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -110,8 +122,9 @@ void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
 
 void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
 {
+  PEnv env;
 	try {
-		IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
 		AVSValue result;
 		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -141,10 +154,8 @@ void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, 
 
 		{
 			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
 		}
-
-		env->DeleteScriptEnvironment();
 	}
 	catch (const AvisynthError& err) {
 		printf("%s\n", err.msg);
@@ -223,8 +234,9 @@ TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
 
 void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -298,10 +310,8 @@ void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -351,8 +361,9 @@ TEST_F(TestBase, Degrain_2Blk32Pel1)
 
 void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -396,10 +407,8 @@ void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -418,8 +427,9 @@ TEST_F(TestBase, DegrainBinomial_2Blk32Pel1)
 
 void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -455,10 +465,8 @@ void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -492,8 +500,9 @@ TEST_F(TestBase, Compensate_Blk32Pel1)
 
 void TestBase::BobTest(TEST_FRAMES tf, bool parity)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -519,10 +528,8 @@ void TestBase::BobTest(TEST_FRAMES tf, bool parity)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -546,8 +553,9 @@ TEST_F(TestBase, BobTest_BFF)
 
 void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -573,10 +581,8 @@ void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -610,8 +616,9 @@ TEST_F(TestBase, BinomialSoften_Rad2NoC)
 
 void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -637,10 +644,8 @@ void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -674,8 +679,9 @@ TEST_F(TestBase, RemoveGrain_Mode20NoC)
 
 void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -699,10 +705,8 @@ void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -726,8 +730,9 @@ TEST_F(TestBase, GaussResizeTest_NoC)
 
 void TestBase::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -756,10 +761,8 @@ void TestBase::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -783,8 +786,9 @@ TEST_F(TestBase, InpandVerticalX2Test_NoC)
 
 void TestBase::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -813,10 +817,8 @@ void TestBase::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -840,8 +842,9 @@ TEST_F(TestBase, ExpandVerticalX2Test_NoC)
 
 void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -872,10 +875,8 @@ void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -899,8 +900,9 @@ TEST_F(TestBase, MakeDiffTest_NoC)
 
 void TestBase::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -931,10 +933,8 @@ void TestBase::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -968,8 +968,9 @@ TEST_F(TestBase, LogicTest_MaxNoC)
 
 void TestBase::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1001,10 +1002,8 @@ void TestBase::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1038,8 +1037,9 @@ TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
 
 void TestBase::VResharpenTest(TEST_FRAMES tf)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1063,10 +1063,8 @@ void TestBase::VResharpenTest(TEST_FRAMES tf)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1085,8 +1083,9 @@ TEST_F(TestBase, VResharpenTest_WithC)
 
 void TestBase::ResharpenTest(TEST_FRAMES tf)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1112,10 +1111,8 @@ void TestBase::ResharpenTest(TEST_FRAMES tf)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1134,8 +1131,9 @@ TEST_F(TestBase, ResharpenTest_WithC)
 
 void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1168,10 +1166,8 @@ void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1190,8 +1186,9 @@ TEST_F(TestBase, LimitOverSharpenTest_WithC)
 
 void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1220,10 +1217,8 @@ void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1247,8 +1242,9 @@ TEST_F(TestBase, ToFullRangeTest_NoC)
 
 void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1280,10 +1276,8 @@ void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1307,8 +1301,9 @@ TEST_F(TestBase, TweakSearchClipTest_NoC)
 
 void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1340,10 +1335,8 @@ void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1367,8 +1360,9 @@ TEST_F(TestBase, MergeTest_NoC)
 
 void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn)
 {
+  PEnv env;
   try {
-    IScriptEnvironment2* env = CreateScriptEnvironment2();;
+    env = PEnv(CreateScriptEnvironment2());
 
     AVSValue result;
     std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
@@ -1399,10 +1393,8 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int q
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env);
+      GetFrames(clip, tf, env.get());
     }
-
-    env->DeleteScriptEnvironment();
   }
   catch (const AvisynthError& err) {
     printf("%s\n", err.msg);
@@ -1483,9 +1475,31 @@ TEST_F(TestBase, NNEDI3Test_NoC)
 
 #pragma endregion
 
+
+TEST_F(TestBase, DeviceCheck)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+    out << "LWLibavVideoSource(\"test.ts\").OnCUDA(0)" << std::endl;
+    out.close();
+
+    EXPECT_THROW(env->Invoke("Import", scriptpath.c_str()).AsClip(), AvisynthError);
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.NNEDI3Test_NS1NN1Q1PS2*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

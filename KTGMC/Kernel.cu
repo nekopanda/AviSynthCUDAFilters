@@ -37,6 +37,18 @@ template <> struct VectorType<unsigned short> {
   typedef ushort4 type;
 };
 
+
+class CUDAFilterBase : public GenericVideoFilter {
+public:
+  CUDAFilterBase(PClip _child) : GenericVideoFilter(_child) { }
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return DEV_TYPE_CUDA;
+    }
+    return 0;
+  };
+};
+
 #pragma region resample
 
 struct ResamplingProgram {
@@ -368,7 +380,7 @@ void launch_resmaple_h(
 
 #pragma endregion
 
-class KTGMC_Bob : public GenericVideoFilter {
+class KTGMC_Bob : public CUDAFilterBase {
 	std::unique_ptr<ResamplingProgram> program_e_y;
 	std::unique_ptr<ResamplingProgram> program_e_uv;
 	std::unique_ptr<ResamplingProgram> program_o_y;
@@ -437,7 +449,7 @@ class KTGMC_Bob : public GenericVideoFilter {
 
 public:
   KTGMC_Bob(PClip _child, double b, double c, IScriptEnvironment* env_)
-		: GenericVideoFilter(_child)
+		: CUDAFilterBase(_child)
 		, parity(_child->GetParity(0))
 		, cacheN(-1)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -577,7 +589,7 @@ __global__ void kl_binomial_temporal_soften_2(
   }
 }
 
-class KBinomialTemporalSoften : public GenericVideoFilter {
+class KBinomialTemporalSoften : public CUDAFilterBase {
 
   int radius;
   int scenechange;
@@ -694,7 +706,7 @@ class KBinomialTemporalSoften : public GenericVideoFilter {
 
 public:
   KBinomialTemporalSoften(PClip _child, int radius, int scenechange, bool chroma, IScriptEnvironment* env_)
-    : GenericVideoFilter(_child)
+    : CUDAFilterBase(_child)
     , radius(radius)
     , scenechange(scenechange)
     , chroma(chroma)
@@ -802,7 +814,7 @@ struct RG20Vertical {
   }
 };
 
-class KRemoveGrain : public GenericVideoFilter {
+class KRemoveGrain : public CUDAFilterBase {
   
   int mode;
   int modeU;
@@ -885,7 +897,7 @@ class KRemoveGrain : public GenericVideoFilter {
 
 public:
   KRemoveGrain(PClip _child, int mode, int modeU, int modeV, IScriptEnvironment* env_)
-    : GenericVideoFilter(_child)
+    : CUDAFilterBase(_child)
     , mode(mode)
     , modeU(modeU)
     , modeV(modeV)
@@ -942,7 +954,7 @@ public:
   }
 };
 
-class KGaussResize : public GenericVideoFilter {
+class KGaussResize : public CUDAFilterBase {
   std::unique_ptr<ResamplingProgram> progVert;
   std::unique_ptr<ResamplingProgram> progVertUV;
   std::unique_ptr<ResamplingProgram> progHori;
@@ -1038,7 +1050,7 @@ class KGaussResize : public GenericVideoFilter {
 
 public:
   KGaussResize(PClip _child, double p, bool chroma, IScriptEnvironment* env_)
-    : GenericVideoFilter(_child)
+    : CUDAFilterBase(_child)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
     , chroma(chroma)
@@ -1090,7 +1102,7 @@ public:
   }
 };
 
-class KMasktoolFilterBase : public GenericVideoFilter {
+class KMasktoolFilterBase : public CUDAFilterBase {
 protected:
   int numChilds;
   PClip childs[4];
@@ -1177,7 +1189,7 @@ protected:
 
 public:
   KMasktoolFilterBase(PClip child, int Y, int U, int V, IScriptEnvironment* env_)
-    : GenericVideoFilter(child)
+    : CUDAFilterBase(child)
     , numChilds(1)
     , Y(Y), U(U), V(V)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -1187,7 +1199,7 @@ public:
   }
 
   KMasktoolFilterBase(PClip child0, PClip child1, int Y, int U, int V, IScriptEnvironment* env_)
-    : GenericVideoFilter(child0)
+    : CUDAFilterBase(child0)
     , numChilds(2)
     , Y(Y), U(U), V(V)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -1198,7 +1210,7 @@ public:
   }
 
   KMasktoolFilterBase(PClip child0, PClip child1, PClip child2, int Y, int U, int V, IScriptEnvironment* env_)
-    : GenericVideoFilter(child0)
+    : CUDAFilterBase(child0)
     , numChilds(3)
     , Y(Y), U(U), V(V)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -1210,7 +1222,7 @@ public:
   }
 
   KMasktoolFilterBase(PClip child0, PClip child1, PClip child2, PClip child3, int Y, int U, int V, IScriptEnvironment* env_)
-    : GenericVideoFilter(child0)
+    : CUDAFilterBase(child0)
     , numChilds(4)
     , Y(Y), U(U), V(V)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))

@@ -880,6 +880,13 @@ public:
 
     return dst;
   }
+  
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+    }
+    return 0;
+  };
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
@@ -2894,7 +2901,13 @@ public:
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
-    return cachehints == CACHE_GET_MTMODE ? MT_MULTI_INSTANCE : 0;
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_MULTI_INSTANCE;
+    }
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+    }
+    return 0;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
@@ -3047,6 +3060,13 @@ public:
       return Proc<uint16_t>(n, env);
     }
   }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+    }
+    return 0;
+  };
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
@@ -4579,6 +4599,13 @@ public:
     }
   }
 
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+    }
+    return 0;
+  };
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
@@ -5094,6 +5121,13 @@ public:
     core = std::unique_ptr<KMCompensateCoreBase>(CreateCore(false, time256, env));
     coreUV = std::unique_ptr<KMCompensateCoreBase>(CreateCore(true, time256, env));
   }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+    }
+    return 0;
+  };
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
