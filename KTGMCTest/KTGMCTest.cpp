@@ -1451,7 +1451,7 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int q
       "pscrn=" << pscrn << ",opt=1,U=" << UV << ",V=" << UV << ")" << std::endl;
     out <<
       "cuda = srcuda.KNNEDI3(field=-2,nsize=" << nsize << ",nns=" << nns << ",qual=" << qual << "," <<
-      "pscrn=" << pscrn << ",opt=1,threads=1,U=" << UV << ",V=" << UV << ").OnCUDA(0)" << std::endl;
+      "pscrn=" << pscrn << ",U=" << UV << ",V=" << UV << ").OnCUDA(0)" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 

@@ -2930,13 +2930,13 @@ public:
     bool truemotion = false; // preset added in v0.9.13
     lambda = args[7].AsInt(400);
     lsad = args[8].AsInt(400);
-    pnew = 25;
-    plevel = 0;
+    pnew = args[10].AsInt(25);
+    plevel = args[11].AsInt(0);
     global = args[9].AsBool(true);
 
     return new KMAnalyse(
       args[0].AsClip(),       // super
-			args[11].Defined() ? args[11].AsClip() : nullptr,      // partial
+			args[13].Defined() ? args[13].AsClip() : nullptr,      // partial
       blksize,
       blksizeV,                // v.1.7
       0,       // levels skip
@@ -2962,13 +2962,13 @@ public:
       10000,   // badSAD
       24,      // badrange
       true,   // isse
-      args[10].AsBool(true),   // meander blocks scan
+      args[12].AsBool(true),   // meander blocks scan
       false,  // temporal predictor
       false,  // try many
       false,  // multi
       false,  // mt
       0,   // scaleCSAD
-			args[12].AsInt(1), // batch
+			args[14].AsInt(1), // batch
       env
     );
   }
@@ -5207,7 +5207,7 @@ void AddFuncMV(IScriptEnvironment2* env)
   env->AddFunction("KMPartialSuper", "c[drop]i", KMPartialSuper::Create, 0);
 
   env->AddFunction("KMAnalyse",
-    "c[blksize]i[overlap]i[search]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[meander]b[partial]c[batch]i",
+    "c[blksize]i[overlap]i[search]i[isb]b[chroma]b[delta]i[lambda]i[lsad]i[global]b[plevel]i[pnew]i[meander]b[partial]c[batch]i",
     KMAnalyse::Create, 0);
 
   env->AddFunction("KMDegrain1",

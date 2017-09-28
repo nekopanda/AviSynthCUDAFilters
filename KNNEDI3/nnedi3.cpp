@@ -461,6 +461,7 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 	if (pscrn>=2) // using new prescreener
 	{
 		int offt[4*64],offt2[4*64];
+		int offt2cuda[4*64];
 		int j_a=0,j_b=0;
 
 		for (int j=0; j<4; j++)
@@ -497,10 +498,25 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 			}
 		}
 
+    // CUDA用
+    j_a = 0, j_b = 0;
+    for (int j = 0; j<4; j++)
+    {
+      for (int k = 0; k<64; k++)
+        offt2cuda[j_a + k] = ((k >> 3) << 5) + j_b + (k & 7);
+
+      j_a += 64;
+      j_b += 8;
+    }
+
 		const float *bdw = bdata+(dims0+dims0new*(pscrn-2));
 		int16_t *ws = (int16_t *)weights0;
 		float *wf = (float *)&ws[4*64];
 		double mean[4] = {0.0,0.0,0.0,0.0};
+
+    std::unique_ptr<int16_t[]> wscuda =
+      std::unique_ptr<int16_t[]>(new int16_t[dims0new * 2]);
+    float *wfcuda = (float *)&wscuda[4 * 64];
 
 		// Calculate mean weight of each first layer neuron
 		j_a=0;
@@ -530,25 +546,29 @@ nnedi3::nnedi3(PClip _child,int _field,bool _dh,bool _Y,bool _U,bool _V,bool _A,
 
 			const double scale = 32767.0/mval;
 
-			for (int k=0; k<64; k++)
-				ws[offt2[j_a+k]] = roundds(((bdw[offt[j_a+k]]-mean[j])/half)*scale);
+      for (int k =0; k < 64; k++)
+      {
+        ws[offt2[j_a + k]] = roundds(((bdw[offt[j_a + k]] - mean[j]) / half)*scale);
+        wscuda[offt2cuda[j_a + k]] = roundds(((bdw[offt[j_a + k]] - mean[j]) / half)*scale);
+      }
 
 			wf[j] = (float)(mval/32767.0);
+      wfcuda[j] = (float)(mval/32767.0);
 			j_a+=64;
 		}
 		memcpy(wf+4,bdw+4*64,(dims0new-4*64)*sizeof(float));
+		memcpy(wfcuda+4,bdw+4*64,(dims0new-4*64)*sizeof(float));
 
     {
       // アクセスする順番に並び替える
       std::unique_ptr<int16_t[]> bws =
         std::unique_ptr<int16_t[]>(new int16_t[dims0new * 2]);
-      float* bwf = (float*)&bws[4*64];
 
-      memcpy(bws.get(), ws, dims0new * 2 * sizeof(int16_t));
+      memcpy(bws.get(), wscuda.get(), dims0new * 2 * sizeof(int16_t));
 
       for (int i = 0; i < 4; i++)
         for (int j = 0; j < 64; j++)
-          bws[i + j * 4] = ws[(i << 3) + ((j >> 3) << 5) + (j & 7)];
+          bws[i + j * 4] = wscuda[(i << 3) + ((j >> 3) << 5) + (j & 7)];
 
       dweights0 = std::unique_ptr<DeviceLocalData<int16_t>>(
         new DeviceLocalData<int16_t>(bws.get(), dims0new * 2, env));
