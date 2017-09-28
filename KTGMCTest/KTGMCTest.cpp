@@ -1473,8 +1473,47 @@ TEST_F(TestBase, NNEDI3Test_NoC)
   NNEDI3Test(TF_MID, false, 0, 0, 1, 2);
 }
 
+// «”\•]‰¿—p
+TEST_F(TestBase, NNEDI3Test_Perf)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KNNEDI3.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    const char* UV = "True";
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(2)" << std::endl;
+    out << "return srcuda.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,pscrn=2,opt=1,threads=1,U=" << UV << ",V=" << UV << ").OnCUDA(2)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      for (int i = 100; i < 1100; ++i) {
+        clip->GetFrame(i, env.get());
+      }
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
 #pragma endregion
 
+#pragma region DeviceCheck
 
 TEST_F(TestBase, DeviceCheck)
 {
@@ -1496,6 +1535,8 @@ TEST_F(TestBase, DeviceCheck)
     GTEST_FAIL();
   }
 }
+
+#pragma endregion
 
 int main(int argc, char **argv)
 {

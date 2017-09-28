@@ -93,7 +93,7 @@ public:
 class IMVCUDA
 {
 public:
-  virtual void SetEnv(cudaStream_t stream, IScriptEnvironment2* env) = 0;
+  virtual void SetEnv(IScriptEnvironment2* env) = 0;
   virtual bool IsEnabled() const = 0;
   virtual IKDeintKernel<uint8_t>* get(uint8_t) = 0;
   virtual IKDeintKernel<uint16_t>* get(uint16_t) = 0;

@@ -861,7 +861,7 @@ public:
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame	dst = env->NewVideoFrame(vi);
 
-    cuda->SetEnv(nullptr, env);
+    cuda->SetEnv(env);
 
     const BYTE* pSrcY = src->GetReadPtr(PLANAR_Y);
     const BYTE* pSrcU = src->GetReadPtr(PLANAR_U);
@@ -2819,7 +2819,7 @@ public:
 		if (n < minframe || n >= maxframe)
 		{
 			PVideoFrame dst = env->NewVideoFrame(vi);
-			cuda->SetEnv(nullptr, env);
+			cuda->SetEnv(env);
 
 			VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
 
@@ -2880,7 +2880,7 @@ public:
 #endif
 		}
 
-    cuda->SetEnv(nullptr, env);
+    cuda->SetEnv(env);
 
 		PVideoFrame work;
 		int work_bytes = pAnalyzer->GetWorkSize();
@@ -4579,7 +4579,7 @@ public:
       SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
     }
 
-    cuda->SetEnv(nullptr, env);
+    cuda->SetEnv(env);
 
     if (IS_CUDA) {
       if (params->nPixelSize == 1) {
@@ -5147,7 +5147,7 @@ public:
       return child->GetFrame(n, env);
     }
 
-    cuda->SetEnv(nullptr, env);
+    cuda->SetEnv(env);
 
     if (IS_CUDA) {
       if (params->nPixelSize == 1) {

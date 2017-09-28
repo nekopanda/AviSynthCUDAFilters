@@ -1417,6 +1417,7 @@ public:
   // CUDA Support
   virtual void __stdcall CopyFrameProps(PVideoFrame src, PVideoFrame dst) = 0;
   virtual int __stdcall SetDeviceMemoryMax(AvsDeviceType type, int index, int mem) = 0;
+  virtual void* __stdcall GetDeviceStream() = 0;
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
 }; // end class IScriptEnvironment2

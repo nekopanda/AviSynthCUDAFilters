@@ -257,11 +257,11 @@ void launch_resmaple_v(
   const vpixel_t* src, vpixel_t* dst,
   int src_pitch4, int dst_pitch4,
   int width4, int height,
-  const int* offset, const float* coef)
+  const int* offset, const float* coef, cudaStream_t stream)
 {
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-  kl_resample_v<vpixel_t, filter_size> << <blocks, threads >> >(
+  kl_resample_v<vpixel_t, filter_size> << <blocks, threads, 0, stream >> >(
     src, dst, src_pitch4, dst_pitch4, width4, height, offset, coef);
 }
 
@@ -370,11 +370,11 @@ void launch_resmaple_h(
   const pixel_t* src, pixel_t* dst,
   int src_pitch, int dst_pitch,
   int width, int height,
-  const int* offset, const float* coef)
+  const int* offset, const float* coef, cudaStream_t stream)
 {
   dim3 threads(RESAMPLE_H_W, RESAMPLE_H_H);
   dim3 blocks(nblocks(width / 4, threads.x), nblocks(height, threads.y));
-  kl_resample_h<pixel_t, filter_size> << <blocks, threads >> >(
+  kl_resample_h<pixel_t, filter_size> << <blocks, threads, 0, stream>> >(
     src, dst, src_pitch, dst_pitch, width, height, offset, coef);
 }
 
@@ -399,6 +399,7 @@ class KTGMC_Bob : public CUDAFilterBase {
 		ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
 	{
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
@@ -425,7 +426,7 @@ class KTGMC_Bob : public CUDAFilterBase {
 
       launch_resmaple_v<vpixel_t, 4>(
 				srcptr, dstptr, src_pitch4, dst_pitch4, width4, height,
-				prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env));
+				prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env), stream);
 
       DEBUG_SYNC;
 		}
@@ -608,6 +609,7 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
   PVideoFrame Proc(int n, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     PVideoFrame src = GetRefFrame(n, env);
     PVideoFrame prv1 = GetRefFrame(n - 1, env);
@@ -630,7 +632,7 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
 
     PVideoFrame dst = env->NewVideoFrame(vi);
 
-    kl_init_sad << <1, radius * 2 * 3 >> > (sad);
+    kl_init_sad << <1, radius * 2 * 3, 0, stream>> > (sad);
     DEBUG_SYNC;
 
     int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
@@ -663,18 +665,18 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
       const vpixel_t* pFwd2;
 
       float* pSad = sad + p * radius * 2;
-      kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pPrv1, width4, height, pitch4, &pSad[0]);
+      kl_calculate_sad << <height, CALC_SAD_THREADS, 0, stream >> > (pSrc, pPrv1, width4, height, pitch4, &pSad[0]);
       DEBUG_SYNC;
-      kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pFwd1, width4, height, pitch4, &pSad[1]);
+      kl_calculate_sad << <height, CALC_SAD_THREADS, 0, stream >> > (pSrc, pFwd1, width4, height, pitch4, &pSad[1]);
       DEBUG_SYNC;
 
       if (radius >= 2) {
         pPrv2 = reinterpret_cast<const vpixel_t*>(prv2->GetReadPtr(planes[p]));
         pFwd2 = reinterpret_cast<const vpixel_t*>(fwd2->GetReadPtr(planes[p]));
 
-        kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pPrv2, width4, height, pitch4, &pSad[2]);
+        kl_calculate_sad << <height, CALC_SAD_THREADS, 0, stream >> > (pSrc, pPrv2, width4, height, pitch4, &pSad[2]);
         DEBUG_SYNC;
-        kl_calculate_sad << <height, CALC_SAD_THREADS >> > (pSrc, pFwd2, width4, height, pitch4, &pSad[3]);
+        kl_calculate_sad << <height, CALC_SAD_THREADS, 0, stream >> > (pSrc, pFwd2, width4, height, pitch4, &pSad[3]);
         DEBUG_SYNC;
       }
 
@@ -689,12 +691,12 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
 
       switch (radius) {
       case 1:
-        kl_binomial_temporal_soften_1 << <blocks, threads >> > (
+        kl_binomial_temporal_soften_1 << <blocks, threads, 0, stream >> > (
           pDst, pSrc, pPrv1, pFwd1, pSad, fsc, width4, height, pitch4);
         DEBUG_SYNC;
         break;
       case 2:
-        kl_binomial_temporal_soften_2 << <blocks, threads >> > (
+        kl_binomial_temporal_soften_2 << <blocks, threads, 0, stream >> > (
           pDst, pSrc, pPrv1, pFwd1, pPrv2, pFwd2, pSad, fsc, width4, height, pitch4);
         DEBUG_SYNC;
         break;
@@ -827,6 +829,7 @@ class KRemoveGrain : public CUDAFilterBase {
   PVideoFrame Proc(int n, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame dst = env->NewVideoFrame(vi);
@@ -868,14 +871,14 @@ class KRemoveGrain : public CUDAFilterBase {
       case 12:
         // [1 2 1] horizontal and vertical kernel blur
         kl_box3x3_filter<pixel_t, RG11Horizontal, RG11Vertical>
-          << <blocks, threads >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
         DEBUG_SYNC;
         break;
 
       case 20:
         // Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
         kl_box3x3_filter<pixel_t, RG20Horizontal, RG20Vertical>
-          << <blocks, threads >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
         DEBUG_SYNC;
         break;
 
@@ -886,7 +889,7 @@ class KRemoveGrain : public CUDAFilterBase {
       {
         dim3 threads(256);
         dim3 blocks(nblocks(max(height, width), threads.x), 4);
-        kl_copy_boarder1 << <blocks, threads >> > (pDst, pSrc, width, height, pitch);
+        kl_copy_boarder1 << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
       }
 
@@ -968,6 +971,7 @@ class KGaussResize : public CUDAFilterBase {
   PVideoFrame Proc(int n, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame tmp = env->NewVideoFrame(vi);
@@ -979,13 +983,13 @@ class KGaussResize : public CUDAFilterBase {
       const vpixel_t* src, vpixel_t* dst,
       int src_pitch4, int dst_pitch4,
       int width4, int height,
-      const int* offset, const float* coef);
+      const int* offset, const float* coef, cudaStream_t);
 
     typedef void(*RESAMPLE_H)(
       const pixel_t* src, pixel_t* dst,
       int src_pitch, int dst_pitch,
       int width, int height,
-      const int* offset, const float* coef);
+      const int* offset, const float* coef, cudaStream_t);
 
     for (int p = 0; p < (chroma ? 3 : 1); ++p) {
       const pixel_t* srcptr = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
@@ -1036,12 +1040,12 @@ class KGaussResize : public CUDAFilterBase {
 
       resample_v(
         (const vpixel_t*)srcptr, (vpixel_t*)tmpptr, pitch4, pitch4, width4, height,
-        progV->pixel_offset->GetData(env), progV->pixel_coefficient_float->GetData(env));
+        progV->pixel_offset->GetData(env), progV->pixel_coefficient_float->GetData(env), stream);
       DEBUG_SYNC;
 
       resample_h(
         tmpptr, dstptr, pitch, pitch, width, height,
-        progH->pixel_offset->GetData(env), progH->pixel_coefficient_float->GetData(env));
+        progH->pixel_offset->GetData(env), progH->pixel_coefficient_float->GetData(env), stream);
       DEBUG_SYNC;
     }
 
@@ -1296,6 +1300,7 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -1304,7 +1309,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_makediff<<<blocks, threads>>>(
+    kl_makediff<<<blocks, threads, 0, stream>>>(
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4, 1 << (bits - 1));
     DEBUG_SYNC;
   }
@@ -1418,6 +1423,7 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -1425,14 +1431,14 @@ protected:
     {
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height - 4, threads.y));
-      kl_box5_v<vpixel_t, F> << <blocks, threads >> >(
+      kl_box5_v<vpixel_t, F> << <blocks, threads, 0, stream >> >(
         (vpixel_t*)(pDst + pitch * 2), (const vpixel_t*)(pSrc0 + pitch * 2), width4, height - 4, pitch4);
       DEBUG_SYNC;
     }
     {
       dim3 threads(32, 4);
       dim3 blocks(nblocks(width4, threads.x));
-      kl_box5_v_border<vpixel_t, F> << <blocks, threads >> >(
+      kl_box5_v_border<vpixel_t, F> << <blocks, threads, 0, stream >> >(
         (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
       DEBUG_SYNC;
     }
@@ -1549,13 +1555,14 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic1<vpixel_t, F> << <blocks, threads >> >(
+    kl_logic1<vpixel_t, F> << <blocks, threads, 0, stream >> >(
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
     DEBUG_SYNC;
   }
@@ -1591,13 +1598,14 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic2<vpixel_t, F> << <blocks, threads >> >(
+    kl_logic2<vpixel_t, F> << <blocks, threads, 0, stream >> >(
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4);
     DEBUG_SYNC;
   }
@@ -1633,13 +1641,14 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic3<vpixel_t, F> << <blocks, threads >> >((vpixel_t*)pDst, 
+    kl_logic3<vpixel_t, F> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst, 
       (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, (const vpixel_t*)pSrc2, width4, height, pitch4);
     DEBUG_SYNC;
   }
@@ -1736,6 +1745,7 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -1744,7 +1754,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
       (const vpixel_t*)pSrc, (const vpixel_t*)pDiff,
       (const vpixel_t*)pChoke1, (const vpixel_t*)pChoke2,
       width4, height, pitch4, scale);
@@ -1853,6 +1863,7 @@ protected:
     const pixel_t* pSrc0, int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -1860,14 +1871,14 @@ protected:
     {
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
-      kl_box3_v<vpixel_t, Resharpen> << <blocks, threads >> >(
+      kl_box3_v<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> >(
         (vpixel_t*)(pDst + pitch), (const vpixel_t*)(pSrc0 + pitch), width4, height - 2, pitch4);
       DEBUG_SYNC;
     }
     {
       dim3 threads(32, 2);
       dim3 blocks(nblocks(width4, threads.x));
-      kl_box3_v_border<vpixel_t, Resharpen> << <blocks, threads >> >(
+      kl_box3_v_border<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> >(
         (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
       DEBUG_SYNC;
     }
@@ -1934,13 +1945,14 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-      kl_resharpen<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+      kl_resharpen<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
         (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
         width4, height, pitch4, sharpAdj);
       DEBUG_SYNC;
@@ -2027,6 +2039,7 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -2035,7 +2048,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_limit_over_sharpen<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+    kl_limit_over_sharpen<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
       (const vpixel_t*)pSrc, (const vpixel_t*)pRef,
       (const vpixel_t*)pCompB, (const vpixel_t*)pCompF,
       width4, height, pitch4, ovs << scale);
@@ -2109,6 +2122,7 @@ protected:
     const pixel_t* pSrc, int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -2116,11 +2130,11 @@ protected:
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
     if (p == 0) {
-      kl_to_full_range<vpixel_t, false> << <blocks, threads >> >(
+      kl_to_full_range<vpixel_t, false> << <blocks, threads, 0, stream >> >(
         (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
     }
     else {
-      kl_to_full_range<vpixel_t, true> << <blocks, threads >> >(
+      kl_to_full_range<vpixel_t, true> << <blocks, threads, 0, stream >> >(
         (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
     }
     DEBUG_SYNC;
@@ -2186,13 +2200,14 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_merge<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+    kl_merge<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
       (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
       width4, height, pitch4, (int)(weight*32767.0f), 32767 - (int)(weight*32767.0f));
     DEBUG_SYNC;
@@ -2300,6 +2315,7 @@ protected:
     int width, int height, int pitch, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
@@ -2310,7 +2326,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_tweak_search_clip<vpixel_t> << <blocks, threads >> >((vpixel_t*)pDst,
+    kl_tweak_search_clip<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
       (const vpixel_t*)pRepair, (const vpixel_t*)pBobbed, (const vpixel_t*)pBlur,
       width4, height, pitch4, scale, invscale);
     DEBUG_SYNC;

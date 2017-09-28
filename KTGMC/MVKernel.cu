@@ -2356,7 +2356,7 @@ public:
 
     SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
     SearchBatchData<pixel_t>* searchbatch = (SearchBatchData<pixel_t>*)_searchbatch;
-    SearchBatchData<pixel_t> hsearchbatch[ANALYZE_MAX_BATCH];
+    SearchBatchData<pixel_t>* hsearchbatch = new SearchBatchData<pixel_t>[ANALYZE_MAX_BATCH];
 
     {
       // set zeroMV and globalMV
@@ -2425,8 +2425,12 @@ public:
         hsearchbatch[i].d.pRefV = pRefV[i];
       }
 
-      // 64KBより小さいのでasync転送になる
-      CUDA_CHECK(cudaMemcpy(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice));
+      CUDA_CHECK(cudaMemcpyAsync(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
+
+      // 終わったら解放するコールバックを追加
+      env->DeviceAddCallback([](void* arg) {
+        delete[]((SearchBatchData<pixel_t>*)arg);
+      }, hsearchbatch);
 
       auto analyzef = table[(searchType == 8) ? 0 : 1][fidx];
       if (analyzef == NULL) {
@@ -2546,7 +2550,7 @@ public:
   {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
-    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT, BINOMIAL> << <blocks, threads >> > (
+    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT, BINOMIAL> << <blocks, threads, 0, stream >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nPitchSuper, nImgPitch);
     DebugSync();
   }
@@ -2558,7 +2562,7 @@ public:
   {
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, N, BLK_SIZE, M> << <blocks, threads >> > (
+    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4, pitchsuper4);
     DebugSync();
   }
@@ -2569,7 +2573,7 @@ public:
   {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_short_to_byte<vpixel_t, vtmp_t> << <blocks, threads >> > (
+    kl_short_to_byte<vpixel_t, vtmp_t> << <blocks, threads, 0, stream >> > (
       dst, src, width4, height, pitch4, max_pixel_value);
     DebugSync();
   }
@@ -2628,7 +2632,7 @@ public:
       }
     }
 
-    CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice, stream));
 
     // 終わったら解放するコールバックを追加
     static_cast<IScriptEnvironment2*>(env)->DeviceAddCallback([](void* arg) {
@@ -2784,13 +2788,13 @@ public:
     int *sceneChangeB = sceneChange;
     int *sceneChangeF = sceneChange + N;
 
-    kl_init_scene_change << <1, numRef >> > (sceneChange);
+    kl_init_scene_change << <1, numRef, 0, stream >> > (sceneChange);
     DebugSync();
     for (int i = 0; i < N; ++i) {
       dim3 threads(256);
       dim3 blocks(nblocks(numBlks, threads.x));
-      kl_scene_change << <blocks, threads >> > (mvB[i], numBlks, nTh1, &sceneChangeB[i]);
-      kl_scene_change << <blocks, threads >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
+      kl_scene_change << <blocks, threads, 0, stream >> > (mvB[i], numBlks, nTh1, &sceneChangeB[i]);
+      kl_scene_change << <blocks, threads, 0, stream >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
       DebugSync();
     }
 
@@ -2833,7 +2837,7 @@ public:
   {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
-    kl_prepare_compensate<pixel_t, NPEL, SHIFT> << <blocks, threads >> > (
+    kl_prepare_compensate<pixel_t, NPEL, SHIFT> << <blocks, threads, 0, stream >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, time256, thSAD, ovrwins, sceneChange,
       mv, pRef0, pRef, pblocks, nPitchSuper, nImgPitch);
     DebugSync();
@@ -2846,7 +2850,7 @@ public:
   {
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_compensate_2x3<pixel_t, vtmp_t, BLK_SIZE, M> << <blocks, threads >> > (
+    kl_compensate_2x3<pixel_t, vtmp_t, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4, pitchsuper4);
     DebugSync();
   }
@@ -2857,7 +2861,7 @@ public:
   {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_short_to_byte_or_copy_src<vpixel_t, vtmp_t> << <blocks, threads >> > (
+    kl_short_to_byte_or_copy_src<vpixel_t, vtmp_t> << <blocks, threads, 0, stream >> > (
       pflag, dst, src, tmp, width4, height, pitch4, max_pixel_value);
     DebugSync();
   }
@@ -2875,12 +2879,12 @@ public:
     int numBlks = nBlkX * nBlkY;
 
     // SceneChange検出
-    kl_init_scene_change << <1, 1 >> > (sceneChange);
+    kl_init_scene_change << <1, 1, 0, stream >> > (sceneChange);
     DebugSync();
     {
       dim3 threads(256);
       dim3 blocks(nblocks(numBlks, threads.x));
-      kl_scene_change << <blocks, threads >> > (mv, numBlks, nTh1, sceneChange);
+      kl_scene_change << <blocks, threads, 0, stream >> > (mv, numBlks, nTh1, sceneChange);
       DebugSync();
     }
 
@@ -3011,9 +3015,9 @@ class IMVCUDAImpl : public IMVCUDA
   KDeintKernel<uint16_t> k16;
 
 public:
-  virtual void SetEnv(cudaStream_t stream, IScriptEnvironment2* env) {
-    k8.SetEnv(stream, env);
-    k16.SetEnv(stream, env);
+  virtual void SetEnv(IScriptEnvironment2* env) {
+    k8.SetEnv(env);
+    k16.SetEnv(env);
   }
 
   virtual bool IsEnabled() const {

@@ -13,10 +13,10 @@ protected:
   cudaStream_t stream;
 public:
 
-  void SetEnv(cudaStream_t stream, IScriptEnvironment2* env)
+  void SetEnv(IScriptEnvironment2* env)
   {
     this->env = env;
-    this->stream = stream;
+    stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   }
 
   void DebugSync()

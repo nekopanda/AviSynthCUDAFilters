@@ -462,22 +462,23 @@ void GetWorkBytes(int width, int height, int& nnBytes, int& blockBytes) {
 void CopyPadCUDA(int pixelsize, pixel_t* ref, int refpitch, const pixel_t* src, int srcpitch, int width, int height, IScriptEnvironment2* env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
+  cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-    kl_copy<<<blocks, threads>>>((vpixel_t*)ref, refpitch / 4, (const vpixel_t*)src, srcpitch / 4, width / 4, height);
+    kl_copy<<<blocks, threads, 0, stream>>>((vpixel_t*)ref, refpitch / 4, (const vpixel_t*)src, srcpitch / 4, width / 4, height);
     DEBUG_SYNC;
   }
   {
     dim3 threads(32, 16);
     dim3 blocks(2, nblocks(height, threads.y));
-    kl_pad_h<<<blocks, threads>>>(ref, refpitch, 32, width, height);
+    kl_pad_h<<<blocks, threads, 0, stream>>>(ref, refpitch, 32, width, height);
     DEBUG_SYNC;
   }
   {
     dim3 threads(32, 3);
     dim3 blocks(nblocks(width + 64, threads.x), 2);
-    kl_pad_v<<<blocks, threads>>>(ref - 32, refpitch, 3, width + 64, height);
+    kl_pad_v<<<blocks, threads, 0, stream>>>(ref - 32, refpitch, 3, width + 64, height);
     DEBUG_SYNC;
   }
 }
@@ -485,9 +486,10 @@ void CopyPadCUDA(int pixelsize, pixel_t* ref, int refpitch, const pixel_t* src, 
 void BitBltCUDA(pixel_t* dst, int dstpitch, const pixel_t* src, int srcpitch, int width, int height, IScriptEnvironment2* env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
+  cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_copy << <blocks, threads >> >((vpixel_t*)dst, dstpitch / 4, (const vpixel_t*)src, srcpitch / 4, width / 4, height);
+  kl_copy << <blocks, threads, 0, stream >> >((vpixel_t*)dst, dstpitch / 4, (const vpixel_t*)src, srcpitch / 4, width / 4, height);
   DEBUG_SYNC;
 }
 
@@ -515,12 +517,14 @@ private:
     pixel_t* dst, int dstpitch, const pixel_t* ref, int refpitch, uchar2* workNN, int* workBlock,
     const int16_t* weights1, int weights1pitch, int val_min, int val_max, IScriptEnvironment2* env)
   {
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     const short2* ws = (const short2*)weights1;
     const float2* wf = (const float2 *)&ws[NN*READ::K];
 
     dim3 threads(NN_BLOCK_W, NN_BLOCK_H);
 
-    kl_compute_nn<pixel_t, QUAL, NN, READ> << <preblock, threads >> >(
+    kl_compute_nn<pixel_t, QUAL, NN, READ> << <preblock, threads, 0, stream >> >(
       dst, dstpitch, ref, refpitch, workNN, workBlock, ws, weights1pitch / 2, wf, weights1pitch / 4, val_min, val_max);
     DEBUG_SYNC;
   }
@@ -591,6 +595,8 @@ void EvalCUDA(int pixelsize, int bits_per_pixel,
     break;
   }
 
+  cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
   int dstpitch4 = dstpitch / 4;
   int refpitch4 = refpitch / 4;
   int width4 = width / 4;
@@ -603,7 +609,7 @@ void EvalCUDA(int pixelsize, int bits_per_pixel,
     
   dim3 threads(PRE_BLOCK_W, PRE_BLOCK_H);
   dim3 blocks(nblocks(width4, PRE_BLOCK_W), nblocks(height, PRE_BLOCK_H));
-  kl_prescreening<vpixel_t><<<blocks, threads>>>(
+  kl_prescreening<vpixel_t><<<blocks, threads, 0, stream>>>(
     (vpixel_t*)dst, dstpitch4, (const vpixel_t*)(ref - refpitch - 8), refpitch4,
     ws, wf, workNN, workBlock, width4, height, val_min, val_max);
   DEBUG_SYNC;
