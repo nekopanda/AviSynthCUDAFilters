@@ -139,7 +139,7 @@
 #	QTGMC( Preset="Slow", ShowSettings=true )
 
 
-function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", int "Rep0", int "Rep1", int "Rep2", string "EdiMode", bool "RepChroma", \
+function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", int "Rep0", int "Rep1", int "Rep2", string "EdiMode", bool "RepChroma", \
                     int "NNSize", int "NNeurons", int "EdiQual", int "EdiMaxD", string "ChromaEdi", int "EdiThreads", clip "EdiExt", float "Sharpness", \
                     int "SMode", int "SLMode", int "SLRad", int "SOvs", float "SVThin", int "Sbb", int "SrchClipPP", int "SubPel", int "SubPelInterp", \
                     int "BlockSize", int "Overlap", int "Search", int "SearchParam", int "PelSearch", bool "ChromaMotion", bool "TrueMotion", int "Lambda", \
@@ -155,11 +155,11 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# EdiMode="RepcYadif"/"cYadif" require the Yadif plugin, which doesn't autoload. Typically the calling script would load it.
 
 	# Temporary Warnings
-	Assert( !defined(BT),            "QTGMC: Setting BT has been replaced by setting NoiseTR" )
-	Assert( !defined(DetailRestore), "QTGMC: Setting DetailRestore has been renamed to GrainRestore" )
-	Assert( !defined(MotionBlur),    "QTGMC: Setting MotionBlur has been renamed to ShutterBlur" )
-	Assert( !defined(MBlurLimit),    "QTGMC: Setting MBlurLimit has been renamed to SBlurLimit" )
-	Assert( !defined(NoiseBypass),   "QTGMC: Setting NoiseBypass has been renamed to NoiseProcess" )
+	Assert( !defined(BT),            "KTGMC: Setting BT has been replaced by setting NoiseTR" )
+	Assert( !defined(DetailRestore), "KTGMC: Setting DetailRestore has been renamed to GrainRestore" )
+	Assert( !defined(MotionBlur),    "KTGMC: Setting MotionBlur has been renamed to ShutterBlur" )
+	Assert( !defined(MBlurLimit),    "KTGMC: Setting MBlurLimit has been renamed to SBlurLimit" )
+	Assert( !defined(NoiseBypass),   "KTGMC: Setting NoiseBypass has been renamed to NoiseProcess" )
 
 	#---------------------------------------
 	# Presets
@@ -171,7 +171,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
     TV_range     = default( TV_range,   !(Isrgb(input)))
 
         sispmt = Findstr(VersionString(), "AviSynth+") != 0 && Findstr(VersionString(), "r1576") == 0
-	sispmt ? Assert( !(Input.BitsPerComponent() > 8 && (lsb || lsbd)), "QTGMC: lsb hack is not Compatible with native high bit depth" ) : nop()
+	sispmt ? Assert( !(Input.BitsPerComponent() > 8 && (lsb || lsbd)), "KTGMC: lsb hack is not Compatible with native high bit depth" ) : nop()
 
 	# Select presets / tuning
 	Preset = default( Preset, "Slower" )
@@ -333,7 +333,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	SVThin     = default( SVThin, 0.0 )
 
 	# Noise processing settings
-	Assert( !defined(EZDenoise) || EZDenoise <= 0.0 || !defined(EZKeepGrain) || EZKeepGrain <= 0.0, "QTGMC: EZDenoise and EZKeepGrain cannot be used together" )
+	Assert( !defined(EZDenoise) || EZDenoise <= 0.0 || !defined(EZKeepGrain) || EZKeepGrain <= 0.0, "KTGMC: EZDenoise and EZKeepGrain cannot be used together" )
 	NoiseProcess = defined(NoiseProcess) ? NoiseProcess : \
 	               (defined(EZDenoise)   && EZDenoise   > 0.0)    ? 1 : \
 	               (defined(EZKeepGrain) && EZKeepGrain > 0.0)    ? 2 : \
@@ -389,7 +389,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	InputType      = default( InputType,     0        )
 	Border         = default( Border,        false    )
 	ShowSettings   = default( ShowSettings,  false    )
-	GlobalNames    = default( GlobalNames,  "QTGMC"   )
+	GlobalNames    = default( GlobalNames,  "KTGMC"   )
 	PrevGlobals    = default( PrevGlobals,  "Replace" )
 	ForceTR        = default( ForceTR,       0        )
 	ReplaceGlobals = (PrevGlobals == "Replace" || PrevGlobals == "Reuse") # If reusing existing globals put them back afterwards - simplifies logic later
@@ -433,23 +433,23 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	planarClip = yuy2 ? clip.nonyuy2clipin(true) : clip
 
 	# Bob the input as a starting point for motion search clip
-	bobbed = (InputType == 0) ? useEdiExt ? isyuy2(EdiExt) ? EdiExt.nonyuy2clipin(true) : EdiExt : planarClip.QTGMC_Bob( 0,0.5 ) : \
+	bobbed = (InputType == 0) ? useEdiExt ? isyuy2(EdiExt) ? EdiExt.nonyuy2clipin(true) : EdiExt : planarClip.KTGMC_Bob( 0,0.5 ) : \
 	         (InputType == 1) ? planarClip : \
 	                            planarClip.Blur( 0,1 )
 
 	# If required, get any existing global clips with a matching "GlobalNames" setting. Unmatched values get NOP (= 0)
-	srchClip  = QTGMC_GetUserGlobal( GlobalNames, "srchClip",  ReuseGlobals )
-	srchSuper = QTGMC_GetUserGlobal( GlobalNames, "srchSuper", ReuseGlobals )
-	bVec1     = QTGMC_GetUserGlobal( GlobalNames, "bVec1",     ReuseGlobals )
-	fVec1     = QTGMC_GetUserGlobal( GlobalNames, "fVec1",     ReuseGlobals )
-	bVec2     = QTGMC_GetUserGlobal( GlobalNames, "bVec2",     ReuseGlobals )
-	fVec2     = QTGMC_GetUserGlobal( GlobalNames, "fVec2",     ReuseGlobals )
-	bVec3     = QTGMC_GetUserGlobal( GlobalNames, "bVec3",     ReuseGlobals )
-	fVec3     = QTGMC_GetUserGlobal( GlobalNames, "fVec3",     ReuseGlobals )
-	bVec4     = QTGMC_GetUserGlobal( GlobalNames, "bVec4",     ReuseGlobals )
-	fVec4     = QTGMC_GetUserGlobal( GlobalNames, "fVec4",     ReuseGlobals )
-	bVec5     = QTGMC_GetUserGlobal( GlobalNames, "bVec5",     ReuseGlobals )
-	fVec5     = QTGMC_GetUserGlobal( GlobalNames, "fVec5",     ReuseGlobals )
+	srchClip  = KTGMC_GetUserGlobal( GlobalNames, "srchClip",  ReuseGlobals )
+	srchSuper = KTGMC_GetUserGlobal( GlobalNames, "srchSuper", ReuseGlobals )
+	bVec1     = KTGMC_GetUserGlobal( GlobalNames, "bVec1",     ReuseGlobals )
+	fVec1     = KTGMC_GetUserGlobal( GlobalNames, "fVec1",     ReuseGlobals )
+	bVec2     = KTGMC_GetUserGlobal( GlobalNames, "bVec2",     ReuseGlobals )
+	fVec2     = KTGMC_GetUserGlobal( GlobalNames, "fVec2",     ReuseGlobals )
+	bVec3     = KTGMC_GetUserGlobal( GlobalNames, "bVec3",     ReuseGlobals )
+	fVec3     = KTGMC_GetUserGlobal( GlobalNames, "fVec3",     ReuseGlobals )
+	bVec4     = KTGMC_GetUserGlobal( GlobalNames, "bVec4",     ReuseGlobals )
+	fVec4     = KTGMC_GetUserGlobal( GlobalNames, "fVec4",     ReuseGlobals )
+	bVec5     = KTGMC_GetUserGlobal( GlobalNames, "bVec5",     ReuseGlobals )
+	fVec5     = KTGMC_GetUserGlobal( GlobalNames, "fVec5",     ReuseGlobals )
 
 	CMmt = ChromaMotion ? 3   :  1
 	CMts = ChromaMotion ? 255 :  0
@@ -470,7 +470,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	                               (ChromaMotion ? ts1.Merge( ts2, 0.357 ).Merge( bobbed, 0.125 ) : ts1.MergeLuma( ts2, 0.357 ).MergeLuma( bobbed, 0.125 ))
 
 	# Remove areas of difference between temporal blurred motion search clip and bob that are not due to bob-shimmer - removes general motion blur
-	repair0 = (IsClip(srchClip) || Rep0 == 0) ? binomial0 : binomial0.QTGMC_KeepOnlyBobShimmerFixes( bobbed, Rep0, (RepChroma && ChromaMotion) )
+	repair0 = (IsClip(srchClip) || Rep0 == 0) ? binomial0 : binomial0.KTGMC_KeepOnlyBobShimmerFixes( bobbed, Rep0, (RepChroma && ChromaMotion) )
 
 	# Blur image and soften edges to assist in motion matching of edge blocks. Blocks are matched by SAD (sum of absolute differences between blocks), but even
 	# a slight change in an edge from frame to frame will give a high SAD due to the higher contrast of edges
@@ -531,18 +531,18 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
 
 	# Expose search clip, motion search super clip and motion vectors to calling script through globals
-	QTGMC_SetUserGlobal( GlobalNames, "srchClip",  srchClip,  ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "srchSuper", srchSuper, ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "bVec1",     bVec1,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "fVec1",     fVec1,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "bVec2",     bVec2,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "fVec2",     fVec2,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "bVec3",     bVec3,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "fVec3",     fVec3,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "bVec4",     bVec4,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "fVec4",     fVec4,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "bVec5",     bVec5,     ReplaceGlobals )
-	QTGMC_SetUserGlobal( GlobalNames, "fVec5",     fVec5,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "srchClip",  srchClip,  ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "srchSuper", srchSuper, ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "bVec1",     bVec1,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "fVec1",     fVec1,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "bVec2",     bVec2,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "fVec2",     fVec2,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "bVec3",     bVec3,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "fVec3",     fVec3,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "bVec4",     bVec4,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "fVec4",     fVec4,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "bVec5",     bVec5,     ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "fVec5",     fVec5,     ReplaceGlobals )
 
 
 	#---------------------------------------
@@ -553,7 +553,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# Expand fields to full frame size before extracting noise (allows use of motion vectors which are frame-sized)
 	fullClip  = (NoiseProcess == 0) ? NOP() : \
 	            (InputType > 0)     ? clip : \
-	                                  clip.QTGMC_Bob( 0,1.0 )
+	                                  clip.KTGMC_Bob( 0,1.0 )
 	fullClip  = (yuy2 && NoiseTR > 0) ? fullClip.nonyuy2clipin(true) : fullClip
 	fullSuper = (NoiseTR > 0)         ? fullClip.MSuper( pel=SubPel, levels=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise ) : NOP() #TEST chroma OK?
 
@@ -595,8 +595,8 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	noise = (totalRestore > 0.0)  ? mt_makediff( planarClip, planarDenoised, U=CNmt1,V=CNmt1 ) : NOP()
 	deintNoise = (NoiseProcess == 0 || totalRestore == 0.0) ? NOP() : \
 	             (InputType != 0)                           ? noise : \
-	             (NoiseDeint == "Bob")                      ? noise.QTGMC_Bob( 0,0.5 ) : \
-	             (NoiseDeint == "Generate")                 ? noise.QTGMC_Generate2ndFieldNoise( denoised, ChromaNoise ) : \
+	             (NoiseDeint == "Bob")                      ? noise.KTGMC_Bob( 0,0.5 ) : \
+	             (NoiseDeint == "Generate")                 ? noise.KTGMC_Generate2ndFieldNoise( denoised, ChromaNoise ) : \
 	                                                          noise.DoubleWeave()
 	# Motion-compensated stabilization of generated noise
 	noiseSuper = (StabilizeNoise) ? deintNoise.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad, chroma=ChromaNoise ) : NOP()
@@ -612,12 +612,12 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 
 	# >>>> Interleaved YUY2 for interpolation
 
-	# Support badly deinterlaced progressive content - drop half the fields and reweave to get 1/2fps interlaced stream appropriate for QTGMC processing
+	# Support badly deinterlaced progressive content - drop half the fields and reweave to get 1/2fps interlaced stream appropriate for KTGMC processing
 	ediInput = (InputType == 2 || InputType == 3) ? innerClip.SeparateFields().SelectEvery(4,0,3).Weave() : innerClip
 
 	# Create interpolated image as starting point for output
 	edi1 = defined(EdiExt) ? EdiExt.PointResize( w,h, 0,(EdiExt.Height()-h)/2, -0,h+epsilon ) : \
-	                         QTGMC_Interpolate( ediInput, InputType, EdiMode, NNSize, NNeurons, EdiQual, EdiMaxD, EdiThreads, bobbed, ChromaEdi )
+	                         KTGMC_Interpolate( ediInput, InputType, EdiMode, NNSize, NNeurons, EdiQual, EdiMaxD, EdiThreads, bobbed, ChromaEdi )
 
 	# >>>> Switch to planar YUY2 during next step - remains planar until very end of script except blurring for back blending & SVThin
 
@@ -658,11 +658,11 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	                         degrain1.Merge( degrain2, 0.2 ).Merge( edi, 0.0625 )
 
 	# Remove areas of difference between smoothed image and interpolated image that are not bob-shimmer fixes: repairs residual motion blur from temporal smooth
-	repair1 = (Rep1 == 0) ? binomial1 : binomial1.QTGMC_KeepOnlyBobShimmerFixes( edi, Rep1, RepChroma )
+	repair1 = (Rep1 == 0) ? binomial1 : binomial1.KTGMC_KeepOnlyBobShimmerFixes( edi, Rep1, RepChroma )
 
 	# Apply source match - use difference between output and source to succesively refine output [extracted to function to clarify main code path]
 	match = (SourceMatch == 0) ? repair1 : \
-	                             repair1.QTGMC_ApplySourceMatch( InputType, ediInput, bVec1,fVec1, bVec2,fVec2, SubPel, SubPelInterp, hpad, vpad, \
+	                             repair1.KTGMC_ApplySourceMatch( InputType, ediInput, bVec1,fVec1, bVec2,fVec2, SubPel, SubPelInterp, hpad, vpad, \
 	                                                             ThSAD1, ThSCD1, ThSCD2, SourceMatch, MatchTR1, MatchEdi, MatchNNSize, MatchNNeurons, \
 	                                                             MatchEdiQual, MatchEdiMaxD, MatchTR2, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, \
 	                                                             MatchEdiMaxD2, MatchEnhance, EdiThreads, lsb )
@@ -670,7 +670,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# Lossless=2 - after preparing an interpolated, de-shimmered clip, restore the original source fields into it and clean up any artefacts.
 	# This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail.
 	# However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage).
-	lossed1 = (Lossless == 2) ? QTGMC_MakeLossless( match, innerClip, InputType ) : match
+	lossed1 = (Lossless == 2) ? KTGMC_MakeLossless( match, innerClip, InputType ) : match
 
 
 	#---------------------------------------
@@ -722,7 +722,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	stable  = (TR2 > 0) && lsb ? stable.ditherpost(mode=6, slice=false) : stable
 
 	# Remove areas of difference between final output & basic interpolated image that are not bob-shimmer fixes: repairs motion blur caused by temporal smooth
-	repair2 = (Rep2 == 0) ? stable : stable.QTGMC_KeepOnlyBobShimmerFixes( edi, Rep2, RepChroma )
+	repair2 = (Rep2 == 0) ? stable : stable.KTGMC_KeepOnlyBobShimmerFixes( edi, Rep2, RepChroma )
 
 	# Limit over-sharpening by clamping to neighboring (spatial or temporal) min/max values in original
 	# Occurs here (after final temporal smooth) if SLMode == 3,4. Allows more sharpening here, but more prone to introducing minor artefacts
@@ -732,7 +732,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 
 	# Lossless=1 - inject source fields into result and clean up inevitable artefacts. Provided NoiseRestore=0.0 or 1.0, this mode will make the script result 
 	# properly lossless, but this will retain source artefacts and cause some combing (where the smoothed deinterlace doesn't quite match the source)
-	lossed2 = (Lossless == 1) ? QTGMC_MakeLossless( sharpLimit2, innerClip, InputType ) : sharpLimit2
+	lossed2 = (Lossless == 1) ? KTGMC_MakeLossless( sharpLimit2, innerClip, InputType ) : sharpLimit2
 
 	# Add back any extracted noise, after final temporal smooth. This will appear as noise/grain in the output
 	# Average luma of FFT3DFilter extracted noise is 128.5, so deal with that too
@@ -809,7 +809,7 @@ function QTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 # Helpers
 
 # Same as Bob, but keeps the field order the same.
-function QTGMC_Bob(clip cp, float "b", float "c", int "height" )
+function KTGMC_Bob(clip cp, float "b", float "c", int "height" )
 {
   ssispmt = Findstr(VersionString(), "AviSynth+") != 0 && Findstr(VersionString(), "r1576") == 0
   h = Default(height, cp.Height)
@@ -836,7 +836,7 @@ function QTGMC_Bob(clip cp, float "b", float "c", int "height" )
 
 # Interpolate input clip using method given in EdiMode. Use Fallback or Bob as result if mode not in list. If ChromaEdi string if set then interpolate chroma
 # separately with that method (only really useful for EEDIx). The function is used as main algorithm starting point and for first two source-match stages
-function QTGMC_Interpolate( clip Input, int InputType, string EdiMode, int NNSize, int NNeurons, int EdiQual, int EdiMaxD, int EdiThreads, clip "Fallback", \
+function KTGMC_Interpolate( clip Input, int InputType, string EdiMode, int NNSize, int NNeurons, int EdiQual, int EdiMaxD, int EdiThreads, clip "Fallback", \
                             string "ChromaEdi" )
 {
 	# >>>> YUY2 is interleaved here
@@ -855,17 +855,17 @@ function QTGMC_Interpolate( clip Input, int InputType, string EdiMode, int NNSiz
 	         (EdiMode == "Yadif")        ? isyuy2(Input) ? Input.nonyuy2clipin(true).Yadifmod2( mode=3 ).nonyuy2clipout(true) : Input.Yadifmod2( mode=3 ) : \
 	         (EdiMode == "cYadif")       ? Input.Yadif( mode=3 ) : \
 	         (EdiMode == "TDeint")       ? Input.TDeInt( mode=1 ) : \
-	         (EdiMode == "RepYadif")     ? isyuy2(Input) ? Repair( Input.nonyuy2clipin(true).Yadifmod2( mode=3 ), default( Fallback, Input.QTGMC_Bob( 0,0.5 ) ).nonyuy2clipin(true), 2, 0 ).nonyuy2clipout(true) : \
+	         (EdiMode == "RepYadif")     ? isyuy2(Input) ? Repair( Input.nonyuy2clipin(true).Yadifmod2( mode=3 ), default( Fallback, Input.KTGMC_Bob( 0,0.5 ) ).nonyuy2clipin(true), 2, 0 ).nonyuy2clipout(true) : \
                                                            Input.Yadifmod2( mode=3 ) : \	
-	         (EdiMode == "RepcYadif")    ? isyuy2(Input) ? Repair( Input.Yadif( mode=3 ).nonyuy2clipin(true), default( Fallback, Input.QTGMC_Bob( 0,0.5 ) ).nonyuy2clipin(true), 2, 0 ).nonyuy2clipout(true) : \
-	         	         	                       Repair( Input.Yadif( mode=3 ), default( Fallback, Input.QTGMC_Bob( 0,0.5 ) ), 2, 0 ) : \
-	                                       default( Fallback, Input.QTGMC_Bob( 0,0.5 ) )
+	         (EdiMode == "RepcYadif")    ? isyuy2(Input) ? Repair( Input.Yadif( mode=3 ).nonyuy2clipin(true), default( Fallback, Input.KTGMC_Bob( 0,0.5 ) ).nonyuy2clipin(true), 2, 0 ).nonyuy2clipout(true) : \
+	         	         	                       Repair( Input.Yadif( mode=3 ), default( Fallback, Input.KTGMC_Bob( 0,0.5 ) ), 2, 0 ) : \
+	                                       default( Fallback, Input.KTGMC_Bob( 0,0.5 ) )
 
 	interpuv = (InputType == 1)        ? NOP() : \
 	           (ChromaEdi == "NNEDI3") ? Input.NNEDI3( field=-2, nsize=4, nns=0, qual=1, threads=EdiThreads, Y=false ) : \
 	           (ChromaEdi == "Yadif")  ? isyuy2(Input) ? Input.nonyuy2clipin(true).Yadifmod2( mode=3 ).nonyuy2clipout(true) : Input.Yadifmod2( mode=3 ) : \
 	           (ChromaEdi == "cYadif") ? Input.Yadif( mode=3 ) : \
-	           (ChromaEdi == "Bob")    ? Input.QTGMC_Bob( 0,0.5 ) : \
+	           (ChromaEdi == "Bob")    ? Input.KTGMC_Bob( 0,0.5 ) : \
 			                             NOP()
 
 	return (!IsClip(interpuv)) ? interp : interp.MergeChroma( interpuv )
@@ -874,7 +874,7 @@ function QTGMC_Interpolate( clip Input, int InputType, string EdiMode, int NNSiz
 
 # Functions (from original TGMC) used instead of mt_xxflate with similar operation but a somewhat stronger result. Originally added for speed, they are
 # no longer faster due to improvements in masktools. Difference (visual and speed) is small so may be reverted in a later version.
-function QTGMC_inflate( clip c, int "Y", int "U", int "V" )
+function KTGMC_inflate( clip c, int "Y", int "U", int "V" )
 {
 	# >>>> YUY2 is planar here
 	mtY =default( Y, 3 )
@@ -886,7 +886,7 @@ function QTGMC_inflate( clip c, int "Y", int "U", int "V" )
 	mt_logic( c, c.RemoveGrain( rgY, rgU, rgV ), "max", Y=mtY,U=mtU,V=mtV )
 }
 
-function QTGMC_deflate( clip c, int "Y", int "U", int "V" )
+function KTGMC_deflate( clip c, int "Y", int "U", int "V" )
 {
 	# >>>> YUY2 is planar here
 	mtY =default( Y, 3 )
@@ -901,7 +901,7 @@ function QTGMC_deflate( clip c, int "Y", int "U", int "V" )
 # Helper function: Compare processed clip with reference clip: only allow thin, horizontal areas of difference, i.e. bob shimmer fixes
 # Rough algorithm: Get difference, deflate vertically by a couple of pixels or so, then inflate again. Thin regions will be removed
 #                  by this process. Restore remaining areas of difference back to as they were in reference clip.
-function QTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chroma )
+function KTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chroma )
 {
 	# >>>> YUY2 is planar here
 
@@ -921,7 +921,7 @@ function QTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chro
 	choke1 =                        diff.  mt_inpand( mode="vertical", U=RCrg,V=RCrg )            #      x x x x x x x x    1 pixel   \
 	choke1 = (ed > 2)             ? choke1.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke1   #      . . . x x x x x    1 pixel    |  Deflate to remove thin areas
 	choke1 = (ed > 5)             ? choke1.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke1   #      . . . . . . x x    1 pixel   /
-	choke1 = (ed % 3 != 0)        ? choke1.QTGMC_deflate( U=RCrg,V=RCrg )              : choke1   #      . x x . x x . x    A bit more deflate & some horizonal effect
+	choke1 = (ed % 3 != 0)        ? choke1.KTGMC_deflate( U=RCrg,V=RCrg )              : choke1   #      . x x . x x . x    A bit more deflate & some horizonal effect
 	choke1 = (ed == 2 || ed == 5) ? choke1.RemoveGrain( 4              )               : choke1   #      . . x . . x . .    Local median
                                                                                                                       
 	choke1 =                        choke1.mt_expand( mode="vertical", U=RCrg,V=RCrg )            #      x x x x x x x x    1 pixel  \
@@ -930,22 +930,22 @@ function QTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chro
 
 	# Over-dilation - extra reflation up to about 1 pixel
 	choke1 = (od == 0)            ? choke1 : \
-	         (od == 1)            ? choke1.QTGMC_inflate( U=RCrg,V=RCrg ) : \
-	         (od == 2)            ? choke1.QTGMC_inflate( U=RCrg,V=RCrg ).QTGMC_inflate( U=RCrg,V=RCrg ) : \
+	         (od == 1)            ? choke1.KTGMC_inflate( U=RCrg,V=RCrg ) : \
+	         (od == 2)            ? choke1.KTGMC_inflate( U=RCrg,V=RCrg ).KTGMC_inflate( U=RCrg,V=RCrg ) : \
 	                                choke1.mt_expand ( U=RCrg,V=RCrg )
 
 	# Areas of negative difference (similar to above)
 	choke2 =                        diff.  mt_expand( mode="vertical", U=RCrg,V=RCrg )         
 	choke2 = (ed > 2)             ? choke2.mt_expand( mode="vertical", U=RCrg,V=RCrg ) : choke2
 	choke2 = (ed > 5)             ? choke2.mt_expand( mode="vertical", U=RCrg,V=RCrg ) : choke2
-	choke2 = (ed % 3 != 0)        ? choke2.QTGMC_inflate( U=RCrg,V=RCrg )              : choke2
+	choke2 = (ed % 3 != 0)        ? choke2.KTGMC_inflate( U=RCrg,V=RCrg )              : choke2
 	choke2 = (ed == 2 || ed == 5) ? choke2.RemoveGrain( 4              )               : choke2
 	choke2 =                        choke2.mt_inpand( mode="vertical", U=RCrg,V=RCrg )
 	choke2 = (ed > 1)             ? choke2.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke2
 	choke2 = (ed > 4)             ? choke2.mt_inpand( mode="vertical", U=RCrg,V=RCrg ) : choke2
 	choke2 = (od == 0)            ? choke2 : \
-	         (od == 1)            ? choke2.QTGMC_deflate( U=RCrg,V=RCrg )  : \
-	         (od == 2)            ? choke2.QTGMC_deflate( U=RCrg,V=RCrg ).QTGMC_deflate( U=RCrg,V=RCrg ) : \
+	         (od == 1)            ? choke2.KTGMC_deflate( U=RCrg,V=RCrg )  : \
+	         (od == 2)            ? choke2.KTGMC_deflate( U=RCrg,V=RCrg ).KTGMC_deflate( U=RCrg,V=RCrg ) : \
 	                                choke2.mt_inpand ( U=RCrg,V=RCrg )
 
 	# Combine above areas to find those areas of difference to restore
@@ -958,7 +958,7 @@ function QTGMC_KeepOnlyBobShimmerFixes( clip Input, clip Ref, int Rep, bool Chro
 # Given noise extracted from an interlaced source (i.e. the noise is interlaced), generate "progressive" noise with a new "field" of noise injected. The new
 # noise is centered on a weighted local average and uses the difference between local min & max as an estimate of local variance
 # YUY2 clip input is planar, but must pass interleaved version of clip to setup noise
-function QTGMC_Generate2ndFieldNoise( clip Input, clip InterleavedClip, bool "ChromaNoise" )
+function KTGMC_Generate2ndFieldNoise( clip Input, clip InterleavedClip, bool "ChromaNoise" )
 {
 	# >>>> YUY2 is planar here. Noise is generated (AddGrainC) interleaved, but immediately made planar
 	ChromaNoise = default( ChromaNoise, false )
@@ -976,7 +976,7 @@ function QTGMC_Generate2ndFieldNoise( clip Input, clip InterleavedClip, bool "Ch
 
 # Insert the source lines into the result to create a true lossless output. However, the other lines in the result have had considerable processing and won't
 # exactly match source lines. There will be some slight residual combing. Use vertical medians to clean a little of this away
-function QTGMC_MakeLossless( clip Input, clip Source, int InputType )
+function KTGMC_MakeLossless( clip Input, clip Source, int InputType )
 {
 	Assert( InputType != 1, "Lossless modes are incompatible with InputType=1" )
 
@@ -1002,7 +1002,7 @@ function QTGMC_MakeLossless( clip Input, clip Source, int InputType )
 
 # Source-match, a three stage process that takes the difference between deinterlaced input and the original interlaced source, to shift the input more towards
 # the source without introducing shimmer. All other arguments defined in main script
-function QTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, val bVec1, val fVec1, val bVec2, val fVec2, \
+function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, val bVec1, val fVec1, val bVec2, val fVec2, \
                                  int SubPel, int SubPelInterp, int hpad, int vpad, int ThSAD1, int ThSCD1, int ThSCD2, int SourceMatch, \
                                  int MatchTR1, string MatchEdi, int MatchNNSize, int MatchNNeurons, int MatchEdiQual, int MatchEdiMaxD,\
                                  int MatchTR2, string MatchEdi2, int MatchNNSize2, int MatchNNeurons2, int MatchEdiQual2, int MatchEdiMaxD2, \
@@ -1028,9 +1028,9 @@ function QTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	noyv16ma1Edi   = MatchEdi =="NNEDI2" || MatchEdi =="NNEDI" || MatchEdi =="EEDI3+NNEDI3" || MatchEdi =="EEDI3" || MatchEdi =="EEDI2" || MatchEdi =="TDeint" || MatchEdi =="cYadif" || MatchEdi =="RepcYadif"
 	noyv16ma2Edi   = MatchEdi2=="NNEDI2" || MatchEdi2=="NNEDI" || MatchEdi2=="EEDI3+NNEDI3" || MatchEdi2=="EEDI3" || MatchEdi2=="EEDI2" || MatchEdi2=="TDeint" || MatchEdi2=="cYadif" || MatchEdi2=="RepcYadif"
 	match1Edi      = (SourceMatch == 0) ? NOP() : \
-	!noyv16ma1Edi || !yuy2 ? match1Update.QTGMC_Interpolate( InputType, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, EdiThreads ) : \
+	!noyv16ma1Edi || !yuy2 ? match1Update.KTGMC_Interpolate( InputType, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, EdiThreads ) : \
 	                         match1Update.nonyuy2clipout(true) \
-	                                     .QTGMC_Interpolate( InputType, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, EdiThreads ) \
+	                                     .KTGMC_Interpolate( InputType, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, EdiThreads ) \
 	                                     .nonyuy2clipin(true)
 	match1Super    = (SourceMatch > 0 && MatchTR1 > 0) ? match1Edi.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match1Degrain1 = (SourceMatch > 0 && MatchTR1 > 0) ? match1Edi.MDegrain1( match1Super, bVec1,fVec1, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
@@ -1052,9 +1052,9 @@ function QTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	match2Clip     = (SourceMatch < 2 || InputType == 1) ? match1Shp : match1Shp.SeparateFields().SelectEvery( 4, 0,3 ).Weave()
 	match2Diff     = (SourceMatch > 1) ? mt_makediff( Source, match2Clip, U=3,V=3 ) : NOP()
 	match2Edi      = (SourceMatch <= 1) ? NOP() : \
-	!noyv16ma2Edi || !yuy2 ? match2Diff.QTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) : \
+	!noyv16ma2Edi || !yuy2 ? match2Diff.KTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) : \
 	                         match2Diff.nonyuy2clipout(true) \
-	                                   .QTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) \
+	                                   .KTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) \
 	                                   .nonyuy2clipin(true)
 	match2Super    = (SourceMatch > 1 && MatchTR2 > 0) ? match2Edi.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match2Degrain1 = (SourceMatch > 1 && MatchTR2 > 0) ? match2Edi.MDegrain1( match2Super, bVec1,fVec1, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
@@ -1086,7 +1086,7 @@ function QTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 
 
 # Set global variable called "Prefix_Name" to "Value". Throws exception if global already exists unless Replace=true, in which case the global is overwritten
-function QTGMC_SetUserGlobal( string Prefix, string Name, val Value, bool "Replace" )
+function KTGMC_SetUserGlobal( string Prefix, string Name, val Value, bool "Replace" )
 {
 	Replace = default( Replace, false )
 	globalName = Prefix + "_" + Name
@@ -1099,11 +1099,11 @@ function QTGMC_SetUserGlobal( string Prefix, string Name, val Value, bool "Repla
 		Eval( "global " + globalName + " = Value" )
 		Replace = true
 	}
-	Assert( Replace, """Multiple calls to QTGMC, set PrevGlobals="Replace" or read documentation on 'Multiple QTGMC Calls'""" )
+	Assert( Replace, """Multiple calls to KTGMC, set PrevGlobals="Replace" or read documentation on 'Multiple KTGMC Calls'""" )
 }
 
 # Return value of global variable called "Prefix_Name". Returns NOP() if it doesn't exist or Reuse is false
-function QTGMC_GetUserGlobal( string Prefix, string Name, bool "Reuse" )
+function KTGMC_GetUserGlobal( string Prefix, string Name, bool "Reuse" )
 {
 	Reuse = default( Reuse, false )
 	globalName = Prefix + "_" + Name
