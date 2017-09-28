@@ -20,6 +20,15 @@
 
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
+static int GetDeviceType(const PClip& clip)
+{
+  int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  if (devtypes == 0) {
+    return DEV_TYPE_CPU;
+  }
+  return devtypes;
+}
+
 enum MVPlaneSet
 {
   YPLANE = 1,
@@ -878,7 +887,7 @@ public:
   
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   };
@@ -2909,7 +2918,7 @@ public:
       return MT_MULTI_INSTANCE;
     }
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   }
@@ -3067,7 +3076,7 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   };
@@ -3195,6 +3204,191 @@ public:
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
     return new KMSuperCheck(args[0].AsClip(), args[1].AsClip(), args[2].AsClip(), env);
+  }
+};
+
+// KMAnalyze偽装したMAnalyzeデータ
+class KMVReplaceWithMV : public GenericVideoFilter
+{
+  PClip mvv;
+
+  const KMVParam* params;
+
+  void GetMVData(int n, const int*& pMv, int& data_size, IScriptEnvironment2* env)
+  {
+    VideoInfo vi = mvv->GetVideoInfo();
+    PVideoFrame mmvframe = mvv->GetFrame(n, env);
+
+    // vector clip is rgb32
+    const int		bytes_per_pix = vi.BitsPerPixel() >> 3;
+    // for calculation of buffer size 
+
+    const int		line_size = vi.width * bytes_per_pix;	// in bytes
+    data_size = vi.height * line_size / sizeof(int);	// in 32-bit words
+
+    pMv = reinterpret_cast<const int*>(mmvframe->GetReadPtr());
+    int header_size = pMv[0];
+    int nMagicKey1 = pMv[1];
+    if (nMagicKey1 != 0x564D)
+    {
+      env->ThrowError("MVTools: invalid vector stream");
+    }
+    int nVersion1 = pMv[2];
+    if (nVersion1 != 5)
+    {
+      env->ThrowError("MVTools: incompatible version of vector stream");
+    }
+
+    // 17.05.22 filling from motion vector clip
+    const int		hs_i32 = header_size / sizeof(int);
+    pMv += hs_i32;									// go to data - v1.8.1
+    data_size -= hs_i32;
+  }
+
+public:
+  KMVReplaceWithMV(PClip kmv, PClip mvv, IScriptEnvironment2* env)
+    : GenericVideoFilter(kmv)
+    , mvv(mvv)
+    , params(KMVParam::GetParam(kmv->GetVideoInfo(), env))
+  {
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    const int* pMv;
+    int data_size;
+    GetMVData(n, pMv, data_size, env);
+
+    std::vector<LevelInfo> linfo = params->levelInfo;
+    PVideoFrame ret = env->NewVideoFrame(vi);
+    VECTOR* kdata = reinterpret_cast<VECTOR*>(ret->GetWritePtr());
+
+    // validity
+    ret->SetProps(GetAnalyzeValidPropName(), pMv[1]);
+    pMv += 2;
+
+    // mvデータ
+    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+      int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+      int length = pMv[0];
+
+      for (int v = 0; v < nBlkCount; ++v) {
+        VECTOR mmv = { pMv[v * 3 + 1], pMv[v * 3 + 2], pMv[v * 3 + 3] };
+        kdata[v] = mmv;
+      }
+
+      pMv += length;
+      kdata += linfo[i].nBlkX * linfo[i].nBlkY;
+    }
+
+    return ret;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KMVReplaceWithMV(args[0].AsClip(), args[1].AsClip(), env);
+  }
+};
+
+// MAnalyze偽装したKMAnalyzeデータ
+class MVReplaceWithKMV : public GenericVideoFilter
+{
+  PClip kmv;
+
+  const KMVParam* params;
+
+  // ヘッダなどのデータの再現は大変なので、
+  // 1枚だけmvtoolsからフレームを取得して
+  // コピーして、テンプレートにしておく
+  std::vector<int> tmpldata;
+
+  void GetTemplateData(int n, IScriptEnvironment2* env)
+  {
+    PVideoFrame mmvframe = child->GetFrame(n, env);
+
+    // vector clip is rgb32
+    const int		bytes_per_pix = vi.BitsPerPixel() >> 3;
+    // for calculation of buffer size 
+
+    const int		line_size = vi.width * bytes_per_pix;	// in bytes
+    int data_size = vi.height * line_size / sizeof(int);	// in 32-bit words
+
+    const int* pMv = reinterpret_cast<const int*>(mmvframe->GetReadPtr());
+    int header_size = pMv[0];
+    int nMagicKey1 = pMv[1];
+    if (nMagicKey1 != 0x564D)
+    {
+      env->ThrowError("MVTools: invalid vector stream");
+    }
+    int nVersion1 = pMv[2];
+    if (nVersion1 != 5)
+    {
+      env->ThrowError("MVTools: incompatible version of vector stream");
+    }
+
+    tmpldata.assign(pMv, pMv + data_size);
+  }
+
+public:
+  MVReplaceWithKMV(PClip mvv, PClip kmv, IScriptEnvironment2* env)
+    : GenericVideoFilter(mvv)
+    , kmv(kmv)
+    , params(KMVParam::GetParam(kmv->GetVideoInfo(), env))
+  {
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    // テンプレート取得
+    if (tmpldata.size() == 0) {
+      GetTemplateData(n, env);
+    }
+
+    PVideoFrame kmvframe = kmv->GetFrame(n, env);
+    const VECTOR* kdata = reinterpret_cast<const VECTOR*>(kmvframe->GetReadPtr());
+
+    PVideoFrame ret = env->NewVideoFrame(vi);
+    std::vector<LevelInfo> linfo = params->levelInfo;
+    int* pMv = reinterpret_cast<int*>(ret->GetWritePtr());
+
+    // テンプレートからコピー
+    std::copy(tmpldata.begin(), tmpldata.end(), pMv);
+
+    pMv += pMv[0] / sizeof(int);
+
+    // validity
+    bool isValid = (kmvframe->GetProps(GetAnalyzeValidPropName())->GetInt() != 0);
+    pMv[1] = isValid;
+    pMv += 2;
+
+    // mvデータ
+    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+      int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+      int length = pMv[0];
+
+      for (int v = 0; v < nBlkCount; ++v) {
+        VECTOR kmv = kdata[v];
+        pMv[v * 3 + 1] = kmv.x;
+        pMv[v * 3 + 2] = kmv.y;
+        pMv[v * 3 + 3] = kmv.sad;
+      }
+
+      pMv += length;
+      kdata += linfo[i].nBlkX * linfo[i].nBlkY;
+    }
+
+    return ret;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new MVReplaceWithKMV(args[0].AsClip(), args[1].AsClip(), env);
   }
 };
 
@@ -4608,7 +4802,12 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+      int devtypes = DEV_TYPE_CPU | DEV_TYPE_CUDA;
+      for (int i = 0; i < 2; ++i) {
+        if (rawClipB[i]) devtypes &= GetDeviceType(rawClipB[i]);
+        if (rawClipF[i]) devtypes &= GetDeviceType(rawClipF[i]);
+      }
+      return devtypes;
     }
     return 0;
   };
@@ -5131,7 +5330,10 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return DEV_TYPE_CPU | DEV_TYPE_CUDA;
+      return GetDeviceType(child) &
+        GetDeviceType(super) &
+        GetDeviceType(vectors) &
+        (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   };
@@ -5225,4 +5427,7 @@ void AddFuncMV(IScriptEnvironment2* env)
   env->AddFunction("KMSuperCheck", "[kmsuper]c[mvsuper]c[view]c", KMSuperCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck", "[kmanalyze]c[mvanalyze]c[view]c", KMAnalyzeCheck::Create, 0);
   env->AddFunction("KMAnalyzeCheck2", "[kmanalyze1]c[kmanalyze2]c[view]c", KMAnalyzeCheck2::Create, 0);
+
+  env->AddFunction("KMVReplaceWithMV", "[kmv]c[mvv]c", KMVReplaceWithMV::Create, 0);
+  env->AddFunction("MVReplaceWithKMV", "[mvv]c[kmv]c", MVReplaceWithKMV::Create, 0);
 }

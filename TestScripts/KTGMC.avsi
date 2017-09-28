@@ -1,9 +1,12 @@
 #-------------------------------------------------------------------#
 #                                                                   #
-#           QTGMC 3.357, by Vit, 2012, 2017 mod by A.SONY           #
+#                  KTGMC 0.1, by Nekopanda, 2017                    #
 #                                                                   #
-#   A high quality deinterlacer using motion-compensated temporal   #
-#  smoothing, with a range of features for quality and convenience  #
+#        base on QTGMC 3.357, by Vit, 2012, 2017 mod by A.SONY      #
+#                                                                   #
+#          CUDA accelerated high quality deinterlacer               #
+#         using motion-compensated temporal smoothing,              #
+#       with a range of features for quality and convenience        #
 #          Originally based on TempGaussMC_beta2 by Didée           #
 #                                                                   #
 #-------------------------------------------------------------------#
@@ -481,50 +484,51 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	              (SrchClipPP < 3)  ? spatialBlur : \
 	                                  repair0.KTGMC_TweakSearchClip( bobbed, spatialBlur, U=CMmt,V=CMmt )
 	srchClip    = tv_range && !srchcheck ? srchClip.KTGMC_ToFullRange( U=CMmt,V=CMmt ) : srchClip
-	return srchClip
 	# Calculate forward and backward motion vectors from motion search clip
 	srchSuper = IsClip(srchSuper) ? srchSuper : \
 	            (maxTR > 0)       ? srchClip.KMSuper( pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion ) : NOP()
+	# partial super for CPU calculation
+	srchSuperP = (maxTR > 0)      ? srchSuper.KMPartialSuper().OnCUDA(1) : NOP()
 	bVec5 = IsClip(bVec5) ? bVec5 : \
-	        (maxTR > 4)   ? srchSuper.MAnalyse( isb=true,  delta=5, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 4)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true, 5, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	bVec4 = IsClip(bVec4) ? bVec4 : \
-	        (maxTR > 3)   ? srchSuper.MAnalyse( isb=true,  delta=4, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 3)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true,  4, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	bVec3 = IsClip(bVec3) ? bVec3 : \
-	        (maxTR > 2)   ? srchSuper.MAnalyse( isb=true,  delta=3, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 2)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true,  3, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	bVec2 = IsClip(bVec2) ? bVec2 : \
-	        (maxTR > 1)   ? srchSuper.MAnalyse( isb=true,  delta=2, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 1)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true,  2, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	bVec1 = IsClip(bVec1) ? bVec1 : \
-	        (maxTR > 0)   ? srchSuper.MAnalyse( isb=true,  delta=1, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 0)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true,  1, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	fVec1 = IsClip(fVec1) ? fVec1 : \
-	        (maxTR > 0)   ? srchSuper.MAnalyse( isb=false, delta=1, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 0)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, false, 1, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	fVec2 = IsClip(fVec2) ? fVec2 : \
-	        (maxTR > 1)   ? srchSuper.MAnalyse( isb=false, delta=2, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 1)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, false, 2, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	fVec3 = IsClip(fVec3) ? fVec3 : \
-	        (maxTR > 2)   ? srchSuper.MAnalyse( isb=false, delta=3, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 2)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, false, 3, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	fVec4 = IsClip(fVec4) ? fVec4 : \
-	        (maxTR > 3)   ? srchSuper.MAnalyse( isb=false, delta=4, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 3)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, false, 4, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 	fVec5 = IsClip(fVec5) ? fVec5 : \
-	        (maxTR > 4)   ? srchSuper.MAnalyse( isb=false, delta=5, blksize=BlockSize, overlap=Overlap, search=Search, searchparam=SearchParam, \
-	                                            pelsearch=PelSearch, truemotion=TrueMotion, lambda=Lambda, lsad=LSAD, pnew=PNew, plevel=PLevel, \
-	                                            global=GlobalMotion, DCT=DCT, chroma=ChromaMotion ) : NOP()
+	        (maxTR > 4)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, false, 5, BlockSize, Overlap, Search, SearchParam, \
+	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
+	                                            GlobalMotion, DCT, ChromaMotion, analyzeBatch ) : NOP()
 
 	# Expose search clip, motion search super clip and motion vectors to calling script through globals
 	KTGMC_SetUserGlobal( GlobalNames, "srchClip",  srchClip,  ReplaceGlobals )
@@ -540,6 +544,14 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	KTGMC_SetUserGlobal( GlobalNames, "bVec5",     bVec5,     ReplaceGlobals )
 	KTGMC_SetUserGlobal( GlobalNames, "fVec5",     fVec5,     ReplaceGlobals )
 
+	# replace with the reference vectors for debug
+	refvector = false
+	bVec1 = refvector ? KMVReplaceWithMV(bVec1.OnCUDA(0), QTGMC_bVec1).OnCPU(0) : bVec1
+	fVec1 = refvector ? KMVReplaceWithMV(fVec1.OnCUDA(0), QTGMC_fVec1).OnCPU(0) : fVec1
+	bVec2 = refvector ? KMVReplaceWithMV(bVec2.OnCUDA(0), QTGMC_bVec2).OnCPU(0) : bVec2
+	fVec2 = refvector ? KMVReplaceWithMV(fVec2.OnCUDA(0), QTGMC_fVec2).OnCPU(0) : fVec2
+	#bVec3 = refvector ? KMVReplaceWithMV(bVec3.OnCUDA(0), QTGMC_bVec3).OnCPU(0) : bVec3
+	#fVec3 = refvector ? KMVReplaceWithMV(fVec3.OnCUDA(0), QTGMC_fVec3).OnCPU(0) : fVec3
 
 	#---------------------------------------
 	# Noise Processing
@@ -625,16 +637,13 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 											            mt_merge( innerClip.nonyuy2clipin(true), edi1.nonyuy2clipin(true), inputTypeBlend, U=2,V=2 ))
 
 	# Get the max/min value for each pixel over neighboring motion-compensated frames - used for temporal sharpness limiting
-	ediSuper = (TR1 > 0 || temporalSL)   ? edi.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
-	bComp1   = (temporalSL)              ? edi.MCompensate( ediSuper, bVec1, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
-	fComp1   = (temporalSL)              ? edi.MCompensate( ediSuper, fVec1, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
-	tMax     = (temporalSL)              ? edi.mt_logic( fComp1, "max", U=3,V=3 ).mt_logic( bComp1, "max", U=3,V=3 )    : NOP()
-	tMin     = (temporalSL)              ? edi.mt_logic( fComp1, "min", U=3,V=3 ).mt_logic( bComp1, "min", U=3,V=3 )    : NOP()
-	bComp3   = (SLRad > 1 && temporalSL) ? edi.MCompensate( ediSuper, bVec3, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
-	fComp3   = (SLRad > 1 && temporalSL) ? edi.MCompensate( ediSuper, fVec3, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
-	tMax     = (SLRad > 1 && temporalSL) ? tMax.mt_logic( fComp3, "max", U=3,V=3 ).mt_logic( bComp3, "max", U=3,V=3 )   : tMax
-	tMin     = (SLRad > 1 && temporalSL) ? tMin.mt_logic( fComp3, "min", U=3,V=3 ).mt_logic( bComp3, "min", U=3,V=3 )   : tMin
-
+	ediSuper = (TR1 > 0 || temporalSL)   ? edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
+	bComp1   = (temporalSL)              ? edi.KMCompensate( ediSuper, bVec1, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
+	fComp1   = (temporalSL)              ? edi.KMCompensate( ediSuper, fVec1, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
+	bComp3   = (SLRad > 1 && temporalSL) ? edi.KMCompensate( ediSuper, bVec3, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
+	fComp3   = (SLRad > 1 && temporalSL) ? edi.KMCompensate( ediSuper, fVec3, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
+	tMax     = (SLRad > 1 && temporalSL) ? tMax.mt_logic( fComp3, "max", U=3,V=3 ).mt_logic( bComp3, "max", U=3,V=3 )   : NOP()
+	tMin     = (SLRad > 1 && temporalSL) ? tMin.mt_logic( fComp3, "min", U=3,V=3 ).mt_logic( bComp3, "min", U=3,V=3 )   : NOP()
 
 	#---------------------------------------
 	# Create basic output
@@ -642,16 +651,9 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# Use motion vectors to blur interpolated image (edi) with motion-compensated previous and next frames. As above, this is done to remove shimmer from
 	# alternate frames so the same binomial kernels are used. However, by using motion-compensated smoothing this time we avoid motion blur. The use of
 	# MDegrain1 (motion compensated) rather than TemporalSmooth makes the weightings *look* different, but they evaluate to the same values
-	# Create linear weightings of neighbors first                                                                                -2    -1     0    1     2
-	degrain1 = (TR1 > 0) ? edi.MDegrain1( ediSuper, bVec1,fVec1, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb) : NOP()  # 0.00  0.33  0.33  0.33  0.00
-	degrain2 = (TR1 > 1) ? edi.MDegrain1( ediSuper, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb) : NOP()  # 0.33  0.00  0.33  0.00  0.33
-	degrain1 = (TR1 > 0) && lsb ? degrain1.ditherpost(mode=6, slice=false) : degrain1
-	degrain2 = (TR1 > 1) && lsb ? degrain2.ditherpost(mode=6, slice=false) : degrain2
-
-	# Combine linear weightings to give binomial weightings - TR1=0: (1), TR1=1: (1:2:1), TR1=2: (1:4:6:4:1)
 	binomial1 = (TR1 == 0) ? edi : \
-	            (TR1 == 1) ? degrain1.Merge( edi, 0.25 ) : \
-	                         degrain1.Merge( degrain2, 0.2 ).Merge( edi, 0.0625 )
+	            (TR1 == 1) ? edi.KMDegrain1( ediSuper, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True) : \
+	                         edi.KMDegrain2( ediSuper, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True)
 
 	# Remove areas of difference between smoothed image and interpolated image that are not bob-shimmer fixes: repairs residual motion blur from temporal smooth
 	repair1 = (Rep1 == 0) ? binomial1 : binomial1.KTGMC_KeepOnlyBobShimmerFixes( edi, Rep1, RepChroma )
@@ -673,11 +675,11 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# Resharpen / retouch output
 
 	# Resharpen to counteract temporal blurs. Little sharpening needed for source-match mode since it has already recovered sharpness from source
-	vresharp1 = (SMode == 2) ? Merge( lossed1.mt_expand( mode="vertical", U=3,V=3 ), lossed1.mt_inpand( mode="vertical", U=3,V=3 ) ) : NOP()
+	vresharp1 = (SMode == 2) ? KTGMC_VResharpen( lossed1 ,U=3,V=3 ) : NOP()
 	vresharp  = (Precise && SMode == 2) ? vresharp1.mt_lutxy( lossed1, "x y < x 1 scalef + x y > x 1 scalef - x ? ?", U=3,V=3 ) : vresharp1 # Precise mode: reduce tiny overshoot
 	resharp   = (SMode == 0) ? lossed1 : \
-	            (SMode == 1) ? lossed1.mt_lutxy( lossed1.RemoveGrain( rgBlur ),  "clamp_f x x y - "+ string(sharpAdj) + " * +", U=3,V=3 ) : \
-	                           lossed1.mt_lutxy( vresharp.RemoveGrain( rgBlur ), "clamp_f x x y - "+ string(sharpAdj) + " * +", U=3,V=3 )
+	            (SMode == 1) ? lossed1.KTGMC_Resharpen( lossed1.KRemoveGrain( rgBlur ),  sharpAdj, U=3,V=3 ) : \
+	                           lossed1.KTGMC_Resharpen( vresharp.KRemoveGrain( rgBlur ), sharpAdj, U=3,V=3 )
 
 	# Slightly thin down 1-pixel high horizontal edges that have been widened into neigboring field lines by the interpolator
 	SVThinSc = SVThin * 6.0
@@ -688,13 +690,13 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 
 	# Back blend the blurred difference between sharpened & unsharpened clip, before (1st) sharpness limiting (Sbb == 1,3). A small fidelity improvement
 	backBlend1 = (Sbb != 1 && Sbb != 3) ? thin : \
-		                 thin.mt_makediff( mt_makediff( thin, lossed1, U=1,V=1 ).RemoveGrain( 12, -1 ) \
-	                         .GaussResize( w,h, 0,0, w+epsilon,h+epsilon, p=5 ), U=2,V=2 )
+		                 thin.KMakeDiff( KMakeDiff( thin, lossed1, U=1,V=1 ).KRemoveGrain( 12, -1 ) \
+	                         .KGaussResize( p=5, chroma=true ), U=2,V=2 )
 
 	# Limit over-sharpening by clamping to neighboring (spatial or temporal) min/max values in original
 	# Occurs here (before final temporal smooth) if SLMode == 1,2. This location will restrict sharpness more, but any artefacts introduced will be smoothed
 	sharpLimit1 = (SLMode == 1) ? backBlend1.Repair( ((SLrad <= 1) ? edi : backBlend1.Repair( edi, 12 )), 1 ) : \
-	              (SLMode == 2) ? backBlend1.mt_clamp( tMax,tMin, Sovs,Sovs, U=3,V=3 ) : \
+	              (SLMode == 2) ? backBlend1.KTGMC_LimitOverSharpen( edi, fComp1,bComp1, Sovs, U=3,V=3 ) : \
 	                              backBlend1
 
 	# Back blend the blurred difference between sharpened & unsharpened clip, after (1st) sharpness limiting (Sbb == 2,3). A small fidelity improvement
@@ -708,10 +710,10 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 		                                backBlend2.mt_adddiff( finalNoise.mt_lut( "x " + noiseCentre + " scalef - " + string(GrainRestore) + " * range_half +", U=CNmt1,V=CNmt1 ), U=CNmt2,V=CNmt2 )
 
 	# Final light linear temporal smooth for denoising
-	stableSuper = (TR2 > 0) ? addNoise1.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
+	stableSuper = (TR2 > 0) ? addNoise1.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	stable  = (TR2 == 0) ? addNoise1 : \
-	          (TR2 == 1) ? addNoise1.MDegrain1( stableSuper, bVec1,fVec1,                                                     thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : \
-	          (TR2 == 2) ? addNoise1.MDegrain2( stableSuper, bVec1,fVec1, bVec2,fVec2,                                        thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : \
+	          (TR2 == 1) ? addNoise1.KMDegrain1( stableSuper, bVec1,fVec1,                                                     thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2 ) : \
+	          (TR2 == 2) ? addNoise1.KMDegrain2( stableSuper, bVec1,fVec1, bVec2,fVec2,                                        thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2 ) : \
  	          (TR2 == 3) ? addNoise1.MDegrain3( stableSuper, bVec1,fVec1, bVec2,fVec2, bVec3,fVec3,                           thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : \
  	          (TR2 == 4) ? addNoise1.MDegrain4( stableSuper, bVec1,fVec1, bVec2,fVec2, bVec3,fVec3, bVec4,fVec4,              thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : \
  	                       addNoise1.MDegrain5( stableSuper, bVec1,fVec1, bVec2,fVec2, bVec3,fVec3, bVec4,fVec4, bVec5,fVec5, thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb )
@@ -804,6 +806,20 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 #---------------------------------------
 # Helpers
 
+function KTGMC_MAnalyze( clip srchSuper, clip srchSuperP, bool isb, int delta, int blksize, int overlap, \
+					int search, int searchparam, int pelsearch, bool truemotion, int lambda, int lsad, int pnew, \
+					int plevel, bool global, int dct, bool chroma, int batch)
+{
+	# partial mv on CPU
+	pmv = srchSuperP.KMAnalyse(blksize=blksize, overlap=overlap, search=search, isb=isb, chroma=chroma, \
+					delta=delta, lambda=lambda, lsad=lsad, global=global, plevel=plevel, pnew=pnew, \
+					meander=false, batch=batch).OnCPU(1)
+
+	# main mv on CUDA
+	return srchSuper.KMAnalyse(blksize=blksize, overlap=overlap, search=search, isb=isb, chroma=chroma, \
+					delta=delta, lambda=lambda, lsad=lsad, global=global, plevel=plevel, pnew=pnew, \
+					meander=false, partial=pmv, batch=batch)
+}
 
 # Interpolate input clip using method given in EdiMode. Use Fallback or Bob as result if mode not in list. If ChromaEdi string if set then interpolate chroma
 # separately with that method (only really useful for EEDIx). The function is used as main algorithm starting point and for first two source-match stages
@@ -816,7 +832,7 @@ function KTGMC_Interpolate( clip Input, int InputType, string EdiMode, int NNSiz
 	CEed = (ChromaEdi == "")
 
 	interp = (InputType == 1)            ? Input : \
-	         (EdiMode == "NNEDI3")       ? Input.NNEDI3( field=-2, nsize=NNSize, nns=NNeurons, qual=EdiQual, threads=EdiThreads, U=CEed,V=CEed ) : \
+	         (EdiMode == "NNEDI3")       ? Input.KNNEDI3( field=-2, nsize=NNSize, nns=NNeurons, qual=EdiQual, threads=EdiThreads, U=CEed,V=CEed ) : \
 	         (EdiMode == "NNEDI2")       ? Input.NNEDI2( field=-2, nsize=NNeurons, qual=EdiQual, threads=EdiThreads, U=CEed,V=CEed ) : \
 	         (EdiMode == "NNEDI")        ? Input.NNEDI( field=-2, U=CEed,V=CEed ) : \
 	         (EdiMode == "EEDI3+NNEDI3") ? Input.EEDI3( field=-2, mdis=EdiMaxD, threads=EdiThreads, U=CEed,V=CEed, \
@@ -833,13 +849,13 @@ function KTGMC_Interpolate( clip Input, int InputType, string EdiMode, int NNSiz
 	                                       default( Fallback, Input.KTGMC_Bob( 0,0.5 ) )
 
 	interpuv = (InputType == 1)        ? NOP() : \
-	           (ChromaEdi == "NNEDI3") ? Input.NNEDI3( field=-2, nsize=4, nns=0, qual=1, threads=EdiThreads, Y=false ) : \
+	           (ChromaEdi == "NNEDI3") ? Input.KNNEDI3( field=-2, nsize=4, nns=0, qual=1, threads=EdiThreads, Y=false ) : \
 	           (ChromaEdi == "Yadif")  ? isyuy2(Input) ? Input.nonyuy2clipin(true).Yadifmod2( mode=3 ).nonyuy2clipout(true) : Input.Yadifmod2( mode=3 ) : \
 	           (ChromaEdi == "cYadif") ? Input.Yadif( mode=3 ) : \
 	           (ChromaEdi == "Bob")    ? Input.KTGMC_Bob( 0,0.5 ) : \
 			                             NOP()
 
-	return (!IsClip(interpuv)) ? interp : interp.MergeChroma( interpuv )
+	return (!IsClip(interpuv)) ? interp : interp.KMergeChroma( interpuv )
 }
 
 

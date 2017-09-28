@@ -73,6 +73,7 @@ protected:
   void DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel);
   void DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel);
   void CompensateTest(TEST_FRAMES tf, int blksize, int pel);
+  void MVReplaceTest(TEST_FRAMES tf, bool kvm);
 
   void BobTest(TEST_FRAMES tf, bool parity);
   void BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma);
@@ -558,6 +559,67 @@ TEST_F(TestBase, Compensate_Blk32Pel2)
 TEST_F(TestBase, Compensate_Blk32Pel1)
 {
   CompensateTest(TF_MID, 32, 1);
+}
+
+#pragma endregion
+
+#pragma region MVReplace
+
+void TestBase::MVReplaceTest(TEST_FRAMES tf, bool kvm)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+
+    out << "ks = src.KMSuper(pel = 2)" << std::endl;
+    out << "kmvb = ks.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = 32, overlap = 16, lambda = 400, global = true, meander = false)" << std::endl;
+    out << "ms = src.MSuper(pel = 2)" << std::endl;
+    out << "mmvb = ms.MAnalyse(isb = true, delta = 1, chroma = false, blksize = 32, overlap = 16, lambda = 400, global = true, meander = false)" << std::endl;
+
+    if (kvm) {
+      out << "kcom = src.KMCompensate(ks, kmvb,thSCD1=1800,thSCD2=980)" << std::endl;
+      out << "mcom = src.MCompensate(ms, MVReplaceWithKMV(mmvb, kmvb),thSCD1=1800,thSCD2=980)" << std::endl;
+    }
+    else {
+      out << "kcom = src.KMCompensate(ks, KMVReplaceWithMV(kmvb, mmvb),thSCD1=1800,thSCD2=980)" << std::endl;
+      out << "mcom = src.MCompensate(ms, mmvb,thSCD1=1800,thSCD2=980)" << std::endl;
+    }
+
+    out << "ImageCompare(kcom, mcom, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, MVReplace_KMV)
+{
+  MVReplaceTest(TF_MID, true);
+}
+
+TEST_F(TestBase, MVReplace_MV)
+{
+  MVReplaceTest(TF_MID, false);
 }
 
 #pragma endregion
@@ -1164,7 +1226,7 @@ void TestBase::ResharpenTest(TEST_FRAMES tf)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "src1 = src.RemoveGrain(20)" << std::endl;
+    out << "src1 = src.RemoveGrain(20).RemoveGrain(20)" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
     out << "sr1cuda = src1.OnCPU(0)" << std::endl;
 
@@ -1606,7 +1668,7 @@ TEST_F(TestBase, DeviceCheck)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.*";
+	::testing::GTEST_FLAG(filter) = "TestBase.MVReplace*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
