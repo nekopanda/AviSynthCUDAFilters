@@ -20,6 +20,8 @@
 
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
+#define LOG_PRINT 0
+
 static int GetDeviceType(const PClip& clip)
 {
   int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
@@ -866,6 +868,11 @@ public:
     PVideoFrame	dst = env->NewVideoFrame(vi);
 
     cuda->SetEnv(env);
+#if LOG_PRINT
+    if (cuda->IsEnabled()) {
+      printf("KMSuper[CUDA]: N=%d\n", n);
+    }
+#endif
 
     const BYTE* pSrcY = src->GetReadPtr(PLANAR_Y);
     const BYTE* pSrcU = src->GetReadPtr(PLANAR_U);
@@ -2635,6 +2642,9 @@ public:
 		if (blksizex != overlapx * 2) {
 			env->ThrowError("KMAnalyse: blksizex != overlapx * 2");
 		}
+    if (blksizex != 16 && blksizex != 32) {
+      env->ThrowError("KMAnalyse: blksizex must be 16 or 32");
+    }
 
     params = *KMVParam::GetParam(vi, env);
 
@@ -2862,6 +2872,14 @@ public:
 		const VECTOR *ppPre[ANALYZE_MAX_BATCH];
 		PVideoFrame preFrames[ANALYZE_MAX_BATCH];
 
+#if LOG_PRINT
+    if (IS_CUDA) {
+      printf("KMAnalyze[CUDA] Pre: %s %d N=%d-%d (%d)\n",
+        params.isBackward ? "B" : "F", params.nDeltaFrame,
+        requestedBatch * maxBatch, requestedBatch * maxBatch + maxBatch, n);
+    }
+#endif
+
 		for (int b = 0; b < numBatch; ++b) {
 			// ƒtƒŒ[ƒ€Šm•Û
 			batchFrames[b] = env->NewVideoFrame(vi);
@@ -2903,9 +2921,13 @@ public:
 		workvi.height = nblocks(work_bytes, workvi.width * 4);
 		work = env->NewVideoFrame(workvi);
 
-		//if (cuda->IsEnabled()) {
-		//	printf("!!!\n");
-		//}
+#if LOG_PRINT
+		if (IS_CUDA) {
+      printf("KMAnalyze[CUDA] Start: %s %d N=%d-%d (%d)\n",
+        params.isBackward ? "B" : "F", params.nDeltaFrame, 
+        requestedBatch * maxBatch, requestedBatch * maxBatch + maxBatch, n);
+		}
+#endif
 
 		pAnalyzer->SearchMVs(numBatch, ppSrcSF, ppRefSF, partialParams ? ppPre : nullptr, ppOut, work->GetWritePtr());
 
@@ -3517,6 +3539,9 @@ public:
 		bool data2valid = kmvframe2->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
     if (data1valid != data2valid) {
       env->ThrowError("Validity missmatch");
+    }
+    if (data1valid == false) {
+      return ret;
     }
 
 		int misCount = 0;
@@ -4781,6 +4806,11 @@ public:
     }
 
     cuda->SetEnv(env);
+#if LOG_PRINT
+    if (cuda->IsEnabled()) {
+      printf("KMDegrain%d[CUDA]: N=%d\n", delta, n);
+    }
+#endif
 
     if (IS_CUDA) {
       if (params->nPixelSize == 1) {
@@ -5357,6 +5387,11 @@ public:
     }
 
     cuda->SetEnv(env);
+#if LOG_PRINT
+    if (cuda->IsEnabled()) {
+      printf("KMCompensate[CUDA]: N=%d\n", n);
+    }
+#endif
 
     if (IS_CUDA) {
       if (params->nPixelSize == 1) {

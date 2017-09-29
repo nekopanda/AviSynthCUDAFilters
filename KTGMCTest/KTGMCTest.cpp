@@ -112,8 +112,16 @@ void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
   case TF_BEGIN:
     clip->GetFrame(0, env);
     clip->GetFrame(1, env);
+    clip->GetFrame(2, env);
+    clip->GetFrame(3, env);
+    clip->GetFrame(4, env);
+    clip->GetFrame(5, env);
     break;
   case TF_END:
+    clip->GetFrame(nframes - 6, env);
+    clip->GetFrame(nframes - 5, env);
+    clip->GetFrame(nframes - 4, env);
+    clip->GetFrame(nframes - 3, env);
     clip->GetFrame(nframes - 2, env);
     clip->GetFrame(nframes - 1, env);
     break;
@@ -295,6 +303,21 @@ TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
   AnalyzeTest(TF_MID, false, 16, true, 2, 4);
 }
 
+TEST_F(TestBase, Analyze_Blk32NoCPel1Begin)
+{
+  AnalyzeTest(TF_BEGIN, true, 32, false, 1, 1);
+}
+
+TEST_F(TestBase, Analyze_Blk32NoCPel1End)
+{
+  AnalyzeTest(TF_END, true, 32, false, 1, 1);
+}
+
+TEST_F(TestBase, Analyze_Blk32NoCPel1Batch8End)
+{
+  AnalyzeTest(TF_END, true, 32, false, 1, 8);
+}
+
 #pragma endregion
 
 #pragma region Degrain
@@ -424,6 +447,16 @@ TEST_F(TestBase, Degrain_2Blk32Pel2)
 TEST_F(TestBase, Degrain_2Blk32Pel1)
 {
   DegrainTest(TF_MID, 2, 32, 1);
+}
+
+TEST_F(TestBase, Degrain_2Blk16Pel2Begin)
+{
+  DegrainTest(TF_BEGIN, 2, 16, 2);
+}
+
+TEST_F(TestBase, Degrain_2Blk16Pel1End)
+{
+  DegrainTest(TF_END, 2, 16, 2);
 }
 
 void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
@@ -559,6 +592,16 @@ TEST_F(TestBase, Compensate_Blk32Pel2)
 TEST_F(TestBase, Compensate_Blk32Pel1)
 {
   CompensateTest(TF_MID, 32, 1);
+}
+
+TEST_F(TestBase, Compensate_Blk16Pel2Begin)
+{
+  CompensateTest(TF_BEGIN, 16, 2);
+}
+
+TEST_F(TestBase, Compensate_Blk16Pel2End)
+{
+  CompensateTest(TF_END, 16, 2);
 }
 
 #pragma endregion
@@ -1620,9 +1663,14 @@ TEST_F(TestBase, NNEDI3Test_Perf)
 
     const char* UV = "True";
 
+    out << "SetLogParams(\"avsrun.log\", LOG_WARNING)" << std::endl;
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+#if 1
+    out << "return src.OnCPU(1)" << std::endl;
+#else
     out << "srcuda = src.OnCPU(2)" << std::endl;
     out << "return srcuda.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,pscrn=2,opt=1,threads=1,U=" << UV << ",V=" << UV << ").OnCUDA(2)" << std::endl;
+#endif
 
     out.close();
 
@@ -1666,9 +1714,105 @@ TEST_F(TestBase, DeviceCheck)
 
 #pragma endregion
 
+// «”\•]‰¿—p
+TEST_F(TestBase, KTGMC_Perf)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+    std::string knnediPath = modulePath + "\\KNNEDI3.dll";
+    env->LoadPlugin(knnediPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "SetLogParams(\"avsrun.log\", LOG_WARNING)" << std::endl;
+    out << "Import(\"KTGMC.avsi\")" << std::endl;
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src.OnCPU(2).KTGMC().OnCUDA(2)" << std::endl;
+
+    out.close();
+
+    // ƒƒ‚ƒŠ‚ð2GB‚ÉÝ’è
+    env->SetDeviceMemoryMax(DEV_TYPE_CUDA, 0, 2048);
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      for (int i = 100; i < 104; ++i) {
+        clip->GetFrame(i, env.get());
+        printf("===== FRAME %d COMPLETE =====\n", i);
+      }
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, MemoryLeak)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string scriptpath = workDirPath + "\\script.avs";
+    std::ofstream out(scriptpath);
+
+    out << "SetLogParams(\"avsrun.log\", LOG_WARNING)" << std::endl;
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "return src.OnCPU(1).OnCUDA(0)" << std::endl;
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      for (int i = 100; i < 101; ++i) {
+        clip->GetFrame(i, env.get());
+      }
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, DeviceMatchingBug)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string scriptpath = workDirPath + "\\script.avs";
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src.OnCPU(0).OnCUDA(0).AudioDub(LWLibavAudioSource(\"test.ts\"))" << std::endl;
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      for (int i = 100; i < 101; ++i) {
+        clip->GetFrame(i, env.get());
+      }
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.MVReplace*";
+	::testing::GTEST_FLAG(filter) = "TestBase.DeviceMatchingBug*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

@@ -399,7 +399,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	ReuseGlobals   = (PrevGlobals == "Reuse")
 	ProgSADMask    = (InputType != 2 && InputType != 3) ? 0.0 : ProgSADMask
 	rgBlur         = (Precise) ? 11 : 12
-	analyzeBatch   = 8
+	analyzeBatch   = 4
 
 	# Get maximum temporal radius needed
 	maxTR = (temporalSL)       ? SLRad : 0
@@ -488,7 +488,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	srchSuper = IsClip(srchSuper) ? srchSuper : \
 	            (maxTR > 0)       ? srchClip.KMSuper( pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion ) : NOP()
 	# partial super for CPU calculation
-	srchSuperP = (maxTR > 0)      ? srchSuper.KMPartialSuper().OnCUDA(1) : NOP()
+	srchSuperP = (maxTR > 0)      ? srchSuper.KMPartialSuper().OnCUDA(2) : NOP()
 	bVec5 = IsClip(bVec5) ? bVec5 : \
 	        (maxTR > 4)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true, 5, BlockSize, Overlap, Search, SearchParam, \
 	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
@@ -813,7 +813,7 @@ function KTGMC_MAnalyze( clip srchSuper, clip srchSuperP, bool isb, int delta, i
 	# partial mv on CPU
 	pmv = srchSuperP.KMAnalyse(blksize=blksize, overlap=overlap, search=search, isb=isb, chroma=chroma, \
 					delta=delta, lambda=lambda, lsad=lsad, global=global, plevel=plevel, pnew=pnew, \
-					meander=false, batch=batch).OnCPU(1)
+					meander=false, batch=1).OnCPU(2)
 
 	# main mv on CUDA
 	return srchSuper.KMAnalyse(blksize=blksize, overlap=overlap, search=search, isb=isb, chroma=chroma, \

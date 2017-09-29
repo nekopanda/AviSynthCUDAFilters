@@ -27,6 +27,8 @@
 
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
+#define LOG_PRINT 0
+
 template <typename T> struct VectorType {};
 
 template <> struct VectorType<unsigned char> {
@@ -480,6 +482,11 @@ public:
     if (!IS_CUDA) {
       env->ThrowError("[KTGMC_Bob] CUDAƒtƒŒ[ƒ€‚ð“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
     }
+#if LOG_PRINT
+    if (IS_CUDA) {
+      printf("KTGMC_Bob[CUDA]: N=%d\n", n);
+    }
+#endif
 
 		int srcN = n / 2;
 
@@ -558,6 +565,7 @@ __global__ void kl_binomial_temporal_soften_1(
     int4 ref1 = isSC[1] ? src : to_int(pRef1[x + y * pitch4]);
 
     int4 tmp = (ref0 + src * 2 + ref1 + 2) >> 2;
+    tmp = clamp(tmp, 0, (sizeof(pSrc[0].x) == 1) ? 255 : 65535);
     pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
 }
@@ -586,6 +594,7 @@ __global__ void kl_binomial_temporal_soften_2(
     int4 ref3 = isSC[3] ? src : to_int(pRef3[x + y * pitch4]);
 
     int4 tmp = (ref2 + ref0 * 4 + src * 6 + ref1 * 4 + ref3 + 4) >> 4;
+    tmp = clamp(tmp, 0, (sizeof(pSrc[0].x) == 1) ? 255 : 65535);
     pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
 }
@@ -611,13 +620,15 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
-    PVideoFrame src = GetRefFrame(n, env);
-    PVideoFrame prv1 = GetRefFrame(n - 1, env);
-    PVideoFrame fwd1 = GetRefFrame(n + 1, env);
-    PVideoFrame prv2, fwd2;
+    PVideoFrame prv2, prv1, src, fwd1, fwd2;
 
     if (radius >= 2) {
       prv2 = GetRefFrame(n - 2, env);
+    }
+    prv1 = GetRefFrame(n - 1, env);
+    src = GetRefFrame(n, env);
+    fwd1 = GetRefFrame(n + 1, env);
+    if (radius >= 2) {
       fwd2 = GetRefFrame(n + 2, env);
     }
 
@@ -787,10 +798,12 @@ __global__ void kl_box3x3_filter(
   int y = threadIdx.y + blockDim.y * blockIdx.y;
 
   if (x < width && y < height) {
-    pDst[x + y * pitch] = vertical(
+    int tmp = vertical(
       horizontal(pSrc[x - 1 + (y - 1) * pitch], pSrc[x + (y - 1) * pitch], pSrc[x + 1 + (y - 1) * pitch]),
       horizontal(pSrc[x - 1 + y * pitch], pSrc[x + y * pitch], pSrc[x + 1 + y * pitch]),
       horizontal(pSrc[x - 1 + (y + 1) * pitch], pSrc[x + (y + 1) * pitch], pSrc[x + 1 + (y + 1) * pitch]));
+    tmp = clamp(tmp, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
+    pDst[x + y * pitch] = tmp;
   }
 }
 
@@ -1272,6 +1285,7 @@ __global__ void kl_makediff(
 
   if (x < width4 && y < height) {
     auto tmp = to_int(pA[x + y * pitch4]) - to_int(pB[x + y * pitch4]) + range_half;
+    tmp = clamp(tmp, 0, (sizeof(pA[0].x) == 1) ? 255 : 65535);
     pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
 }
@@ -2061,6 +2075,13 @@ public:
     , ovs(ovs)
   { }
 
+#if LOG_PRINT
+  virtual PVideoFrame GetFrame(int n, IScriptEnvironment* env) {
+    printf("KTGMC_LimitOverSharpen[CUDA]: N=%d\n", n);
+    return KMasktoolFilterBase::GetFrame(n, env);
+  }
+#endif
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
     return new KTGMC_LimitOverSharpen(
       args[0].AsClip(),
@@ -2144,6 +2165,13 @@ public:
   KTGMC_ToFullRange(PClip src, int y, int u, int v, IScriptEnvironment* env_)
     : KMasktoolFilterBase(src, y, u, v, env_)
   { }
+
+#if LOG_PRINT
+  virtual PVideoFrame GetFrame(int n, IScriptEnvironment* env) {
+    printf("KTGMC_ToFullRange[CUDA]: N=%d\n", n);
+    return KMasktoolFilterBase::GetFrame(n, env);
+  }
+#endif
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
     return new KTGMC_ToFullRange(

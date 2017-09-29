@@ -2793,8 +2793,12 @@ public:
     for (int i = 0; i < N; ++i) {
       dim3 threads(256);
       dim3 blocks(nblocks(numBlks, threads.x));
-      kl_scene_change << <blocks, threads, 0, stream >> > (mvB[i], numBlks, nTh1, &sceneChangeB[i]);
-      kl_scene_change << <blocks, threads, 0, stream >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
+      if (isUsableB[i]) {
+        kl_scene_change << <blocks, threads, 0, stream >> > (mvB[i], numBlks, nTh1, &sceneChangeB[i]);
+      }
+      if (isUsableF[i]) {
+        kl_scene_change << <blocks, threads, 0, stream >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
+      }
       DebugSync();
     }
 

@@ -1468,6 +1468,9 @@ PVideoFrame nnedi3::GetFrameCUDA(int n, int fn, IScriptEnvironment2 *env)
 {
   const int off = 1 - fn;
   PVideoFrame src = child->GetFrame(n, env);
+#if 0
+  printf("KNNEDI[CUDA]: N=%d\n", n);
+#endif
 
   const uint8_t PlaneMax = (grey) ? 1 : (isAlphaChannel) ? 4 : 3;
   int plane[4];
