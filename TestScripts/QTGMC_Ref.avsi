@@ -671,7 +671,6 @@ function QTGMC_Ref( clip Input, string "Preset", int "TR0", int "TR1", int "TR2"
 	# This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail.
 	# However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage).
 	lossed1 = (Lossless == 2) ? QTGMC_Ref_MakeLossless( match, innerClip, InputType ) : match
-	return lossed1
 
 	#---------------------------------------
 	# Resharpen / retouch output

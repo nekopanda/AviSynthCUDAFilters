@@ -489,7 +489,7 @@ public:
     }
 #endif
 
-		int srcN = n / 2;
+		int srcN = n >> 1;
 
 		if (cacheN >= 0 && srcN == cacheN) {
 			return cache[n % 2];
@@ -509,6 +509,10 @@ public:
 
 		return cache[n % 2];
 	}
+
+  bool __stdcall GetParity(int n) {
+    return child->GetParity(0);
+  }
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
 		return new KTGMC_Bob(
@@ -2711,6 +2715,105 @@ public:
   }
 };
 
+__device__ float dev_lossless_proc(
+  float x, float y, float half, float maxval
+)
+{
+  float dst;
+  if ((x - half) * (y - half) < 0) {
+    dst = half;
+  }
+  else if (fabsf(x - half) < fabsf(y - half)) {
+    dst = x;
+  }
+  else {
+    dst = y;
+  }
+  return clamp(dst, 0.0f, maxval);
+}
+
+template <typename vpixel_t>
+__global__ void kl_lossless_proc(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pX,
+  const vpixel_t* __restrict__ pY,
+  int width4, int height, int pitch4,
+  float half, float maxval
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto valx = to_float(pX[x + y * pitch4]);
+    auto valy = to_float(pY[x + y * pitch4]);
+    float4 tmp = {
+      dev_lossless_proc(valx.x, valy.x, half, maxval),
+      dev_lossless_proc(valx.y, valy.y, half, maxval),
+      dev_lossless_proc(valx.z, valy.z, half, maxval),
+      dev_lossless_proc(valx.w, valy.w, half, maxval)
+    };
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+class KTGMC_LosslessProc : public KMasktoolFilterBase
+{
+protected:
+
+  virtual void ProcPlane(int p, uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(int p, uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pX, const pixel_t* pY,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    int bits = vi.BitsPerComponent();
+    float range_half = (float)(1 << (bits - 1));
+    float maxval = (float)((1 << bits) - 1);
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_lossless_proc<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+      (const vpixel_t*)pX, (const vpixel_t*)pY,
+      width4, height, pitch4, range_half, maxval);
+    DEBUG_SYNC;
+  }
+
+public:
+  KTGMC_LosslessProc(PClip srcx, PClip srcy, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(srcx, srcy, y, u, v, env_)
+  { }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_LosslessProc(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      args[2].AsInt(3),
+      args[3].AsInt(1),
+      args[4].AsInt(1),
+      env);
+  }
+};
+
 template <typename vpixel_t>
 __global__ void kl_merge(
   vpixel_t* pDst,
@@ -3210,6 +3313,7 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KTGMC_LimitOverSharpen", "cccc[ovs]i[y]i[u]i[v]i", KTGMC_LimitOverSharpen::Create, 0);
   env->AddFunction("KTGMC_ToFullRange", "c[y]i[u]i[v]i", KTGMC_ToFullRange::Create, 0);
   env->AddFunction("KTGMC_TweakSearchClip", "ccc[y]i[u]i[v]i", KTGMC_TweakSearchClip::Create, 0);
+  env->AddFunction("KTGMC_LosslessProc", "cc[y]i[u]i[v]i", KTGMC_LosslessProc::Create, 0);
 
   env->AddFunction("KMerge", "cc[weight]f", KMerge::CreateMerge, 0);
   env->AddFunction("KMergeLuma", "cc[weight]f", KMerge::CreateMergeLuma, 0);

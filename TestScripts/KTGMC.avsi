@@ -669,7 +669,6 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail.
 	# However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage).
 	lossed1 = (Lossless == 2) ? KTGMC_MakeLossless( match, innerClip, InputType ) : match
-	return lossed1
 
 	#---------------------------------------
 	# Resharpen / retouch output
@@ -967,17 +966,17 @@ function KTGMC_MakeLossless( clip Input, clip Source, int InputType )
 	srcFields1 = (InputType == 0) ? Source.SeparateFields() : Source.SeparateFields().SelectEvery( 4, 0,3 )
 	srcFields  = Source.IsYUY2() ? srcFields1.nonyuy2clipin(true) : srcFields1
 	newFields  = Input.SeparateFields().SelectEvery( 4, 1,2 )
-	processed  = Interleave( srcFields, newFields ).SelectEvery(4, 0,1,3,2 ).Weave()
+	processed  = Interleave( srcFields, newFields ).SelectEvery(4, 0,1,3,2 ).KWeave()
 
 	# Clean some of the artefacts caused by the above - creating a second version of the "new" fields
-	vertMedian  = processed.VerticalCleaner( mode=1 )
-	vertMedDiff = mt_makediff( processed, vertMedian, U=3,V=3 )
-	vmNewDiff1  = vertMedDiff.SeparateFields().SelectEvery( 4, 1,2 )
-	vmNewDiff2  = vmNewDiff1.VerticalCleaner( mode=1 ).mt_lutxy( vmNewDiff1, "x range_half - y range_half - * 0 < range_half x range_half - abs y range_half - abs < x y ? ?", U=3,V=3 )
-	vmNewDiff3  = vmNewDiff2.Repair( vmNewDiff2.RemoveGrain( 2 ), 1 )
+	vertMedian  = processed.KVerticalCleaner( mode=1 )
+	vertMedDiff = KMakeDiff( processed, vertMedian, U=3,V=3 )
+	vmNewDiff1  = vertMedDiff.SeparateFields().SelectEvery( 4, 1,2 ).KCopy()
+	vmNewDiff2  = vmNewDiff1.KVerticalCleaner( mode=1 ).KTGMC_LosslessProc( vmNewDiff1, U=3,V=3 )
+	vmNewDiff3  = vmNewDiff2.KRepair( vmNewDiff2.KRemoveGrain( 2 ), 1 )
 
 	# Reweave final result
-	return Interleave( srcFields, newFields.mt_makediff( vmNewDiff3, U=3,V=3 )).SelectEvery( 4, 0,1,3,2 ).Weave()
+	return Interleave( srcFields, newFields.KCopy().KMakeDiff( vmNewDiff3, U=3,V=3 )).SelectEvery( 4, 0,1,3,2 ).KWeave()
 }
 
 
@@ -1003,7 +1002,7 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	# S will make the result sharper, sensible range is about -0.25 to 1.0. Empirically, S=0.5 is effective [will do deeper analysis later]
 	errorTemporalSimilarity = 0.5  # S in formula described above
 	errorAdjust1   = Select( MatchTR1, 1.0, 2.0 / (1.0 + errorTemporalSimilarity), 8.0 / (3.0 + 5.0 * errorTemporalSimilarity) )
-	match1Clip     = (SourceMatch < 1 || InputType == 1) ? Deinterlace : Deinterlace.KTGMC_SourceFrame()
+	match1Clip     = (SourceMatch < 1 || InputType == 1) ? Deinterlace : Deinterlace.SeparateFields().SelectEvery( 4, 0,3 ).KWeave()
 	match1Update   = (SourceMatch < 1 || MatchTR1 == 0) \
 						? Source : KTGMC_ErrorAdjust( Source, match1Clip, errorAdjust1, U=3,V=3 )
 
@@ -1027,7 +1026,7 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	# this difference then add it back to output. Helps restore differences that the basic match missed. However, as this pass works on a difference rather than
 	# the source image it can be prone to occasional artefacts (difference images are not ideal for interpolation). In fact a lower quality interpolation such
 	# as a simple bob often performs nearly as well as advanced, slower methods (e.g. NNEDI3)
-	match2Clip     = (SourceMatch < 2 || InputType == 1) ? match1Shp : match1Shp.KTGMC_SourceFrame()
+	match2Clip     = (SourceMatch < 2 || InputType == 1) ? match1Shp : match1Shp.SeparateFields().SelectEvery( 4, 0,3 ).KWeave()
 	match2Diff     = (SourceMatch > 1) ? KMakeDiff( Source, match2Clip, U=3,V=3 ) : NOP()
 	match2Edi      = (SourceMatch <= 1) ? NOP() : \
 	!noyv16ma2Edi || !yuy2 ? match2Diff.KTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) : \

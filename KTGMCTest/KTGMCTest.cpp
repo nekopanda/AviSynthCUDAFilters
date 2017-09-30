@@ -93,8 +93,8 @@ protected:
   void LimitOverSharpenTest(TEST_FRAMES tf);
   void ToFullRangeTest(TEST_FRAMES tf, bool chroma);
   void TweakSearchClipTest(TEST_FRAMES tf, bool chroma);
+  void LosslessProcTest(TEST_FRAMES tf, bool chroma);
   void ErrorAdjustTest(TEST_FRAMES tf, bool chroma);
-  void MergeInterlaceTest(TEST_FRAMES tf);
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
   void WeaveTest(TEST_FRAMES tf, bool parity, bool dbl);
@@ -1658,6 +1658,61 @@ TEST_F(TestBase, TweakSearchClipTest_WithC)
 TEST_F(TestBase, TweakSearchClipTest_NoC)
 {
   TweakSearchClipTest(TF_MID, false);
+}
+
+#pragma endregion
+
+#pragma region LosslessProc
+
+void TestBase::LosslessProcTest(TEST_FRAMES tf, bool chroma)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    int rc = (chroma ? 3 : 1);
+
+    out << "x = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "y = x.RemoveGrain(20)" << std::endl;
+    out << "xcuda = x.OnCPU(0)" << std::endl;
+    out << "ycuda = y.OnCPU(0)" << std::endl;
+
+    out << "ref = mt_lutxy(x, y,\"x range_half - y range_half - * 0 < range_half x range_half - abs y range_half - abs < x y ? ?\",u=" << rc << ",v=" << rc << ")" << std::endl;
+    out << "cuda = KTGMC_LosslessProc(xcuda, ycuda, u=" << rc << ",v=" << rc << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, LosslessProcTest_WithC)
+{
+  LosslessProcTest(TF_MID, true);
+}
+
+TEST_F(TestBase, LosslessProcTest_NoC)
+{
+  LosslessProcTest(TF_MID, false);
 }
 
 #pragma endregion
