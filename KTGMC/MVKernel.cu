@@ -261,14 +261,6 @@ __device__ bool dev_check_mv(int x, int y, const int* rect)
   return (x <= rect[0]) & (y <= rect[1]) & (x >= rect[2]) & (y >= rect[3]);
 }
 
-__device__ int dev_max(int a, int b, int c) {
-  return max(a, max(b, c));
-}
-
-__device__ int dev_min(int a, int b, int c) {
-  return min(a, min(b, c));
-}
-
 __device__ int dev_sq_norm(int ax, int ay, int bx, int by) {
   return (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
 }
@@ -862,10 +854,7 @@ __global__ void kl_search(
               int a = pred[4][tx];
               int b = pred[5][tx];
               int c = pred[6][tx];
-              int max_ = dev_max(a, b, c);
-              int min_ = dev_min(a, b, c);
-              int med_ = a + b + c - max_ - min_;
-              pred[3][tx] = med_;
+              pred[3][tx] = min(max(min(a, b), c), max(a, b));
             }
           }
           else {
@@ -878,10 +867,7 @@ __global__ void kl_search(
               int a = pred[3][tx];
               int b = pred[4][tx];
               int c = pred[5][tx];
-              int max_ = dev_max(a, b, c);
-              int min_ = dev_min(a, b, c);
-              int med_ = a + b + c - max_ - min_;
-              pred[6][tx] = med_;
+              pred[6][tx] = min(max(min(a, b), c), max(a, b));
             }
           }
         }

@@ -78,6 +78,8 @@ protected:
   void BobTest(TEST_FRAMES tf, bool parity);
   void BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma);
   void RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma);
+  void RepairTest(TEST_FRAMES tf, int mode, bool chroma);
+  void VerticalCleanerTest(TEST_FRAMES tf, int mode, bool chroma);
   void GaussResizeTest(TEST_FRAMES tf, bool chroma);
 
   void InpandVerticalX2Test(TEST_FRAMES tf, bool chroma);
@@ -804,8 +806,6 @@ void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
 
     std::ofstream out(scriptpath);
 
-    out << "Import(\"QTGMC_BinomialSoften.avs\")" << std::endl;
-
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
@@ -885,6 +885,140 @@ TEST_F(TestBase, RemoveGrain_Mode20WithC)
 TEST_F(TestBase, RemoveGrain_Mode20NoC)
 {
   RemoveGrainTest(TF_MID, 20, false);
+}
+
+#pragma endregion
+
+#pragma region Repair
+
+void TestBase::RepairTest(TEST_FRAMES tf, int mode, bool chroma)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "sref = src.GaussResize(1920,1080,0,0,1920.0001,1080.0001,p=2)" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "srefcuda = sref.OnCPU(0)" << std::endl;
+
+    out << "ref = src.Repair(sref, " << mode << (chroma ? "" : ", -1") << ")" << std::endl;
+    out << "cuda = srcuda.KRepair(srefcuda, " << mode << (chroma ? "" : ", -1") << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, Repair_Mode1WithC)
+{
+  RepairTest(TF_MID, 1, true);
+}
+
+TEST_F(TestBase, Repair_Mode1NoC)
+{
+  RepairTest(TF_MID, 1, false);
+}
+
+TEST_F(TestBase, Repair_Mode2WithC)
+{
+  RepairTest(TF_MID, 2, true);
+}
+
+TEST_F(TestBase, Repair_Mode2NoC)
+{
+  RepairTest(TF_MID, 2, false);
+}
+
+TEST_F(TestBase, Repair_Mode3WithC)
+{
+  RepairTest(TF_MID, 3, true);
+}
+
+TEST_F(TestBase, Repair_Mode3NoC)
+{
+  RepairTest(TF_MID, 3, false);
+}
+
+TEST_F(TestBase, Repair_Mode4WithC)
+{
+  RepairTest(TF_MID, 4, true);
+}
+
+TEST_F(TestBase, Repair_Mode4NoC)
+{
+  RepairTest(TF_MID, 4, false);
+}
+
+#pragma endregion
+
+#pragma region VerticalCleaner
+
+void TestBase::VerticalCleanerTest(TEST_FRAMES tf, int mode, bool chroma)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "ref = src.VerticalCleaner(" << mode << (chroma ? "" : ", 0") << ")" << std::endl;
+    out << "cuda = srcuda.KVerticalCleaner(" << mode << (chroma ? "" : ", 0") << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, VerticalCleaner_WithC)
+{
+  VerticalCleanerTest(TF_MID, 1, true);
+}
+
+TEST_F(TestBase, VerticalCleaner_NoC)
+{
+  VerticalCleanerTest(TF_MID, 1, false);
 }
 
 #pragma endregion

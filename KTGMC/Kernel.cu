@@ -786,6 +786,23 @@ __global__ void kl_copy_boarder1(
   }
 }
 
+template <typename pixel_t>
+__global__ void kl_copy_boarder1_v(
+  pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+
+  switch (blockIdx.y) {
+  case 0: // top
+    if (x < width) pDst[x] = pSrc[x];
+    break;
+  case 1: // bottom
+    if (x < width) pDst[x + (height - 1) * pitch] = pSrc[x + (height - 1) * pitch];
+    break;
+  }
+}
+
 template <typename pixel_t, typename Horizontal, typename Vertical>
 __global__ void kl_box3x3_filter(
   pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
@@ -862,6 +879,46 @@ __device__ void dev_sort_8elem(T& a0, T& a1, T& a2, T& a3, T& a4, T& a5, T& a6, 
   cas(a5, a6);
 }
 
+template<typename T, typename CompareAndSwap>
+__device__ void dev_sort_9elem(T& a0, T& a1, T& a2, T& a3, T& a4, T& a5, T& a6, T& a7, T& a8)
+{
+  CompareAndSwap cas;
+
+  // 25 comparison
+
+  cas(a0, a1);
+  cas(a3, a4);
+  cas(a6, a7);
+
+  cas(a1, a2);
+  cas(a4, a5);
+  cas(a7, a8);
+
+  cas(a0, a1);
+  cas(a3, a4);
+  cas(a6, a7);
+
+  cas(a0, a3);
+  cas(a1, a4);
+  cas(a2, a5);
+
+  cas(a3, a6);
+  cas(a4, a7);
+  cas(a5, a8);
+
+  cas(a0, a3);
+  cas(a1, a4);
+  cas(a2, a5);
+
+  cas(a1, a3);
+  cas(a5, a7);
+  cas(a2, a6);
+  cas(a4, a6);
+  cas(a2, a4);
+  cas(a2, a3);
+  cas(a5, a6);
+}
+
 struct IntCompareAndSwap {
   __device__ void operator()(int& a, int& b) {
     int a_ = min(a, b);
@@ -903,6 +960,47 @@ __global__ void kl_rg_clip(
       break;
     case 4: // 4th
       tmp = clamp(s, a3, a4);
+      break;
+    }
+    pDst[x + y * pitch] = tmp;
+  }
+}
+
+template <typename pixel_t, int N>
+__global__ void kl_repair_clip(
+  pixel_t* pDst, const pixel_t* __restrict__ pSrc,
+  const pixel_t* __restrict__ pRef, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockDim.x * blockIdx.x;
+  int y = threadIdx.y + blockDim.y * blockIdx.y;
+
+  if (x < width && y < height) {
+    int a0 = pRef[x - 1 + (y - 1) * pitch];
+    int a1 = pRef[x + (y - 1) * pitch];
+    int a2 = pRef[x + 1 + (y - 1) * pitch];
+    int a3 = pRef[x - 1 + y * pitch];
+    int a4 = pRef[x + y * pitch];
+    int a5 = pRef[x + 1 + y * pitch];
+    int a6 = pRef[x - 1 + (y + 1) * pitch];
+    int a7 = pRef[x + (y + 1) * pitch];
+    int a8 = pRef[x + 1 + (y + 1) * pitch];
+
+    dev_sort_9elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7, a8);
+
+    int s = pSrc[x + y * pitch];
+    int tmp;
+    switch (N) {
+    case 1: // 1st
+      tmp = clamp(s, a0, a8);
+      break;
+    case 2: // 2nd
+      tmp = clamp(s, a1, a7);
+      break;
+    case 3: // 3rd
+      tmp = clamp(s, a2, a6);
+      break;
+    case 4: // 4th
+      tmp = clamp(s, a3, a5);
       break;
     }
     pDst[x + y * pitch] = tmp;
@@ -1070,6 +1168,312 @@ public:
     int modeU = args[2].AsInt(mode);
     int modeV = args[3].AsInt(modeU);
     return new KRemoveGrain(
+      args[0].AsClip(),
+      mode,
+      modeU,
+      modeV,
+      env);
+  }
+};
+
+class KRepair : public CUDAFilterBase {
+
+  PClip refclip;
+
+  int mode;
+  int modeU;
+  int modeV;
+
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame ref = refclip->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    int modes[] = { mode, modeU, modeV };
+
+    for (int p = 0; p < 3; ++p) {
+      int mode = modes[p];
+      if (mode == -1) continue;
+
+      const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      const pixel_t* pRef = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(planes[p]));
+      pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+
+      int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
+      int width = vi.width;
+      int height = vi.height;
+
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
+
+      int width4 = width >> 2;
+      int pitch4 = pitch >> 2;
+
+      if (mode == 0) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+        DEBUG_SYNC;
+        continue;
+      }
+
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width - 2, threads.x), nblocks(height - 2, threads.y));
+
+      switch (mode) {
+      case 1:
+        // Clips the source pixel with the Nth minimum and maximum found on the 3×3-pixel square from the reference clip.
+        kl_repair_clip<pixel_t, 1>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+      case 2:
+        // Clips the source pixel with the Nth minimum and maximum found on the 3×3-pixel square from the reference clip.
+        kl_repair_clip<pixel_t, 2>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+      case 3:
+        // Clips the source pixel with the Nth minimum and maximum found on the 3×3-pixel square from the reference clip.
+        kl_repair_clip<pixel_t, 3>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+      case 4:
+        // Clips the source pixel with the Nth minimum and maximum found on the 3×3-pixel square from the reference clip.
+        kl_repair_clip<pixel_t, 4>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+
+      default:
+        env->ThrowError("[KRepair] Unsupported mode %d", modes[p]);
+      }
+
+      {
+        dim3 threads(256);
+        dim3 blocks(nblocks(max(height, width), threads.x), 4);
+        kl_copy_boarder1 << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
+        DEBUG_SYNC;
+      }
+
+    }
+
+    return dst;
+  }
+
+public:
+  KRepair(PClip _child, PClip refclip, int mode, int modeU, int modeV, IScriptEnvironment* env_)
+    : CUDAFilterBase(_child)
+    , refclip(refclip)
+    , mode(mode)
+    , modeU(modeU)
+    , modeV(modeV)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int modes[] = { mode, modeU, modeV };
+    for (int p = 0; p < 3; ++p) {
+      switch (modes[p]) {
+      case -1:
+      case 0:
+      case 1:
+      case 2:
+      case 3:
+      case 4:
+        break;
+      default:
+        env->ThrowError("[KRepair] Unsupported mode %d", modes[p]);
+      }
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KRepair] CUDAフレームを入力してください");
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return Proc<uint8_t>(n, env);
+    case 2:
+      return Proc<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KRepair] 未対応フォーマット");
+    }
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    int mode = args[2].AsInt(2);
+    int modeU = args[3].AsInt(mode);
+    int modeV = args[4].AsInt(modeU);
+    return new KRepair(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      mode,
+      modeU,
+      modeV,
+      env);
+  }
+};
+
+template <typename vpixel_t>
+__global__ void kl_vertical_cleaner_median(
+  vpixel_t* dst, const vpixel_t* __restrict__ pSrc, int width4, int height, int pitch4
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    int4 a = to_int(pSrc[x + (y - 1) * pitch4]);
+    int4 b = to_int(pSrc[x + y * pitch4]);
+    int4 c = to_int(pSrc[x + (y + 1) * pitch4]);
+    int4 tmp = min(max(min(a, b), c), max(a, b));
+    dst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+class KVerticalCleaner : public CUDAFilterBase {
+
+  int mode;
+  int modeU;
+  int modeV;
+
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    int modes[] = { mode, modeU, modeV };
+
+    for (int p = 0; p < 3; ++p) {
+      int mode = modes[p];
+      if (mode == -1) continue;
+
+      const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+
+      int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
+      int width = vi.width;
+      int height = vi.height;
+
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+      }
+
+      int width4 = width >> 2;
+      int pitch4 = pitch >> 2;
+
+      if (mode == 0) {
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+        DEBUG_SYNC;
+        continue;
+      }
+
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
+
+      switch (mode) {
+      case 1:
+        // vertical median
+        kl_vertical_cleaner_median<vpixel_t>
+          << <blocks, threads, 0, stream >> > (
+          (vpixel_t*)(pDst + pitch), (const vpixel_t*)(pSrc + pitch), width4, height - 2, pitch4);
+        DEBUG_SYNC;
+        break;
+
+      default:
+        env->ThrowError("[KVerticalCleaner] Unsupported mode %d", modes[p]);
+      }
+
+      {
+        dim3 threads(256);
+        dim3 blocks(nblocks(width, threads.x), 2);
+        kl_copy_boarder1_v << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
+        DEBUG_SYNC;
+      }
+
+    }
+
+    return dst;
+  }
+
+public:
+  KVerticalCleaner(PClip _child, int mode, int modeU, int modeV, IScriptEnvironment* env_)
+    : CUDAFilterBase(_child)
+    , mode(mode)
+    , modeU(modeU)
+    , modeV(modeV)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int modes[] = { mode, modeU, modeV };
+    for (int p = 0; p < 3; ++p) {
+      switch (modes[p]) {
+      case 0:
+      case 1:
+        break;
+      default:
+        env->ThrowError("[KVerticalCleaner] Unsupported mode %d", modes[p]);
+      }
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KVerticalCleaner] CUDAフレームを入力してください");
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return Proc<uint8_t>(n, env);
+    case 2:
+      return Proc<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KVerticalCleaner] 未対応フォーマット");
+    }
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    int mode = args[1].AsInt(2);
+    int modeU = args[2].AsInt(mode);
+    int modeV = args[3].AsInt(modeU);
+    return new KVerticalCleaner(
       args[0].AsClip(),
       mode,
       modeU,
@@ -2760,6 +3164,8 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
   env->AddFunction("KBinomialTemporalSoften", "ci[scenechange]i[chroma]b", KBinomialTemporalSoften::Create, 0);
   env->AddFunction("KRemoveGrain", "c[mode]i[modeU]i[modeV]i", KRemoveGrain::Create, 0);
+  env->AddFunction("KRepair", "cc[mode]i[modeU]i[modeV]i", KRepair::Create, 0);
+  env->AddFunction("KVerticalCleaner", "c[mode]i[modeU]i[modeV]i", KVerticalCleaner::Create, 0);
   env->AddFunction("KGaussResize", "c[p]f[chroma]b", KGaussResize::Create, 0);
 
   env->AddFunction("KInpandVerticalX2", "c[y]i[u]i[v]i", KXpandVerticalX2<Min5>::Create, 0);
