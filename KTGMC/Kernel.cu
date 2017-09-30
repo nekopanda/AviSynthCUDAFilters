@@ -462,7 +462,7 @@ public:
 
 		// フレーム数、FPSを2倍
 		vi.num_frames *= 2;
-		vi.fps_numerator *= 2;
+		vi.MulDivFPS(2, 1);
 		
 		double shift = parity ? 0.25 : -0.25;
 
@@ -1272,7 +1272,7 @@ public:
   }
 };
 
-template <typename vpixel_t>
+template <typename vpixel_t, typename Op>
 __global__ void kl_makediff(
   vpixel_t* pDst,
   const vpixel_t* __restrict__ pA,
@@ -1280,16 +1280,30 @@ __global__ void kl_makediff(
   int width4, int height, int pitch4, int range_half
 )
 {
+  Op op;
+
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (x < width4 && y < height) {
-    auto tmp = to_int(pA[x + y * pitch4]) - to_int(pB[x + y * pitch4]) + range_half;
+    auto tmp = op(to_int(pA[x + y * pitch4]), to_int(pB[x + y * pitch4]), range_half);
     tmp = clamp(tmp, 0, (sizeof(pA[0].x) == 1) ? 255 : 65535);
     pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
 }
 
+struct MakeDiffOp {
+  __device__ int4 operator()(int4 a, int4 b, int range_half) {
+    return a - b + range_half;
+  }
+};
+struct AddDiffOp {
+  __device__ int4 operator()(int4 a, int4 b, int range_half) {
+    return a + b + (-range_half);
+  }
+};
+
+template <typename Op>
 class KMakeDiff : public KMasktoolFilterBase
 {
 protected:
@@ -1323,7 +1337,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_makediff<<<blocks, threads, 0, stream>>>(
+    kl_makediff<vpixel_t, Op><<<blocks, threads, 0, stream>>>(
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4, 1 << (bits - 1));
     DEBUG_SYNC;
   }
@@ -1934,6 +1948,7 @@ __global__ void kl_resharpen(
   }
 }
 
+// mt_lutxy("clamp_f x x y - sharpAdj * +")を計算
 class KTGMC_Resharpen : public KMasktoolFilterBase
 {
   float sharpAdj;
@@ -2377,6 +2392,195 @@ public:
   }
 };
 
+template <typename vpixel_t>
+__global__ void kl_source_frame(
+  vpixel_t* dst, const vpixel_t* top, const vpixel_t* bottom, int pitch4, int width4, int height2)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height2) {
+    dst[x + (2 * y + 0) * pitch4] = top[x + (2 * y + 0) * pitch4];
+    dst[x + (2 * y + 1) * pitch4] = bottom[x + (2 * y + 1) * pitch4];
+  }
+}
+
+// プログレッシブ化されたフレームからソースにあるフィールドだけ抜き出してweave
+class KTGMC_SourceFrame : public CUDAFilterBase {
+
+  bool parity;
+
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  void Proc(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    for (int p = 0; p < 3; ++p) {
+      const vpixel_t* topptr = reinterpret_cast<const vpixel_t*>(top->GetReadPtr(planes[p]));
+      const vpixel_t* bottomptr = reinterpret_cast<const vpixel_t*>(bottom->GetReadPtr(planes[p]));
+      vpixel_t* dstptr = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+      int pitch4 = top->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
+
+      int width4 = vi.width / 4;
+      int height2 = vi.height / 2;
+
+      if (p > 0) {
+        width4 >>= logUVx;
+        height2 >>= logUVy;
+      }
+
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height2, threads.y));
+      kl_source_frame<<<blocks, threads, 0, stream>>>(
+        dstptr, topptr, bottomptr, pitch4, width4, height2);
+      DEBUG_SYNC;
+    }
+  }
+
+  void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
+    ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
+  {
+  }
+
+public:
+  KTGMC_SourceFrame(PClip _child, IScriptEnvironment* env_)
+    : CUDAFilterBase(_child)
+    , parity(_child->GetParity(0))
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    // フレーム数、FPSを半分
+    vi.num_frames /= 2;
+    vi.MulDivFPS(1, 2);
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KTGMC_SourceFrame] CUDAフレームを入力してください");
+    }
+#if LOG_PRINT
+    if (IS_CUDA) {
+      printf("KTGMC_Bob[CUDA]: N=%d\n", n);
+    }
+#endif
+
+    PVideoFrame top = child->GetFrame(2 * n + 0, env);
+    PVideoFrame bottom = child->GetFrame(2 * n + 1, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    if (parity == false) {
+      // BFFなので逆にする
+      std::swap(top, bottom);
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      Proc<uint8_t>(dst, top, bottom, env);
+      break;
+    case 2:
+      Proc<uint16_t>(dst, top, bottom, env);
+      break;
+    default:
+      env->ThrowError("[KTGMC_SourceFrame] 未対応フォーマット");
+    }
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_SourceFrame(
+      args[0].AsClip(),
+      env);
+  }
+};
+
+template <typename vpixel_t>
+__global__ void kl_error_adjust(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc0,
+  const vpixel_t* __restrict__ pSrc1,
+  int width4, int height, int pitch4,
+  float errorAdj
+)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto srcx = to_float(pSrc0[x + y * pitch4]);
+    auto srcy = to_float(pSrc1[x + y * pitch4]);
+    auto lut = (srcx * (errorAdj + 1)) - (srcy * errorAdj);
+    auto tmp = clamp(lut + 0.5f, 0, ((sizeof(pSrc0[0].x) == 1) ? 255 : 65535));
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(to_int(tmp));
+  }
+}
+
+// mt_lutxy("clamp_f x " + string(errorAdjust1 + 1) + " * y " + string(errorAdjust1) + " * -")を計算
+class KTGMC_ErrorAdjust : public KMasktoolFilterBase
+{
+  float errorAdj;
+protected:
+
+  virtual void ProcPlane(int p, uint8_t* pDst,
+    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
+  }
+
+  virtual void ProcPlane(int p, uint16_t* pDst,
+    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
+  }
+
+  template <typename pixel_t>
+  void ProcPlane_(pixel_t* pDst,
+    const pixel_t* pSrc0, const pixel_t* pSrc1,
+    int width, int height, int pitch, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    int width4 = width / 4;
+    int pitch4 = pitch / 4;
+
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_error_adjust<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
+      width4, height, pitch4, errorAdj);
+    DEBUG_SYNC;
+  }
+
+public:
+  KTGMC_ErrorAdjust(PClip src, PClip match, float errorAdj, int y, int u, int v, IScriptEnvironment* env_)
+    : KMasktoolFilterBase(src, match, y, u, v, env_)
+    , errorAdj(errorAdj)
+  { }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_ErrorAdjust(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      (float)args[2].AsFloat(),
+      args[3].AsInt(3),
+      args[4].AsInt(1),
+      args[5].AsInt(1),
+      env);
+  }
+};
 
 void AddFuncKernel(IScriptEnvironment2* env)
 {
@@ -2388,11 +2592,13 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KInpandVerticalX2", "c[y]i[u]i[v]i", KXpandVerticalX2<Min5>::Create, 0);
   env->AddFunction("KExpandVerticalX2", "c[y]i[u]i[v]i", KXpandVerticalX2<Max5>::Create, 0);
 
-  env->AddFunction("KMakeDiff", "cc[y]i[u]i[v]i", KMakeDiff::Create, 0);
+  env->AddFunction("KMakeDiff", "cc[y]i[u]i[v]i", KMakeDiff<MakeDiffOp>::Create, 0);
+  env->AddFunction("KAddDiff", "cc[y]i[u]i[v]i", KMakeDiff<AddDiffOp>::Create, 0);
   env->AddFunction("KLogic", "cc[mode]s[y]i[u]i[v]i", KLogicCreate, 0);
 
   env->AddFunction("KTGMC_BobShimmerFixesMerge", "cccc[y]i[u]i[v]i", KTGMC_BobShimmerFixesMerge::Create, 0);
   env->AddFunction("KTGMC_VResharpen", "c[y]i[u]i[v]i", KTGMC_VResharpen::Create, 0);
+  // mt_lutxy("clamp_f x x y - sharpAdj * +")を計算
   env->AddFunction("KTGMC_Resharpen", "cc[sharpAdj]f[y]i[u]i[v]i", KTGMC_Resharpen::Create, 0);
   env->AddFunction("KTGMC_LimitOverSharpen", "cccc[ovs]i[y]i[u]i[v]i", KTGMC_LimitOverSharpen::Create, 0);
   env->AddFunction("KTGMC_ToFullRange", "c[y]i[u]i[v]i", KTGMC_ToFullRange::Create, 0);
@@ -2401,4 +2607,9 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KMerge", "cc[weight]f", KMerge::CreateMerge, 0);
   env->AddFunction("KMergeLuma", "cc[weight]f", KMerge::CreateMergeLuma, 0);
   env->AddFunction("KMergeChroma", "cc[weight]f", KMerge::CreateMergeChroma, 0);
+
+  // SeparateFields().SelectEvery( 4, 0,3 ).Weave()
+  env->AddFunction("KTGMC_SourceFrame", "c", KTGMC_SourceFrame::Create, 0);
+  // mt_lutxy( XX, YY, "clamp_f x " + string(errorAdj + 1) + " * y " + string(errorAdj) + " * -" )
+  env->AddFunction("KTGMC_ErrorAdjust", "cc[errorAdj]f[y]i[u]i[v]i", KTGMC_ErrorAdjust::Create, 0);
 }

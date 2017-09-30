@@ -548,8 +548,8 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	refvector = false
 	bVec1 = refvector ? KMVReplaceWithMV(bVec1.OnCUDA(0), QTGMC_bVec1).OnCPU(0) : bVec1
 	fVec1 = refvector ? KMVReplaceWithMV(fVec1.OnCUDA(0), QTGMC_fVec1).OnCPU(0) : fVec1
-	bVec2 = refvector ? KMVReplaceWithMV(bVec2.OnCUDA(0), QTGMC_bVec2).OnCPU(0) : bVec2
-	fVec2 = refvector ? KMVReplaceWithMV(fVec2.OnCUDA(0), QTGMC_fVec2).OnCPU(0) : fVec2
+	#bVec2 = refvector ? KMVReplaceWithMV(bVec2.OnCUDA(0), QTGMC_bVec2).OnCPU(0) : bVec2
+	#fVec2 = refvector ? KMVReplaceWithMV(fVec2.OnCUDA(0), QTGMC_fVec2).OnCPU(0) : fVec2
 	#bVec3 = refvector ? KMVReplaceWithMV(bVec3.OnCUDA(0), QTGMC_bVec3).OnCPU(0) : bVec3
 	#fVec3 = refvector ? KMVReplaceWithMV(fVec3.OnCUDA(0), QTGMC_fVec3).OnCPU(0) : fVec3
 
@@ -664,7 +664,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	                                                             ThSAD1, ThSCD1, ThSCD2, SourceMatch, MatchTR1, MatchEdi, MatchNNSize, MatchNNeurons, \
 	                                                             MatchEdiQual, MatchEdiMaxD, MatchTR2, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, \
 	                                                             MatchEdiMaxD2, MatchEnhance, EdiThreads, lsb )
-
+	return match
 	# Lossless=2 - after preparing an interpolated, de-shimmered clip, restore the original source fields into it and clean up any artefacts.
 	# This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail.
 	# However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage).
@@ -1003,9 +1003,10 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	# S will make the result sharper, sensible range is about -0.25 to 1.0. Empirically, S=0.5 is effective [will do deeper analysis later]
 	errorTemporalSimilarity = 0.5  # S in formula described above
 	errorAdjust1   = Select( MatchTR1, 1.0, 2.0 / (1.0 + errorTemporalSimilarity), 8.0 / (3.0 + 5.0 * errorTemporalSimilarity) )
-	match1Clip     = (SourceMatch < 1 || InputType == 1) ? Deinterlace : Deinterlace.SeparateFields().SelectEvery( 4, 0,3 ).Weave()
+	match1Clip     = (SourceMatch < 1 || InputType == 1) ? Deinterlace : Deinterlace.KTGMC_SourceFrame()
 	match1Update   = (SourceMatch < 1 || MatchTR1 == 0) \
-						? Source : mt_lutxy( Source, match1Clip, "clamp_f x " + string(errorAdjust1 + 1) + " * y " + string(errorAdjust1) + " * -", U=3,V=3 )
+						? Source : KTGMC_ErrorAdjust( Source, match1Clip, errorAdjust1, U=3,V=3 )
+
 	noyv16ma1Edi   = MatchEdi =="NNEDI2" || MatchEdi =="NNEDI" || MatchEdi =="EEDI3+NNEDI3" || MatchEdi =="EEDI3" || MatchEdi =="EEDI2" || MatchEdi =="TDeint" || MatchEdi =="cYadif" || MatchEdi =="RepcYadif"
 	noyv16ma2Edi   = MatchEdi2=="NNEDI2" || MatchEdi2=="NNEDI" || MatchEdi2=="EEDI3+NNEDI3" || MatchEdi2=="EEDI3" || MatchEdi2=="EEDI2" || MatchEdi2=="TDeint" || MatchEdi2=="cYadif" || MatchEdi2=="RepcYadif"
 	match1Edi      = (SourceMatch == 0) ? NOP() : \
@@ -1013,56 +1014,44 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	                         match1Update.nonyuy2clipout(true) \
 	                                     .KTGMC_Interpolate( InputType, MatchEdi, MatchNNSize, MatchNNeurons, MatchEdiQual, MatchEdiMaxD, EdiThreads ) \
 	                                     .nonyuy2clipin(true)
-	match1Super    = (SourceMatch > 0 && MatchTR1 > 0) ? match1Edi.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
-	match1Degrain1 = (SourceMatch > 0 && MatchTR1 > 0) ? match1Edi.MDegrain1( match1Super, bVec1,fVec1, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
-	match1Degrain2 = (SourceMatch > 0 && MatchTR1 > 1) ? match1Edi.MDegrain1( match1Super, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
-	match1Degrain1 = (SourceMatch > 0 && MatchTR1 > 0) && lsb ? match1Degrain1.ditherpost(mode=6, slice=false) : match1Degrain1
-	match1Degrain2 = (SourceMatch > 0 && MatchTR1 > 1) && lsb ? match1Degrain2.ditherpost(mode=6, slice=false) : match1Degrain2
+	match1Super    = (SourceMatch > 0 && MatchTR1 > 0) ? match1Edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match1         = (SourceMatch < 1) ? Deinterlace : \
 	                 (MatchTR1 == 0)   ? match1Edi : \
-	                 (MatchTR1 == 1)   ? match1Degrain1.Merge( match1Edi, 0.25 ) : \
-	                                     match1Degrain1.Merge( match1Degrain2, 0.2 ).Merge( match1Edi, 0.0625 )
+	                 (MatchTR1 == 1)   ? match1Edi.KMDegrain1( match1Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True ) : \
+	                                     match1Edi.KMDegrain2( match1Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True )
 
 	# Enhance effect of source-match stages 2 & 3 by sharpening clip prior to refinement (source-match tends to underestimate so this will leave result sharper)
-	match1Shp = (SourceMatch > 1 && MatchEnhance > 0.0) ? match1.mt_lutxy( match1.RemoveGrain( 12 ), "clamp_f x x y - "+ string(MatchEnhance) + " * +", U=3,V=3 ) : match1
+	match1Shp = (SourceMatch > 1 && MatchEnhance > 0.0) ? match1.KTGMC_Resharpen( match1.KRemoveGrain( 12 ), MatchEnhance, U=3,V=3 ) : match1
 
 	# Source-match refinement. Find difference between source clip & equivalent fields in (updated) interpolated/smoothed clip. Interpolate & binomially smooth
 	# this difference then add it back to output. Helps restore differences that the basic match missed. However, as this pass works on a difference rather than
 	# the source image it can be prone to occasional artefacts (difference images are not ideal for interpolation). In fact a lower quality interpolation such
 	# as a simple bob often performs nearly as well as advanced, slower methods (e.g. NNEDI3)
-	match2Clip     = (SourceMatch < 2 || InputType == 1) ? match1Shp : match1Shp.SeparateFields().SelectEvery( 4, 0,3 ).Weave()
-	match2Diff     = (SourceMatch > 1) ? mt_makediff( Source, match2Clip, U=3,V=3 ) : NOP()
+	match2Clip     = (SourceMatch < 2 || InputType == 1) ? match1Shp : match1Shp.KTGMC_SourceFrame()
+	match2Diff     = (SourceMatch > 1) ? KMakeDiff( Source, match2Clip, U=3,V=3 ) : NOP()
 	match2Edi      = (SourceMatch <= 1) ? NOP() : \
 	!noyv16ma2Edi || !yuy2 ? match2Diff.KTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) : \
 	                         match2Diff.nonyuy2clipout(true) \
 	                                   .KTGMC_Interpolate( InputType, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, MatchEdiMaxD2, EdiThreads ) \
 	                                   .nonyuy2clipin(true)
-	match2Super    = (SourceMatch > 1 && MatchTR2 > 0) ? match2Edi.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
-	match2Degrain1 = (SourceMatch > 1 && MatchTR2 > 0) ? match2Edi.MDegrain1( match2Super, bVec1,fVec1, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
-	match2Degrain2 = (SourceMatch > 1 && MatchTR2 > 1) ? match2Edi.MDegrain1( match2Super, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
-	match2Degrain1 = (SourceMatch > 1 && MatchTR2 > 0) && lsb ? match2Degrain1.ditherpost(mode=6, slice=false) : match2Degrain1
-	match2Degrain2 = (SourceMatch > 1 && MatchTR2 > 1) && lsb ? match2Degrain2.ditherpost(mode=6, slice=false) : match2Degrain2
+	match2Super    = (SourceMatch > 1 && MatchTR2 > 0) ? match2Edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match2         = (SourceMatch < 2) ? match1 : \
 	                 (MatchTR2 == 0)   ? match2Edi : \
-	                 (MatchTR2 == 1)   ? match2Degrain1.Merge( match2Edi, 0.25 ) : \
-	                                     match2Degrain1.Merge( match2Degrain2, 0.2 ).Merge( match2Edi, 0.0625 )
+	                 (MatchTR2 == 1)   ? match2Edi.KMDegrain1( match2Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True ) : \
+	                                     match2Edi.KMDegrain2( match2Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True )
 
 	# Source-match second refinement - correct error introduced in the refined difference by temporal smoothing. Similar to error correction from basic step
 	errorAdjust2   = Select( MatchTR2, 1.0, 2.0 / (1.0 + errorTemporalSimilarity), 8.0 / (3.0 + 5.0 * errorTemporalSimilarity) )
 	match3Update   = (SourceMatch < 3 || MatchTR2 == 0) \
-	                     ? match2Edi : mt_lutxy( match2Edi, match2, "clamp_f x " + string(errorAdjust2 + 1) + " * y " + string(errorAdjust2) + " * -", U=3,V=3 )
-	match3Super    = (SourceMatch > 2 && MatchTR2 > 0) ? match3Update.MSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
-	match3Degrain1 = (SourceMatch > 2 && MatchTR2 > 0) ? match3Update.MDegrain1( match3Super, bVec1,fVec1, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
-	match3Degrain2 = (SourceMatch > 2 && MatchTR2 > 1) ? match3Update.MDegrain1( match3Super, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : NOP()
-	match3Degrain1 = (SourceMatch > 2 && MatchTR2 > 0) && lsb ? match3Degrain1.ditherpost(mode=6, slice=false) : match3Degrain1
-	match3Degrain2 = (SourceMatch > 2 && MatchTR2 > 1) && lsb ? match3Degrain2.ditherpost(mode=6, slice=false) : match3Degrain2
+	                     ? match2Edi : KTGMC_ErrorAdjust( match2Edi, match2, errorAdjust2, U=3,V=3 )
+	match3Super    = (SourceMatch > 2 && MatchTR2 > 0) ? match3Update.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match3         = (SourceMatch < 3) ? match2 : \
 	                 (MatchTR2 == 0)   ? match3Update : \
-	                 (MatchTR2 == 1)   ? match3Degrain1.Merge( match3Update, 0.25 ) : \
-	                                     match3Degrain1.Merge( match3Degrain2, 0.2 ).Merge( match3Update, 0.0625 )
+	                 (MatchTR2 == 1)   ? match3Update.KMDegrain1( match3Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True ) : \
+	                                     match3Update.KMDegrain2( match3Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True )
 
 	# Apply difference calculated in source-match refinement
-	return (SourceMatch < 2) ? match1 : match1Shp.mt_adddiff( match3, U=3,V=3 )
+	return (SourceMatch < 2) ? match1 : match1Shp.KAddDiff( match3, U=3,V=3 )
 }
 
 

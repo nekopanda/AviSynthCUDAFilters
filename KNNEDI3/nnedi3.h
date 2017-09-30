@@ -110,4 +110,7 @@ public:
 	PVideoFrame __stdcall nnedi3::GetFrame(int n,IScriptEnvironment *env);
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range);
+
+  // フレーム数が変わるのをちゃんと実装していないのでとりあえず0番フレームのparityを返しておく
+  bool __stdcall GetParity(int n) { return child->GetParity(0); }
 };

@@ -82,7 +82,7 @@ protected:
 
   void InpandVerticalX2Test(TEST_FRAMES tf, bool chroma);
   void ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma);
-  void MakeDiffTest(TEST_FRAMES tf, bool chroma);
+  void MakeDiffTest(TEST_FRAMES tf, bool chroma, bool makediff);
   void LogicTest(TEST_FRAMES tf, const char* mode, bool chroma);
 
   void BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma);
@@ -91,6 +91,8 @@ protected:
   void LimitOverSharpenTest(TEST_FRAMES tf);
   void ToFullRangeTest(TEST_FRAMES tf, bool chroma);
   void TweakSearchClipTest(TEST_FRAMES tf, bool chroma);
+  void SourceFrameTest(TEST_FRAMES tf);
+  void ErrorAdjustTest(TEST_FRAMES tf, bool chroma);
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
 
@@ -1011,7 +1013,7 @@ TEST_F(TestBase, ExpandVerticalX2Test_NoC)
 
 #pragma region MakeDiff
 
-void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma)
+void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma, bool makediff)
 {
   PEnv env;
   try {
@@ -1037,8 +1039,14 @@ void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma)
     out << "src2 = src.RemoveGrain(20)" << std::endl;
     out << "sr2cuda = src2.OnCPU(0)" << std::endl;
 
-    out << "ref = src.mt_makediff(src2, U=" << rc << ",V=" << rc << ")" << std::endl;
-    out << "cuda = srcuda.KMakeDiff(sr2cuda, U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    if (makediff) {
+      out << "ref = src.mt_makediff(src2, U=" << rc << ",V=" << rc << ")" << std::endl;
+      out << "cuda = srcuda.KMakeDiff(sr2cuda, U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    }
+    else {
+      out << "ref = src.mt_adddiff(src2, U=" << rc << ",V=" << rc << ")" << std::endl;
+      out << "cuda = srcuda.KAddDiff(sr2cuda, U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    }
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1057,12 +1065,22 @@ void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma)
 
 TEST_F(TestBase, MakeDiffTest_WithC)
 {
-  MakeDiffTest(TF_MID, true);
+  MakeDiffTest(TF_MID, true, true);
 }
 
 TEST_F(TestBase, MakeDiffTest_NoC)
 {
-  MakeDiffTest(TF_MID, false);
+  MakeDiffTest(TF_MID, false, true);
+}
+
+TEST_F(TestBase, AddDiffTest_WithC)
+{
+  MakeDiffTest(TF_MID, true, false);
+}
+
+TEST_F(TestBase, AddDiffTest_NoC)
+{
+  MakeDiffTest(TF_MID, false, false);
 }
 
 #pragma endregion
@@ -1527,6 +1545,105 @@ TEST_F(TestBase, MergeTest_NoC)
 
 #pragma endregion
 
+#pragma region SourceFrame
+
+void TestBase::SourceFrameTest(TEST_FRAMES tf)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "src.AssumeTFF()" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 ).Weave()" << std::endl;
+    out << "cuda = srcuda.KTGMC_SourceFrame().OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 0)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, SourceFrameTest)
+{
+  SourceFrameTest(TF_MID);
+}
+
+#pragma endregion
+
+#pragma region ErrorAdjust
+
+void TestBase::ErrorAdjustTest(TEST_FRAMES tf, bool chroma)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    float errorAdj = 1.333333f;
+    int rc = chroma ? 3 : 1;
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "src2 = src.RemoveGrain(20)" << std::endl;
+    out << "sr2cuda = src2.OnCPU(0)" << std::endl;
+
+    out << "ref = src.mt_lutxy(src2, \"clamp_f x " << (errorAdj + 1) << " * y " << errorAdj << " * -\", U=" << rc << ", V = " << rc << " )" << std::endl;
+    out << "cuda = srcuda.KTGMC_ErrorAdjust(sr2cuda, " << errorAdj << ", U=" << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, ErrorAdjustTest_WithC)
+{
+  ErrorAdjustTest(TF_MID, true);
+}
+
+#pragma endregion
+
 #pragma region NNEDI3
 
 void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn)
@@ -1732,14 +1849,12 @@ TEST_F(TestBase, KTGMC_Perf)
     std::ofstream out(scriptpath);
 
     out << "SetLogParams(\"avsrun.log\", LOG_WARNING)" << std::endl;
+    out << "SetMemoryMax(2048, type=DEV_TYPE_CUDA)" << std::endl;
     out << "Import(\"KTGMC.avsi\")" << std::endl;
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "src.OnCPU(2).KTGMC().OnCUDA(2)" << std::endl;
 
     out.close();
-
-    // ƒƒ‚ƒŠ‚ð2GB‚ÉÝ’è
-    env->SetDeviceMemoryMax(DEV_TYPE_CUDA, 0, 2048);
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
@@ -1812,7 +1927,7 @@ TEST_F(TestBase, DeviceMatchingBug)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.DeviceMatchingBug*";
+	::testing::GTEST_FLAG(filter) = "TestBase.SourceFrameTest*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
