@@ -8,6 +8,7 @@
 #include "CommonFunctions.h"
 #include "DeviceLocalData.h"
 #include "DebugWriter.h"
+#include "Misc.h"
 
 #include <string>
 
@@ -29,6 +30,15 @@ void OnCudaError(cudaError_t err) {
 #if 1 // デバッグ用（本番は取り除く）
 	printf("[CUDA Error] %s (code: %d)\n", cudaGetErrorString(err), err);
 #endif
+}
+
+int GetDeviceType(const PClip& clip)
+{
+  int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
+  if (devtypes == 0) {
+    return DEV_TYPE_CPU;
+  }
+  return devtypes;
 }
 
 class Time : public GenericVideoFilter {

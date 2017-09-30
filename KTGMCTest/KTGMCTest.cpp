@@ -93,11 +93,12 @@ protected:
   void LimitOverSharpenTest(TEST_FRAMES tf);
   void ToFullRangeTest(TEST_FRAMES tf, bool chroma);
   void TweakSearchClipTest(TEST_FRAMES tf, bool chroma);
-  void SourceFrameTest(TEST_FRAMES tf);
   void ErrorAdjustTest(TEST_FRAMES tf, bool chroma);
   void MergeInterlaceTest(TEST_FRAMES tf);
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
+  void WeaveTest(TEST_FRAMES tf, bool parity, bool dbl);
+  void CopyTest(TEST_FRAMES tf, bool cuda);
 
   void NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn);
 
@@ -1720,9 +1721,9 @@ TEST_F(TestBase, MergeTest_NoC)
 
 #pragma endregion
 
-#pragma region SourceFrame
+#pragma region Weave
 
-void TestBase::SourceFrameTest(TEST_FRAMES tf)
+void TestBase::WeaveTest(TEST_FRAMES tf, bool parity, bool dbl)
 {
   PEnv env;
   try {
@@ -1739,11 +1740,22 @@ void TestBase::SourceFrameTest(TEST_FRAMES tf)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "src.AssumeTFF()" << std::endl;
+    if (parity) {
+      out << "src.AssumeTFF()" << std::endl;
+    }
+    else {
+      out << "src.AssumeBFF()" << std::endl;
+    }
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
-    out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 ).Weave()" << std::endl;
-    out << "cuda = srcuda.KTGMC_SourceFrame().OnCUDA(0)" << std::endl;
+    if (dbl) {
+      out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 ).DoubleWeave()" << std::endl;
+      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KDoubleWeave().OnCUDA(0)" << std::endl;
+    }
+    else {
+      out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 ).Weave()" << std::endl;
+      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KWeave().OnCUDA(0)" << std::endl;
+    }
 
     out << "ImageCompare(ref, cuda, 0)" << std::endl;
 
@@ -1760,9 +1772,81 @@ void TestBase::SourceFrameTest(TEST_FRAMES tf)
   }
 }
 
-TEST_F(TestBase, SourceFrameTest)
+TEST_F(TestBase, WeaveTest_DoubleTFF)
 {
-  SourceFrameTest(TF_MID);
+  WeaveTest(TF_MID, true, true);
+}
+
+TEST_F(TestBase, WeaveTest_DoubleBFF)
+{
+  WeaveTest(TF_MID, false, true);
+}
+
+TEST_F(TestBase, WeaveTest_TFF)
+{
+  WeaveTest(TF_MID, true, false);
+}
+
+TEST_F(TestBase, WeaveTest_BFF)
+{
+  WeaveTest(TF_MID, false, false);
+}
+
+#pragma endregion
+
+#pragma region Copy
+
+void TestBase::CopyTest(TEST_FRAMES tf, bool cuda)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+
+    if (cuda) {
+      out << "srcuda = src.OnCPU(0)" << std::endl;
+      out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 )" << std::endl;
+      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KCopy().OnCUDA(0)" << std::endl;
+    }
+    else {
+      out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 )" << std::endl;
+      out << "cuda = ref.KCopy()" << std::endl;
+    }
+
+    out << "ImageCompare(ref, cuda, 0)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, TF_MID, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, CopyTest_CUDA)
+{
+  CopyTest(TF_MID, true);
+}
+
+TEST_F(TestBase, CopyTest_CPU)
+{
+  CopyTest(TF_MID, false);
 }
 
 #pragma endregion
@@ -1815,54 +1899,6 @@ void TestBase::ErrorAdjustTest(TEST_FRAMES tf, bool chroma)
 TEST_F(TestBase, ErrorAdjustTest_WithC)
 {
   ErrorAdjustTest(TF_MID, true);
-}
-
-#pragma endregion
-
-#pragma region MergeInterlace
-
-void TestBase::MergeInterlaceTest(TEST_FRAMES tf)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "srcuda = src.OnCPU(0)" << std::endl;
-
-    // テストなのでわかりやすくするために同じソースを渡しているが
-    // 実際はフレーム数が違う前提なので、TF_ENDは動かない？ことに注意
-    out << "ref = Interleave( src.SeparateFields(), src.SeparateFields().SelectEvery( 4, 1,2 ) ).SelectEvery(4, 0,1,3,2 ).Weave()" << std::endl;
-    out << "cuda = srcuda.KTGMC_MergeInterlace(srcuda).OnCUDA(0)" << std::endl;
-
-    out << "ImageCompare(ref, cuda, 0)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, tf, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
-TEST_F(TestBase, MergeInterlaceTest)
-{
-  MergeInterlaceTest(TF_MID);
 }
 
 #pragma endregion

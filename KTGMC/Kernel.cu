@@ -15,6 +15,7 @@
 #include "ReduceKernel.cuh"
 #include "VectorFunctions.cuh"
 #include "GenericImageFunctions.cuh"
+#include "Misc.h"
 
 #ifndef NDEBUG
 //#if 1
@@ -2905,122 +2906,6 @@ public:
 };
 
 template <typename vpixel_t>
-__global__ void kl_source_frame(
-  vpixel_t* dst, const vpixel_t* top, const vpixel_t* bottom, int pitch4, int width4, int height2)
-{
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
-
-  if (x < width4 && y < height2) {
-    dst[x + (2 * y + 0) * pitch4] = top[x + (2 * y + 0) * pitch4];
-    dst[x + (2 * y + 1) * pitch4] = bottom[x + (2 * y + 1) * pitch4];
-  }
-}
-
-class MergeFieldsBase : public CUDAFilterBase
-{
-protected:
-  int logUVx;
-  int logUVy;
-
-  // この関数はKTGMC_SourceFrameと全く同じ
-  template <typename pixel_t>
-  void MergeFields(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, IScriptEnvironment2* env)
-  {
-    typedef typename VectorType<pixel_t>::type vpixel_t;
-    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
-
-    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
-
-    for (int p = 0; p < 3; ++p) {
-      const vpixel_t* topptr = reinterpret_cast<const vpixel_t*>(top->GetReadPtr(planes[p]));
-      const vpixel_t* bottomptr = reinterpret_cast<const vpixel_t*>(bottom->GetReadPtr(planes[p]));
-      vpixel_t* dstptr = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
-      int pitch4 = top->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
-
-      int width4 = vi.width / 4;
-      int height2 = vi.height / 2;
-
-      if (p > 0) {
-        width4 >>= logUVx;
-        height2 >>= logUVy;
-      }
-
-      dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height2, threads.y));
-      kl_source_frame << <blocks, threads, 0, stream >> >(
-        dstptr, topptr, bottomptr, pitch4, width4, height2);
-      DEBUG_SYNC;
-    }
-  }
-
-public:
-  MergeFieldsBase(PClip _child, IScriptEnvironment* env_)
-    : CUDAFilterBase(_child)
-    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
-    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-  { }
-};
-
-// プログレッシブ化されたフレームからソースにあるフィールドだけ抜き出してweave
-class KTGMC_SourceFrame : public MergeFieldsBase {
-
-  bool parity;
-public:
-  KTGMC_SourceFrame(PClip _child, IScriptEnvironment* env_)
-    : MergeFieldsBase(_child, env_)
-    , parity(_child->GetParity(0))
-  {
-    // フレーム数、FPSを半分
-    vi.num_frames /= 2;
-    vi.MulDivFPS(1, 2);
-  }
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-  {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
-
-    if (!IS_CUDA) {
-      env->ThrowError("[KTGMC_SourceFrame] CUDAフレームを入力してください");
-    }
-#if LOG_PRINT
-    if (IS_CUDA) {
-      printf("KTGMC_Bob[CUDA]: N=%d\n", n);
-    }
-#endif
-
-    PVideoFrame top = child->GetFrame(2 * n + 0, env);
-    PVideoFrame bottom = child->GetFrame(2 * n + 1, env);
-    PVideoFrame dst = env->NewVideoFrame(vi);
-
-    if (parity == false) {
-      // BFFなので逆にする
-      std::swap(top, bottom);
-    }
-
-    int pixelSize = vi.ComponentSize();
-    switch (pixelSize) {
-    case 1:
-      MergeFields<uint8_t>(dst, top, bottom, env);
-      break;
-    case 2:
-      MergeFields<uint16_t>(dst, top, bottom, env);
-      break;
-    default:
-      env->ThrowError("[KTGMC_SourceFrame] 未対応フォーマット");
-    }
-
-    return dst;
-  }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    return new KTGMC_SourceFrame(
-      args[0].AsClip(),
-      env);
-  }
-};
-
-template <typename vpixel_t>
 __global__ void kl_error_adjust(
   vpixel_t* pDst,
   const vpixel_t* __restrict__ pSrc0,
@@ -3098,63 +2983,206 @@ public:
   }
 };
 
-// mt_lutxy("clamp_f x " + string(errorAdjust1 + 1) + " * y " + string(errorAdjust1) + " * -")を計算
-class KTGMC_MergeInterlace : public MergeFieldsBase
+template <typename vpixel_t>
+__global__ void kl_weave(
+  vpixel_t* dst, int dst_pitch4,
+  const vpixel_t* top, int top_pitch4,
+  const vpixel_t* bottom, int bottom_pitch4,
+  int width4, int height2)
 {
-  PClip intl;
-  bool parity;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height2) {
+    dst[x + (2 * y + 0) * dst_pitch4] = top[x + y * top_pitch4];
+    dst[x + (2 * y + 1) * dst_pitch4] = bottom[x + y * bottom_pitch4];
+  }
+}
+
+class KDoubleWeave : public CUDAFilterBase
+{
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  void Proc(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    for (int p = 0; p < 3; ++p) {
+      const vpixel_t* pTop = reinterpret_cast<const vpixel_t*>(top->GetReadPtr(planes[p]));
+      const vpixel_t* pBottom = reinterpret_cast<const vpixel_t*>(bottom->GetReadPtr(planes[p]));
+      vpixel_t* pDst = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+      int topPitch4 = top->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
+      int bottomPitch4 = bottom->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
+      int dstPitch4 = dst->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
+
+      int width4 = vi.width / 4;
+      int height2 = vi.height / 2;
+
+      if (p > 0) {
+        width4 >>= logUVx;
+        height2 >>= logUVy;
+      }
+
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height2, threads.y));
+      kl_weave << <blocks, threads, 0, stream >> >(
+        pDst, dstPitch4, pTop, topPitch4, pBottom, bottomPitch4, width4, height2);
+      DEBUG_SYNC;
+    }
+  }
 
 public:
-  KTGMC_MergeInterlace(PClip prog, PClip intl, IScriptEnvironment* env_)
-    : MergeFieldsBase(prog, env_)
-    , parity(intl->GetParity(0))
-    , intl(intl)
-  { }
+  KDoubleWeave(PClip child, IScriptEnvironment* env_)
+    : CUDAFilterBase(child)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    vi.height *= 2;
+    vi.SetFieldBased(false);
+  }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 
     if (!IS_CUDA) {
-      env->ThrowError("[KTGMC_MergeInterlace] CUDAフレームを入力してください");
+      env->ThrowError("[KDoubleWeave] CUDAフレームを入力してください");
     }
 #if LOG_PRINT
     if (IS_CUDA) {
-      printf("KTGMC_MergeInterlace[CUDA]: N=%d\n", n);
+      printf("KDoubleWeave[CUDA]: N=%d\n", n);
     }
 #endif
-
-    PVideoFrame top = child->GetFrame(n, env);
-    PVideoFrame bottom = child->GetFrame(n >> 1, env);
+    PVideoFrame a = child->GetFrame(n, env);
+    PVideoFrame b = child->GetFrame(n + 1, env);
     PVideoFrame dst = env->NewVideoFrame(vi);
+    const bool parity = child->GetParity(n);
 
-    // この状態ではtopがプログレッシブフレームになっている
-    // TFFかつ偶数フレーム or BFFかつ奇数フレームのときは
-    // topをインターレースフレームにしたいので逆にする
-    bool bswap = (parity && ((n & 1) == 0)) || (!parity && ((n & 1) != 0));
-    if (bswap) {
-      std::swap(top, bottom);
+    if (!parity) {
+      std::swap(a, b);
     }
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
     case 1:
-      MergeFields<uint8_t>(dst, top, bottom, env);
+      Proc<uint8_t>(dst, a, b, env);
       break;
     case 2:
-      MergeFields<uint16_t>(dst, top, bottom, env);
+      Proc<uint16_t>(dst, a, b, env);
       break;
     default:
-      env->ThrowError("[KTGMC_MergeInterlace] 未対応フォーマット");
+      env->ThrowError("[KDoubleWeave] 未対応フォーマット");
     }
 
     return dst;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-    return new KTGMC_MergeInterlace(
+    return new KDoubleWeave(
       args[0].AsClip(),
-      args[1].AsClip(),
+      env);
+  }
+
+  static AVSValue __cdecl CreateWeave(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    PClip clip = args[0].AsClip();
+    if (!clip->GetVideoInfo().IsFieldBased()) {
+      env->ThrowError("KWeave: Weave should be applied on field-based material: use AssumeFieldBased() beforehand");
+    }
+    AVSValue selectargs[3] = { KDoubleWeave::Create(args, 0, env), 2, 0 };
+    return env->Invoke("SelectEvery", AVSValue(selectargs, 3));
+  }
+};
+
+class KCopy : public GenericVideoFilter
+{
+  int logUVx;
+  int logUVy;
+
+  template <typename pixel_t>
+  void Proc(PVideoFrame& dst, PVideoFrame& src, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    for (int p = 0; p < 3; ++p) {
+      if (IS_CUDA) {
+        const vpixel_t* pSrc = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
+        vpixel_t* pDst = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+        int srcPitch4 = src->GetPitch(planes[p]) / sizeof(vpixel_t);
+        int dstPitch4 = dst->GetPitch(planes[p]) / sizeof(vpixel_t);
+
+        int width4 = vi.width / 4;
+        int height = vi.height;
+
+        if (p > 0) {
+          width4 >>= logUVx;
+          height >>= logUVy;
+        }
+
+        dim3 threads(32, 16);
+        dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+        kl_copy << <blocks, threads, 0, stream >> >(
+          pDst, dstPitch4, pSrc, srcPitch4, width4, height);
+        DEBUG_SYNC;
+      }
+      else {
+        const uint8_t* pSrc = src->GetReadPtr(planes[p]);
+        uint8_t* pDst = dst->GetWritePtr(planes[p]);
+        int srcPitch = src->GetPitch(planes[p]);
+        int dstPitch = dst->GetPitch(planes[p]);
+        int rowSize = src->GetRowSize(planes[p]);
+        int height = src->GetHeight(planes[p]);
+
+        env->BitBlt(pDst, dstPitch, pSrc, srcPitch, rowSize, height);
+      }
+    }
+  }
+
+public:
+  KCopy(PClip child, IScriptEnvironment* env_)
+    : GenericVideoFilter(child)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  { }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      Proc<uint8_t>(dst, src, env);
+      break;
+    case 2:
+      Proc<uint16_t>(dst, src, env);
+      break;
+    default:
+      env->ThrowError("[KCopy] 未対応フォーマット");
+    }
+
+    return dst;
+  }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    return 0;
+  };
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KCopy(
+      args[0].AsClip(),
       env);
   }
 };
@@ -3187,11 +3215,10 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KMergeLuma", "cc[weight]f", KMerge::CreateMergeLuma, 0);
   env->AddFunction("KMergeChroma", "cc[weight]f", KMerge::CreateMergeChroma, 0);
 
-  // SeparateFields().SelectEvery( 4, 0,3 ).Weave()
-  env->AddFunction("KTGMC_SourceFrame", "c", KTGMC_SourceFrame::Create, 0);
+  env->AddFunction("KDoubleWeave", "c", KDoubleWeave::Create, 0);
+  env->AddFunction("KWeave", "c", KDoubleWeave::CreateWeave, 0);
+  env->AddFunction("KCopy", "c", KCopy::Create, 0);
+
   // mt_lutxy( XX, YY, "clamp_f x " + string(errorAdj + 1) + " * y " + string(errorAdj) + " * -" )
   env->AddFunction("KTGMC_ErrorAdjust", "cc[errorAdj]f[y]i[u]i[v]i", KTGMC_ErrorAdjust::Create, 0);
-
-  // Interleave( Source.SeparateFields(), Input.SeparateFields().SelectEvery( 4, 1,2 ) ).SelectEvery(4, 0,1,3,2 ).Weave()
-  env->AddFunction("KTGMC_MergeInterlace", "c[intl]c", KTGMC_MergeInterlace::Create, 0);
 }

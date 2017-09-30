@@ -51,20 +51,23 @@ class ImageCompare : GenericVideoFilter
   const int thresh;
 
   template <typename pixel_t>
-  void ComparePlanar(pixel_t* d, const pixel_t* a, const pixel_t* b, int width, int height, int pitch, IScriptEnvironment2* env)
+  void ComparePlanar(
+    pixel_t* d, int dpitch, 
+    const pixel_t* a, int apitch,
+    const pixel_t* b, int bpitch, 
+    int width, int height, IScriptEnvironment2* env)
   {
     //DebugWriteBitmap("bob-ref-%d.bmp", (const uint8_t*)a, width, height, pitch, 1);
     //DebugWriteBitmap("bob-cuda-%d.bmp", (const uint8_t*)b, width, height, pitch, 1);
 
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
-        int off = x + y * pitch;
-        pixel_t diff = std::abs(a[off] - b[off]);
+        pixel_t diff = std::abs(a[x + y * apitch] - b[x + y * bpitch]);
         if (diff > thresh) {
-          printf("miss match %d vs %d at (%d,%d)\n", a[off], b[off], x, y);
+          printf("miss match %d vs %d at (%d,%d)\n", a[x + y * apitch], b[x + y * bpitch], x, y);
           env->ThrowError("[ImageCompare] 画像が一致しません。テスト失敗");
         }
-        d[off] = diff;
+        d[x + y * dpitch] = diff;
       }
     }
   }
@@ -86,14 +89,23 @@ class ImageCompare : GenericVideoFilter
     int nUVShiftX = vi.GetPlaneWidthSubsampling(PLANAR_U);
     int nUVShiftY = vi.GetPlaneHeightSubsampling(PLANAR_U);
 
-    ComparePlanar<pixel_t>(dstY, f1Y, f2Y,
-      vi.width, vi.height, dst->GetPitch(PLANAR_Y) >> nPixelShift, env);
+    ComparePlanar<pixel_t>(
+      dstY, dst->GetPitch(PLANAR_Y) >> nPixelShift, 
+      f1Y, frame1->GetPitch(PLANAR_Y) >> nPixelShift,
+      f2Y, frame2->GetPitch(PLANAR_Y) >> nPixelShift,
+      vi.width, vi.height, env);
 
     if (chroma) {
-      ComparePlanar<pixel_t>(dstU, f1U, f2U,
-        vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_U) >> nPixelShift, env);
-      ComparePlanar<pixel_t>(dstV, f1V, f2V,
-        vi.width >> nUVShiftX, vi.height >> nUVShiftY, dst->GetPitch(PLANAR_V) >> nPixelShift, env);
+      ComparePlanar<pixel_t>(
+        dstU, dst->GetPitch(PLANAR_U) >> nPixelShift,
+        f1U, frame1->GetPitch(PLANAR_U) >> nPixelShift,
+        f2U, frame2->GetPitch(PLANAR_U) >> nPixelShift,
+        vi.width >> nUVShiftX, vi.height >> nUVShiftY, env);
+      ComparePlanar<pixel_t>(
+        dstV, dst->GetPitch(PLANAR_V) >> nPixelShift,
+        f1V, frame1->GetPitch(PLANAR_V) >> nPixelShift,
+        f2V, frame2->GetPitch(PLANAR_V) >> nPixelShift,
+        vi.width >> nUVShiftX, vi.height >> nUVShiftY, env);
     }
   }
 

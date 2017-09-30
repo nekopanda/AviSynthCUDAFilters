@@ -176,7 +176,7 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="KDeint.cpp" />
+    <ClCompile Include="Misc.cpp" />
     <ClCompile Include="MV.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -189,6 +189,7 @@
     <ClInclude Include="CudaDebug.h" />
     <ClInclude Include="CudaKernelBase.h" />
     <ClInclude Include="GenericImageFunctions.cuh" />
+    <ClInclude Include="Misc.h" />
     <ClInclude Include="MVKernel.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

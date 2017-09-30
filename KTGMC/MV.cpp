@@ -13,6 +13,7 @@
 #include "CommonFunctions.h"
 #include "MVKernel.h"
 #include "DeviceLocalData.h"
+#include "Misc.h"
 
 #if 1
 #include "DebugWriter.h"
@@ -21,15 +22,6 @@
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
 #define LOG_PRINT 0
-
-static int GetDeviceType(const PClip& clip)
-{
-  int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
-  if (devtypes == 0) {
-    return DEV_TYPE_CPU;
-  }
-  return devtypes;
-}
 
 enum MVPlaneSet
 {
