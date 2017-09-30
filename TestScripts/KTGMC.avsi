@@ -664,12 +664,12 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	                                                             ThSAD1, ThSCD1, ThSCD2, SourceMatch, MatchTR1, MatchEdi, MatchNNSize, MatchNNeurons, \
 	                                                             MatchEdiQual, MatchEdiMaxD, MatchTR2, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, \
 	                                                             MatchEdiMaxD2, MatchEnhance, EdiThreads, lsb )
-	return match
+
 	# Lossless=2 - after preparing an interpolated, de-shimmered clip, restore the original source fields into it and clean up any artefacts.
 	# This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail.
 	# However, it can introduce minor combing. This setting is best used together with source-match (it's effectively the final source-match stage).
 	lossed1 = (Lossless == 2) ? KTGMC_MakeLossless( match, innerClip, InputType ) : match
-
+	return lossed1
 
 	#---------------------------------------
 	# Resharpen / retouch output

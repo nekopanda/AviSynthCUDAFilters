@@ -93,6 +93,7 @@ protected:
   void TweakSearchClipTest(TEST_FRAMES tf, bool chroma);
   void SourceFrameTest(TEST_FRAMES tf);
   void ErrorAdjustTest(TEST_FRAMES tf, bool chroma);
+  void MergeInterlaceTest(TEST_FRAMES tf);
 
   void MergeTest(TEST_FRAMES tf, bool chroma);
 
@@ -824,6 +825,46 @@ void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
     printf("%s\n", err.msg);
     GTEST_FAIL();
   }
+}
+
+TEST_F(TestBase, RemoveGrain_Mode1WithC)
+{
+  RemoveGrainTest(TF_MID, 1, true);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode1NoC)
+{
+  RemoveGrainTest(TF_MID, 1, false);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode2WithC)
+{
+  RemoveGrainTest(TF_MID, 2, true);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode2NoC)
+{
+  RemoveGrainTest(TF_MID, 2, false);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode3WithC)
+{
+  RemoveGrainTest(TF_MID, 3, true);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode3NoC)
+{
+  RemoveGrainTest(TF_MID, 3, false);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode4WithC)
+{
+  RemoveGrainTest(TF_MID, 4, true);
+}
+
+TEST_F(TestBase, RemoveGrain_Mode4NoC)
+{
+  RemoveGrainTest(TF_MID, 4, false);
 }
 
 TEST_F(TestBase, RemoveGrain_Mode12WithC)
@@ -1644,6 +1685,54 @@ TEST_F(TestBase, ErrorAdjustTest_WithC)
 
 #pragma endregion
 
+#pragma region MergeInterlace
+
+void TestBase::MergeInterlaceTest(TEST_FRAMES tf)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KTGMC.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    // テストなのでわかりやすくするために同じソースを渡しているが
+    // 実際はフレーム数が違う前提なので、TF_ENDは動かない？ことに注意
+    out << "ref = Interleave( src.SeparateFields(), src.SeparateFields().SelectEvery( 4, 1,2 ) ).SelectEvery(4, 0,1,3,2 ).Weave()" << std::endl;
+    out << "cuda = srcuda.KTGMC_MergeInterlace(srcuda).OnCUDA(0)" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 0)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(TestBase, MergeInterlaceTest)
+{
+  MergeInterlaceTest(TF_MID);
+}
+
+#pragma endregion
+
 #pragma region NNEDI3
 
 void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn)
@@ -1927,7 +2016,7 @@ TEST_F(TestBase, DeviceMatchingBug)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.SourceFrameTest*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

@@ -262,13 +262,11 @@ __device__ bool dev_check_mv(int x, int y, const int* rect)
 }
 
 __device__ int dev_max(int a, int b, int c) {
-  int ab = (a > b) ? a : b;
-  return (ab > c) ? ab : c;
+  return max(a, max(b, c));
 }
 
 __device__ int dev_min(int a, int b, int c) {
-  int ab = (a < b) ? a : b;
-  return (ab < c) ? ab : c;
+  return min(a, min(b, c));
 }
 
 __device__ int dev_sq_norm(int ax, int ay, int bx, int by) {

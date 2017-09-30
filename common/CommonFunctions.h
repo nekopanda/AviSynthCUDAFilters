@@ -38,6 +38,8 @@ inline static int nlog2(int i)
 #endif
 }
 
+// CUDA‚Ìê‡‚ÍŠù‚É’è‹`‚³‚ê‚Ä‚¢‚éŠÖ”‚ªintrinsic‚ğŒÄ‚ñ‚Å‚­‚ê‚é‚Ì‚Å•K—v‚È‚¢
+#ifndef __CUDA_ARCH__
 template<typename T>
 __host__ __device__ T min(T v1, T v2)
 {
@@ -49,12 +51,12 @@ __host__ __device__ T max(T v1, T v2)
 {
   return v1 > v2 ? v1 : v2;
 }
+#endif
 
 template<typename T>
-__host__ __device__ T clamp(T n, T min, T max)
+__host__ __device__ T clamp(T n, T minv, T maxv)
 {
-  n = n > max ? max : n;
-  return n < min ? min : n;
+  return max(minv, min(n, maxv));
 }
 
 #ifdef ENABLE_CUDA

@@ -829,6 +829,86 @@ struct RG20Vertical {
   }
 };
 
+template<typename T, typename CompareAndSwap>
+__device__ void dev_sort_8elem(T& a0, T& a1, T& a2, T& a3, T& a4, T& a5, T& a6, T& a7)
+{
+  CompareAndSwap cas;
+
+  // Batcher's odd-even mergesort
+  // 8要素なら19comparisonなので最小のソーティングネットワークになるっぽい
+  cas(a0, a1);
+  cas(a2, a3);
+  cas(a4, a5);
+  cas(a6, a7);
+
+  cas(a0, a2);
+  cas(a1, a3);
+  cas(a4, a6);
+  cas(a5, a7);
+  
+  cas(a1, a2);
+  cas(a5, a6);
+
+  cas(a0, a4);
+  cas(a1, a5);
+  cas(a2, a6);
+  cas(a3, a7);
+
+  cas(a2, a4);
+  cas(a3, a5);
+
+  cas(a1, a2);
+  cas(a3, a4);
+  cas(a5, a6);
+}
+
+struct IntCompareAndSwap {
+  __device__ void operator()(int& a, int& b) {
+    int a_ = min(a, b);
+    int b_ = max(a, b);
+    a = a_; b = b_;
+  }
+};
+
+template <typename pixel_t, int N>
+__global__ void kl_rg_clip(
+  pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockDim.x * blockIdx.x;
+  int y = threadIdx.y + blockDim.y * blockIdx.y;
+
+  if (x < width && y < height) {
+    int a0 = pSrc[x - 1 + (y - 1) * pitch];
+    int a1 = pSrc[x + (y - 1) * pitch];
+    int a2 = pSrc[x + 1 + (y - 1) * pitch];
+    int a3 = pSrc[x - 1 + y * pitch];
+    int s = pSrc[x + y * pitch];
+    int a4 = pSrc[x + 1 + y * pitch];
+    int a5 = pSrc[x - 1 + (y + 1) * pitch];
+    int a6 = pSrc[x + (y + 1) * pitch];
+    int a7 = pSrc[x + 1 + (y + 1) * pitch];
+
+    dev_sort_8elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7);
+
+    int tmp;
+    switch (N) {
+    case 1: // 1st
+      tmp = clamp(s, a0, a7);
+      break;
+    case 2: // 2nd
+      tmp = clamp(s, a1, a6);
+      break;
+    case 3: // 3rd
+      tmp = clamp(s, a2, a5);
+      break;
+    case 4: // 4th
+      tmp = clamp(s, a3, a4);
+      break;
+    }
+    pDst[x + y * pitch] = tmp;
+  }
+}
+
 class KRemoveGrain : public CUDAFilterBase {
   
   int mode;
@@ -880,6 +960,30 @@ class KRemoveGrain : public CUDAFilterBase {
       dim3 blocks(nblocks(width - 2, threads.x), nblocks(height - 2, threads.y));
 
       switch (mode) {
+      case 1:
+        // Clips the pixel with the minimum and maximum of the 8 neighbour pixels.
+        kl_rg_clip<pixel_t, 1>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+      case 2:
+        // Clips the pixel with the second minimum and maximum of the 8 neighbour pixels
+        kl_rg_clip<pixel_t, 2>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+      case 3:
+        // Clips the pixel with the third minimum and maximum of the 8 neighbour pixels.
+        kl_rg_clip<pixel_t, 3>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
+      case 4:
+        // Clips the pixel with the fourth minimum and maximum of the 8 neighbour pixels, which is equivalent to a median filter.
+        kl_rg_clip<pixel_t, 4>
+          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+        DEBUG_SYNC;
+        break;
       case 11:
       case 12:
         // [1 2 1] horizontal and vertical kernel blur
@@ -927,6 +1031,10 @@ public:
       switch (modes[p]) {
       case -1:
       case 0:
+      case 1:
+      case 2:
+      case 3:
+      case 4:
       case 11:
       case 12:
       case 20:
@@ -2405,16 +2513,15 @@ __global__ void kl_source_frame(
   }
 }
 
-// プログレッシブ化されたフレームからソースにあるフィールドだけ抜き出してweave
-class KTGMC_SourceFrame : public CUDAFilterBase {
-
-  bool parity;
-
+class MergeFieldsBase : public CUDAFilterBase
+{
+protected:
   int logUVx;
   int logUVy;
 
+  // この関数はKTGMC_SourceFrameと全く同じ
   template <typename pixel_t>
-  void Proc(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, IScriptEnvironment2* env)
+  void MergeFields(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2437,23 +2544,28 @@ class KTGMC_SourceFrame : public CUDAFilterBase {
 
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height2, threads.y));
-      kl_source_frame<<<blocks, threads, 0, stream>>>(
+      kl_source_frame << <blocks, threads, 0, stream >> >(
         dstptr, topptr, bottomptr, pitch4, width4, height2);
       DEBUG_SYNC;
     }
   }
 
-  void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
-    ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
-  {
-  }
-
 public:
-  KTGMC_SourceFrame(PClip _child, IScriptEnvironment* env_)
+  MergeFieldsBase(PClip _child, IScriptEnvironment* env_)
     : CUDAFilterBase(_child)
-    , parity(_child->GetParity(0))
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  { }
+};
+
+// プログレッシブ化されたフレームからソースにあるフィールドだけ抜き出してweave
+class KTGMC_SourceFrame : public MergeFieldsBase {
+
+  bool parity;
+public:
+  KTGMC_SourceFrame(PClip _child, IScriptEnvironment* env_)
+    : MergeFieldsBase(_child, env_)
+    , parity(_child->GetParity(0))
   {
     // フレーム数、FPSを半分
     vi.num_frames /= 2;
@@ -2485,10 +2597,10 @@ public:
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
     case 1:
-      Proc<uint8_t>(dst, top, bottom, env);
+      MergeFields<uint8_t>(dst, top, bottom, env);
       break;
     case 2:
-      Proc<uint16_t>(dst, top, bottom, env);
+      MergeFields<uint16_t>(dst, top, bottom, env);
       break;
     default:
       env->ThrowError("[KTGMC_SourceFrame] 未対応フォーマット");
@@ -2582,6 +2694,67 @@ public:
   }
 };
 
+// mt_lutxy("clamp_f x " + string(errorAdjust1 + 1) + " * y " + string(errorAdjust1) + " * -")を計算
+class KTGMC_MergeInterlace : public MergeFieldsBase
+{
+  PClip intl;
+  bool parity;
+
+public:
+  KTGMC_MergeInterlace(PClip prog, PClip intl, IScriptEnvironment* env_)
+    : MergeFieldsBase(prog, env_)
+    , parity(intl->GetParity(0))
+    , intl(intl)
+  { }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    if (!IS_CUDA) {
+      env->ThrowError("[KTGMC_MergeInterlace] CUDAフレームを入力してください");
+    }
+#if LOG_PRINT
+    if (IS_CUDA) {
+      printf("KTGMC_MergeInterlace[CUDA]: N=%d\n", n);
+    }
+#endif
+
+    PVideoFrame top = child->GetFrame(n, env);
+    PVideoFrame bottom = child->GetFrame(n >> 1, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    // この状態ではtopがプログレッシブフレームになっている
+    // TFFかつ偶数フレーム or BFFかつ奇数フレームのときは
+    // topをインターレースフレームにしたいので逆にする
+    bool bswap = (parity && ((n & 1) == 0)) || (!parity && ((n & 1) != 0));
+    if (bswap) {
+      std::swap(top, bottom);
+    }
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      MergeFields<uint8_t>(dst, top, bottom, env);
+      break;
+    case 2:
+      MergeFields<uint16_t>(dst, top, bottom, env);
+      break;
+    default:
+      env->ThrowError("[KTGMC_MergeInterlace] 未対応フォーマット");
+    }
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_MergeInterlace(
+      args[0].AsClip(),
+      args[1].AsClip(),
+      env);
+  }
+};
+
 void AddFuncKernel(IScriptEnvironment2* env)
 {
   env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
@@ -2612,4 +2785,7 @@ void AddFuncKernel(IScriptEnvironment2* env)
   env->AddFunction("KTGMC_SourceFrame", "c", KTGMC_SourceFrame::Create, 0);
   // mt_lutxy( XX, YY, "clamp_f x " + string(errorAdj + 1) + " * y " + string(errorAdj) + " * -" )
   env->AddFunction("KTGMC_ErrorAdjust", "cc[errorAdj]f[y]i[u]i[v]i", KTGMC_ErrorAdjust::Create, 0);
+
+  // Interleave( Source.SeparateFields(), Input.SeparateFields().SelectEvery( 4, 1,2 ) ).SelectEvery(4, 0,1,3,2 ).Weave()
+  env->AddFunction("KTGMC_MergeInterlace", "c[intl]c", KTGMC_MergeInterlace::Create, 0);
 }

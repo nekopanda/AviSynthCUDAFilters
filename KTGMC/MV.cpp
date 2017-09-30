@@ -3165,7 +3165,7 @@ class KMSuperCheck : public GenericVideoFilter
           for (int x = 0; x < w; ++x) {
             pixel_t kv = kptr[x + y * nPitch];
             pixel_t mv = mptr[x + y * nPitch];
-            if (std::abs(kv - mv) > 1) {
+            if (std::abs(kv - mv) > 2) {
             //if (kv != mv) {
               env->ThrowError("ERROR !!!");
             }
@@ -3379,7 +3379,7 @@ public:
     int* pMv = reinterpret_cast<int*>(ret->GetWritePtr());
 
     // テンプレートからコピー
-    std::copy(tmpldata.begin(), tmpldata.end(), pMv);
+    memcpy(pMv, tmpldata.data(), tmpldata.size() * sizeof(int));
 
     pMv += pMv[0] / sizeof(int);
 
@@ -3564,7 +3564,7 @@ public:
     }
 
 		if (misCount > 100) {
-			env->ThrowError("Motion vector too many miss!!");
+			env->ThrowError("Motion vector too many miss!! (%d)", misCount);
 		}
 
     return ret;
