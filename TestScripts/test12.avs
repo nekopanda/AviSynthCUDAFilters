@@ -4,17 +4,28 @@ SetMemoryMax(2048, type=DEV_TYPE_CUDA)
 platform = "x64"
 #config = "Debug"
 config = "Release"
+configKFM = "Release"
 prefix = "../" + platform + "/" + config + "/"
+prefixKFM = "../" + platform + "/" + configKFM + "/"
 LoadPlugin(prefix + "KNNEDI3.dll")
 LoadPlugin(prefix + "KTGMC.dll")
+LoadPlugin(prefixKFM + "KFM.dll")
 
 Import(".\KTGMC.avsi")
 
-src = LWLibavVideoSource("test.ts").Trim(0, 1000)
+src = LWLibavVideoSource("news.ts")
+#return src
 
-src.QTGMC(SourceMatch=3, Lossless=2, tr0=1, tr1=1, tr2=1)
-#src.OnCPU(2).KTGMC(SourceMatch=3, Lossless=2, tr0=1, tr1=1, tr2=1).OnCUDA(2)
+#bobbed = src.QTGMC(Preset="Medium")
+#bobbed = src.OnCPU(0).KTGMC(Preset="Medium").OnCUDA(2)
 #DumpFilterGraph("T:\sandbox\t28\17\out.dot", mode=1)
-Prefetch(6)
+
+KFMDev(src, 5, 100, 100, 1)
+
+#KMergeDev(bobbed, src, 8, 0)
+#AudioDub(LWLibavAudioSource("news.ts"))
+#Prefetch(6)
+
+#Interleave(last, bobbed.Subtitle("KTGMC"))
 
 #AudioDub(LWLibavAudioSource("test.ts"))

@@ -1356,6 +1356,552 @@ public:
   }
 };
 
+class KMergeDev : public GenericVideoFilter
+{
+  enum {
+    DIST = 1,
+    N_REFS = DIST * 2 + 1,
+    BLK_SIZE = 8
+  };
+
+  typedef uint8_t pixel_t;
+
+  PClip source;
+
+  float thresh;
+  int debug;
+
+  int logUVx;
+  int logUVy;
+
+  int nBlkX;
+  int nBlkY;
+
+  PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+  {
+    ref = clamp(ref, 0, vi.num_frames);
+    return source->GetFrame(ref, env);
+  }
+public:
+  KMergeDev(PClip clip60, PClip source, float thresh, int debug, IScriptEnvironment* env)
+    : GenericVideoFilter(clip60)
+    , source(source)
+    , thresh(thresh)
+    , debug(debug)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    nBlkX = nblocks(vi.width, BLK_SIZE);
+    nBlkY = nblocks(vi.height, BLK_SIZE);
+
+    VideoInfo srcvi = source->GetVideoInfo();
+    if (vi.num_frames != srcvi.num_frames * 2) {
+      env->ThrowError("[KMergeDev] Num frames don't match");
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int n30 = n >> 1;
+
+    PVideoFrame frames[N_REFS];
+    for (int i = 0; i < N_REFS; ++i) {
+      frames[i] = GetRefFrame(i + n30 - DIST, env);
+    }
+    PVideoFrame inframe = child->GetFrame(n, env);
+
+    struct DIFF { float v[3]; };
+
+    std::vector<DIFF> diffs(nBlkX * nBlkY);
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    // diffを取得
+    for (int p = 0; p < 3; ++p) {
+      const uint8_t* pRefs[N_REFS];
+      for (int i = 0; i < N_REFS; ++i) {
+        pRefs[i] = frames[i]->GetReadPtr(planes[p]);
+      }
+      int pitch = frames[0]->GetPitch(planes[p]);
+
+      int width = vi.width;
+      int height = vi.height;
+      int blksizeX = BLK_SIZE;
+      int blksizeY = BLK_SIZE;
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+        blksizeX >>= logUVx;
+        blksizeY >>= logUVy;
+      }
+
+      for (int by = 0; by < nBlkY; ++by) {
+        for (int bx = 0; bx < nBlkX; ++bx) {
+          int ystart = by * blksizeY;
+          int yend = std::min(ystart + blksizeY, height);
+          int xstart = bx * blksizeX;
+          int xend = std::min(xstart + blksizeX, width);
+
+          int diff = 0;
+          for (int y = ystart; y < yend; ++y) {
+            for (int x = xstart; x < xend; ++x) {
+              int off = x + y * pitch;
+              int minv = 0xFFFF;
+              int maxv = 0;
+              for (int i = 0; i < N_REFS; ++i) {
+                int v = pRefs[i][off];
+                minv = std::min(minv, v);
+                maxv = std::max(maxv, v);
+              }
+              int maxdiff = maxv - minv;
+              diff += maxdiff;
+            }
+          }
+
+          diffs[bx + by * nBlkX].v[p] = (float)diff / (blksizeX * blksizeY);
+        }
+      }
+    }
+
+    // フレーム作成
+    PVideoFrame& src = frames[DIST];
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    for (int p = 0; p < 3; ++p) {
+      const pixel_t* pSrc = src->GetReadPtr(planes[p]);
+      const pixel_t* pIn = inframe->GetReadPtr(planes[p]);
+      pixel_t* pDst = dst->GetWritePtr(planes[p]);
+      int pitch = src->GetPitch(planes[p]);
+
+      int width = vi.width;
+      int height = vi.height;
+      int blksizeX = BLK_SIZE;
+      int blksizeY = BLK_SIZE;
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+        blksizeX >>= logUVx;
+        blksizeY >>= logUVy;
+      }
+
+      for (int by = 0; by < nBlkY; ++by) {
+        for (int bx = 0; bx < nBlkX; ++bx) {
+          int ystart = by * blksizeY;
+          int yend = std::min(ystart + blksizeY, height);
+          int xstart = bx * blksizeX;
+          int xend = std::min(xstart + blksizeX, width);
+
+          DIFF& diff = diffs[bx + by * nBlkX];
+          bool isStatic = (diff.v[0] < thresh) && (diff.v[1] < thresh) && (diff.v[2] < thresh);
+
+          if ((debug == 1 && isStatic) || (debug == 2 && !isStatic)) {
+            for (int y = ystart; y < yend; ++y) {
+              for (int x = xstart; x < xend; ++x) {
+                int off = x + y * pitch;
+                pDst[off] = 20;
+              }
+            }
+          }
+          else {
+            const pixel_t* pFrom = (isStatic ? pSrc : pIn);
+            for (int y = ystart; y < yend; ++y) {
+              for (int x = xstart; x < xend; ++x) {
+                int off = x + y * pitch;
+                pDst[off] = pFrom[off];
+              }
+            }
+            if (isStatic) {
+              // 上下方向の縞をなくすため上下のしきい値以下のピクセルと平均化する
+              for (int y = ystart + 1; y < yend - 1; ++y) {
+                for (int x = xstart; x < xend; ++x) {
+                  int p0 = pFrom[x + (y - 1) * pitch];
+                  int p1 = pFrom[x + (y + 0) * pitch];
+                  int p2 = pFrom[x + (y + 1) * pitch];
+                  p0 = (std::abs(p0 - p1) <= thresh) ? p0 : p1;
+                  p2 = (std::abs(p2 - p1) <= thresh) ? p2 : p1;
+                  // 2項分布でマージ
+                  pDst[x + y * pitch] = (p0 + 2 * p1 + p2 + 2) >> 2;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KMergeDev(
+      args[0].AsClip(),       // clip60
+      args[1].AsClip(),       // source
+      args[2].AsFloat(2),     // thresh
+      args[3].AsInt(0),       // debug
+      env);
+  }
+};
+
+class KFMDev : public GenericVideoFilter
+{
+  enum {
+    DIST = 1,
+    N_REFS = DIST * 2 + 1,
+    BLK_SIZE = 8
+  };
+
+  typedef uint8_t pixel_t;
+
+  float thresh1;
+  float thresh2;
+  float thresh3;
+  float chromaScale;
+  int debug;
+
+  int logUVx;
+  int logUVy;
+
+  int nBlkX;
+  int nBlkY;
+
+  PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+  {
+    ref = clamp(ref, 0, vi.num_frames);
+    return child->GetFrame(ref, env);
+  }
+
+  void CompareFieldN1(const PVideoFrame& base, const PVideoFrame& ref, bool isTop, FieldMathingScore* fms)
+  {
+    const pixel_t* baseY = reinterpret_cast<const pixel_t*>(base->GetReadPtr(PLANAR_Y));
+    const pixel_t* baseU = reinterpret_cast<const pixel_t*>(base->GetReadPtr(PLANAR_U));
+    const pixel_t* baseV = reinterpret_cast<const pixel_t*>(base->GetReadPtr(PLANAR_V));
+    const pixel_t* refY = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(PLANAR_Y));
+    const pixel_t* refU = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(PLANAR_U));
+    const pixel_t* refV = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(PLANAR_V));
+
+    int pitchY = base->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = base->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >>logUVy;
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        int yStart = by * BLK_SIZE;
+        int yEnd = min(yStart + BLK_SIZE, vi.height);
+        int xStart = bx * BLK_SIZE;
+        int xEnd = min(xStart + BLK_SIZE, vi.width);
+
+        float sumY = 0;
+
+        for (int y = yStart + (isTop ? 0 : 1); y < yEnd; y += 2) {
+          int ypp = max(y - 2, 0);
+          int yp = max(y - 1, 0);
+          int yn = min(y + 1, vi.height - 1);
+          int ynn = min(y + 2, vi.height - 1);
+
+          for (int x = xStart; x < xEnd; ++x) {
+            pixel_t a = baseY[x + ypp * pitchY];
+            pixel_t b = refY[x + yp * pitchY];
+            pixel_t c = baseY[x + y * pitchY];
+            pixel_t d = refY[x + yn * pitchY];
+            pixel_t e = baseY[x + ynn * pitchY];
+            float t = (a + 4 * c + e - 3 * (b + d)) * 0.1667f;
+            t *= t;
+            if (t > 15 * 15) {
+              t = t * 16 - 15 * 15 * 15;
+            }
+            sumY += t;
+          }
+        }
+
+        int yStartUV = yStart >> logUVy;
+        int yEndUV = yEnd >> logUVy;
+        int xStartUV = xStart >> logUVx;
+        int xEndUV = xEnd >> logUVx;
+
+        float sumUV = 0;
+
+        for (int y = yStartUV + (isTop ? 0 : 1); y < yEndUV; y += 2) {
+          int ypp = max(y - 2, 0);
+          int yp = max(y - 1, 0);
+          int yn = min(y + 1, heightUV - 1);
+          int ynn = min(y + 2, heightUV - 1);
+
+          for (int x = xStartUV; x < xEndUV; ++x) {
+            {
+              pixel_t a = baseU[x + ypp * pitchUV];
+              pixel_t b = refU[x + yp * pitchUV];
+              pixel_t c = baseU[x + y * pitchUV];
+              pixel_t d = refU[x + yn * pitchUV];
+              pixel_t e = baseU[x + ynn * pitchUV];
+              float t = (a + 4 * c + e - 3 * (b + d)) * 0.1667f;
+              t *= t;
+              if (t > 15 * 15) {
+                t = t * 16 - 15 * 15 * 15;
+              }
+              sumUV += t;
+            }
+            {
+              pixel_t a = baseV[x + ypp * pitchUV];
+              pixel_t b = refV[x + yp * pitchUV];
+              pixel_t c = baseV[x + y * pitchUV];
+              pixel_t d = refV[x + yn * pitchUV];
+              pixel_t e = baseV[x + ynn * pitchUV];
+              float t = (a + 4 * c + e - 3 * (b + d)) * 0.1667f;
+              t *= t;
+              if (t > 15 * 15) {
+                t = t * 16 - 15 * 15 * 15;
+              }
+              sumUV += t;
+            }
+          }
+        }
+
+        float sum = (sumY + sumUV * chromaScale) * (1.0f / 16.0f);
+
+        // 1ピクセル単位にする
+        sum *= 1.0f / ((xEnd - xStart) * (yEnd - yStart));
+
+        fms[bx + by * nBlkX].n1 = sum;
+      }
+    }
+  }
+
+  void CompareFieldN2(const PVideoFrame& base, const PVideoFrame& ref, bool isTop, FieldMathingScore* fms)
+  {
+    const pixel_t* baseY = reinterpret_cast<const pixel_t*>(base->GetReadPtr(PLANAR_Y));
+    const pixel_t* baseU = reinterpret_cast<const pixel_t*>(base->GetReadPtr(PLANAR_U));
+    const pixel_t* baseV = reinterpret_cast<const pixel_t*>(base->GetReadPtr(PLANAR_V));
+    const pixel_t* refY = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(PLANAR_Y));
+    const pixel_t* refU = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(PLANAR_U));
+    const pixel_t* refV = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(PLANAR_V));
+
+    int pitchY = base->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = base->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        int yStart = by * BLK_SIZE;
+        int yEnd = min(yStart + BLK_SIZE, vi.height);
+        int xStart = bx * BLK_SIZE;
+        int xEnd = min(xStart + BLK_SIZE, vi.width);
+
+        float sumY = 0;
+
+        for (int y = yStart + (isTop ? 0 : 1); y < yEnd; y += 2) {
+          for (int x = xStart; x < xEnd; ++x) {
+            pixel_t b = baseY[x + y * pitchY];
+            pixel_t r = refY[x + y * pitchY];
+            sumY += (r - b) * (r - b);
+          }
+        }
+
+        int yStartUV = yStart >> logUVy;
+        int yEndUV = yEnd >> logUVy;
+        int xStartUV = xStart >> logUVx;
+        int xEndUV = xEnd >> logUVx;
+
+        float sumUV = 0;
+
+        for (int y = yStartUV + (isTop ? 0 : 1); y < yEndUV; y += 2) {
+          for (int x = xStartUV; x < xEndUV; ++x) {
+            {
+              pixel_t b = baseU[x + y * pitchUV];
+              pixel_t r = refU[x + y * pitchUV];
+              sumUV += (r - b) * (r - b);
+            }
+            {
+              pixel_t b = baseV[x + y * pitchUV];
+              pixel_t r = refV[x + y * pitchUV];
+              sumUV += (r - b) * (r - b);
+            }
+          }
+        }
+
+        float sum = sumY + sumUV * chromaScale;
+
+        // 1ピクセル単位にする
+        sum *= 1.0f / ((xEnd - xStart) * (yEnd - yStart));
+
+        fms[bx + by * nBlkX].n2 = sum;
+      }
+    }
+  }
+
+public:
+  KFMDev(PClip clip, float thresh1, float thresh2, float thresh3, int debug, IScriptEnvironment* env)
+    : GenericVideoFilter(clip)
+    , thresh1(thresh1)
+    , thresh2(thresh2)
+    , thresh3(thresh3)
+    , debug(debug)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    vi.num_frames *= 2;
+    vi.MulDivFPS(2, 1);
+
+    chromaScale = 1.0f;
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int n30 = n >> 1;
+
+    PVideoFrame frames[N_REFS];
+    for (int i = 0; i < N_REFS; ++i) {
+      frames[i] = GetRefFrame(i + n30 - DIST, env);
+    }
+
+    struct DIFF { float v[3]; };
+
+    std::vector<DIFF> diffs(nBlkX * nBlkY);
+
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    // diffを取得
+    for (int p = 0; p < 3; ++p) {
+      const uint8_t* pRefs[N_REFS];
+      for (int i = 0; i < N_REFS; ++i) {
+        pRefs[i] = frames[i]->GetReadPtr(planes[p]);
+      }
+      int pitch = frames[0]->GetPitch(planes[p]);
+
+      int width = vi.width;
+      int height = vi.height;
+      int blksizeX = BLK_SIZE;
+      int blksizeY = BLK_SIZE;
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+        blksizeX >>= logUVx;
+        blksizeY >>= logUVy;
+      }
+
+      for (int by = 0; by < nBlkY; ++by) {
+        for (int bx = 0; bx < nBlkX; ++bx) {
+          int ystart = by * blksizeY;
+          int yend = std::min(ystart + blksizeY, height);
+          int xstart = bx * blksizeX;
+          int xend = std::min(xstart + blksizeX, width);
+
+          int diff = 0;
+          for (int y = ystart; y < yend; ++y) {
+            for (int x = xstart; x < xend; ++x) {
+              int off = x + y * pitch;
+              int minv = 0xFFFF;
+              int maxv = 0;
+              for (int i = 0; i < N_REFS; ++i) {
+                int v = pRefs[i][off];
+                minv = std::min(minv, v);
+                maxv = std::max(maxv, v);
+              }
+              int maxdiff = maxv - minv;
+              diff += maxdiff;
+            }
+          }
+
+          diffs[bx + by * nBlkX].v[p] = (float)diff / (blksizeX * blksizeY);
+        }
+      }
+    }
+
+    // マッチング
+    std::vector<FieldMathingScore> scores(nBlkX * nBlkY);
+
+    if (n & 1) {
+      CompareFieldN1(frames[DIST], frames[DIST + 1], false, scores.data());
+      CompareFieldN2(frames[DIST], frames[DIST + 1], false, scores.data());
+    }
+    else {
+      CompareFieldN1(frames[DIST], frames[DIST], true, scores.data());
+      CompareFieldN2(frames[DIST], frames[DIST], true, scores.data());
+    }
+
+
+    // フレーム作成
+    PVideoFrame& src = frames[DIST];
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    for (int p = 0; p < 3; ++p) {
+      const pixel_t* pSrc = src->GetReadPtr(planes[p]);
+      pixel_t* pDst = dst->GetWritePtr(planes[p]);
+      int pitch = src->GetPitch(planes[p]);
+
+      int width = vi.width;
+      int height = vi.height;
+      int blksizeX = BLK_SIZE;
+      int blksizeY = BLK_SIZE;
+      if (p > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+        blksizeX >>= logUVx;
+        blksizeY >>= logUVy;
+      }
+
+      for (int by = 0; by < nBlkY; ++by) {
+        for (int bx = 0; bx < nBlkX; ++bx) {
+          int ystart = by * blksizeY;
+          int yend = std::min(ystart + blksizeY, height);
+          int xstart = bx * blksizeX;
+          int xend = std::min(xstart + blksizeX, width);
+
+          DIFF& diff = diffs[bx + by * nBlkX];
+          FieldMathingScore& sc = scores[bx + by * nBlkX];
+          bool isStatic = (diff.v[0] < thresh1) && (diff.v[1] < thresh1) && (diff.v[2] < thresh1);
+          bool isN1 = (sc.n1 > thresh2);
+          bool isN2 = (sc.n2 > thresh3);
+
+          if ((debug == 1 && isStatic) || (debug == 2 && !isStatic)) {
+            for (int y = ystart; y < yend; ++y) {
+              for (int x = xstart; x < xend; ++x) {
+                int off = x + y * pitch;
+                pDst[off] = 20;
+              }
+            }
+          }
+          else if ((debug == 3 && isN1) || (debug == 4 && isN2)) {
+            for (int y = ystart; y < yend; ++y) {
+              for (int x = xstart; x < xend; ++x) {
+                int off = x + y * pitch;
+                pDst[off] = 20;
+              }
+            }
+          }
+          else {
+            for (int y = ystart; y < yend; ++y) {
+              for (int x = xstart; x < xend; ++x) {
+                int off = x + y * pitch;
+                pDst[off] = pSrc[off];
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KFMDev(
+      args[0].AsClip(),       // clip60
+      args[1].AsFloat(2),     // thresh1
+      args[2].AsFloat(2),     // thresh2
+      args[3].AsFloat(2),     // thresh3
+      args[4].AsInt(0),       // debug
+      env);
+  }
+};
+
 void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KFM", "c", KFM::Create, 0);
@@ -1363,6 +1909,10 @@ void AddFuncFM(IScriptEnvironment* env)
 	env->AddFunction("KTCMerge", "ccc[thmatch]f[thdiff]f[temp]i[spatial]i", KTCMerge::Create, 0);
 	// 内部用
 	env->AddFunction("KTCMergeMatching", "cffii", KTCMergeMatching::Create, 0);
+
+  //
+  env->AddFunction("KMergeDev", "cc[thresh]f[debug]i", KMergeDev::Create, 0);
+  env->AddFunction("KFMDev", "c[thresh1]f[thresh2]f[thresh3]f[debug]i", KFMDev::Create, 0);
 }
 
 #include <Windows.h>
