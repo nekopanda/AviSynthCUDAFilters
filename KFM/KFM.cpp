@@ -3,6 +3,7 @@
 #include <avisynth.h>
 
 #include <algorithm>
+#include <numeric>
 #include <memory>
 #include <vector>
 
@@ -1356,6 +1357,716 @@ public:
   }
 };
 
+enum {
+	MOVE = 1,
+	SHIMA = 2,
+	LSHIMA = 4,
+
+	BORDER = 4,
+};
+
+// srefはbase-1ライン
+template <typename pixel_t>
+static void CompareFields(pixel_t* dst, int dstPitch,
+	const pixel_t* base, const pixel_t* sref, const pixel_t* mref,
+	int width, int height, int pitch, int threshM, int threshS, int threshLS)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			pixel_t flag = 0;
+
+			// 縞判定
+			pixel_t a = base[x + (y - 1) * pitch];
+			pixel_t b = sref[x + y * pitch];
+			pixel_t c = base[x + y * pitch];
+			pixel_t d = sref[x + (y + 1) * pitch];
+			pixel_t e = base[x + (y + 1) * pitch];
+
+			int t = (a + 4 * c + e - 3 * (b + d));
+			if (t > threshS) flag |= SHIMA;
+			if (t > threshLS) flag |= LSHIMA;
+
+			// 動き判定
+			pixel_t f = mref[x + y * pitch];
+			if (std::abs(f - c) > threshM) flag |= MOVE;
+
+			// フラグ格納
+			dst[x + y * dstPitch] = flag;
+		}
+	}
+}
+
+static void MergeUVFlags(PVideoFrame& fflag, int width, int height, int logUVx, int logUVy)
+{
+	uint8_t* fY = fflag->GetWritePtr(PLANAR_Y);
+	const uint8_t* fU = fflag->GetWritePtr(PLANAR_U);
+	const uint8_t* fV = fflag->GetWritePtr(PLANAR_V);
+	int pitchY = fflag->GetPitch(PLANAR_Y);
+	int pitchUV = fflag->GetPitch(PLANAR_U);
+
+	for (int y = BORDER; y < height - BORDER; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int offUV = (x >> logUVx) + (y >> logUVy) * pitchUV;
+			int flagUV = fU[offUV] | fV[offUV];
+			fY[x + y * pitchY] |= (flagUV << 4);
+		}
+	}
+}
+
+struct FMCount {
+	int move, shima, lshima;
+};
+
+static FMCount CountFlags(uint8_t* flagp, int width, int height, int pitch)
+{
+	FMCount cnt = { 0 };
+	for (int y = BORDER; y < height - BORDER; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int flag = flagp[x + y * pitch];
+			if (flag & MOVE) cnt.move++;
+			if (flag & SHIMA) cnt.shima++;
+			if (flag & LSHIMA) cnt.lshima++;
+		}
+	}
+}
+
+class KFMFrameDev : public GenericVideoFilter
+{
+	typedef uint8_t pixel_t;
+
+	int threshMY;
+	int threshSY;
+	int threshLSY;
+	int threshMC;
+	int threshSC;
+	int threshLSC;
+
+	int logUVx;
+	int logUVy;
+
+	void VisualizeFlags(PVideoFrame& dst, PVideoFrame& fflag)
+	{
+		int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+		// 判定結果を表示
+		int black[] = { 0, 128, 128 };
+		int blue[] = { 73, 230, 111 };
+		int gray[] = { 140, 128, 128 };
+		int purple[] = { 197, 160, 122 };
+
+		const pixel_t* fflagp = reinterpret_cast<const pixel_t*>(fflag->GetReadPtr(PLANAR_Y));
+		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+		int flagPitch = fflag->GetPitch(PLANAR_Y);
+		int dstPitchY = dst->GetPitch(PLANAR_Y);
+		int dstPitchUV = dst->GetPitch(PLANAR_U);
+
+		// 黒で初期化しておく
+		for (int y = 0; y < vi.height; ++y) {
+			for (int x = 0; x < vi.width; ++x) {
+				int offY = x + y * dstPitchY;
+				int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
+				dstY[offY] = black[0];
+				dstU[offUV] = black[1];
+				dstV[offUV] = black[2];
+			}
+		}
+
+		// 色を付ける
+		for (int y = BORDER; y < vi.height - BORDER; ++y) {
+			for (int x = 0; x < vi.width; ++x) {
+				int flag = fflagp[x + y * flagPitch];
+				flag |= (flag >> 4);
+
+				int* color = nullptr;
+				if ((flag & MOVE) && (flag & SHIMA)) {
+					color = purple;
+				}
+				else if (flag & MOVE) {
+					color = blue;
+				}
+				else if (flag & SHIMA) {
+					color = gray;
+				}
+
+				if (color) {
+					int offY = x + y * dstPitchY;
+					int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
+					dstY[offY] = color[0];
+					dstU[offUV] = color[1];
+					dstV[offUV] = color[2];
+				}
+			}
+		}
+	}
+
+public:
+	KFMFrameDev(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, IScriptEnvironment* env)
+		: GenericVideoFilter(clip)
+		, threshMY(threshMY)
+		, threshSY(threshSY * 6)
+		, threshLSY(threshSY * 6)
+		, threshMC(threshMC)
+		, threshSC(threshSC * 6)
+		, threshLSC(threshSC * 6)
+		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+	{ }
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		PVideoFrame f0 = child->GetFrame(n, env);
+		PVideoFrame f1 = child->GetFrame(n + 1, env);
+		PVideoFrame fflag = env->NewVideoFrame(vi);
+
+		int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+		// 各プレーンを判定
+		for (int pi = 0; pi < 3; ++pi) {
+			int p = planes[pi];
+
+			const pixel_t* f0p = reinterpret_cast<const pixel_t*>(f0->GetReadPtr(p));
+			const pixel_t* f1p = reinterpret_cast<const pixel_t*>(f1->GetReadPtr(p));
+			pixel_t* fflagp = reinterpret_cast<pixel_t*>(fflag->GetWritePtr(p));
+			int pitch = f0->GetPitch(p);
+			int dstPitch = fflag->GetPitch(p);
+
+			// 計算が面倒なので上下4ピクセルは除外
+			int width = vi.width;
+			int height = vi.height;
+			int border = BORDER;
+			if (p > 0) {
+				width >>= logUVx;
+				height >>= logUVy;
+				border >>= logUVy;
+			}
+
+			int threshM = (p == 0) ? threshMY : threshMC;
+			int threshS = (p == 0) ? threshSY : threshSC;
+			int threshLS = (p == 0) ? threshLSY : threshLSC;
+
+			// top
+			CompareFields(
+				fflagp + dstPitch * border, dstPitch * 2,
+				f0p + pitch * border,
+				f0p + pitch * (border - 1),
+				f1p + pitch * border,
+				width, (height - border * 2) / 2, pitch * 2,
+				threshM, threshS, threshLS);
+
+			// bottom
+			CompareFields(
+				fflagp + dstPitch * (border + 1), dstPitch * 2,
+				f0p + pitch * (border + 1),
+				f1p + pitch * border,
+				f1p + pitch * (border + 1),
+				width, (height - border * 2) / 2, pitch * 2,
+				threshM, threshS, threshLS);
+		}
+
+		// UV判定結果をYにマージ
+		MergeUVFlags(fflag, vi.width, vi.height, logUVx, logUVy);
+
+		// 判定結果を表示
+		PVideoFrame dst = env->NewVideoFrame(vi);
+		VisualizeFlags(dst, fflag);
+
+		return dst;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new KFMFrameDev(
+			args[0].AsClip(),       // clip
+			args[1].AsInt(10),       // threshMY
+			args[2].AsInt(10),       // threshSY
+			args[3].AsInt(10),       // threshMC
+			args[4].AsInt(10),       // threshSC
+			env
+			);
+	}
+};
+
+class KFMFrame : public GenericVideoFilter
+{
+public:
+	KFMFrame(PClip clip, IScriptEnvironment* env)
+		: GenericVideoFilter(clip)
+	{
+		int out_bytes = sizeof(FMCount) * 2;
+		vi.pixel_type = VideoInfo::CS_BGR32;
+		vi.width = 16;
+		vi.height = nblocks(out_bytes, vi.width * 4);
+	}
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		int parity = child->GetParity(n);
+		PVideoFrame f0 = child->GetFrame(n, env);
+		PVideoFrame f1 = child->GetFrame(n + 1, env);
+		PVideoFrame fflag = env->NewVideoFrame(vi);
+
+		int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+		// 各プレーンを判定
+		for (int pi = 0; pi < 3; ++pi) {
+			int p = planes[pi];
+
+			// TODO: 後でマージ
+
+		}
+
+		// MergeUVFlags
+
+		PVideoFrame dst = env->NewVideoFrame(vi);
+		// CountFlags
+
+		return dst;
+	}
+};
+
+struct FMData {
+	// 小さい縞の量
+	float fieldv[14];
+	float fieldbase;
+	// 大きい縞の量
+	float fieldlv[14];
+	float fieldlbase;
+	// 動き量
+	float move[14];
+	// 動きから見た分離度
+	float splitv[14];
+	// 動きから見た3フィールド結合度
+	float mergev[14];
+};
+
+struct PulldownPatternField {
+	bool split; // 次のフィールドとは別フレーム
+	bool merge; // 3フィールドの最初のフィールド
+};
+
+struct PulldownPattern {
+	PulldownPatternField fields[10 * 4];
+
+	PulldownPattern(int nf0, int nf1, int nf2, int nf3)
+		: fields()
+	{
+		if (nf0 + nf1 + nf2 + nf2 != 10) {
+			printf("Error: sum of nfields must be 10.\n");
+		}
+		int nfields[] = { nf0, nf1, nf2, nf3 };
+		for (int c = 0, fstart = 0; c < 4; ++c) {
+			for (int i = 0; i < 4; ++i) {
+				int nf = nfields[i];
+				for (int f = 0; f < nf - 2; ++f) {
+					fields[fstart + f].merge = true;
+				}
+				fields[fstart + nf - 1].split = true;
+				fstart += nf;
+			}
+		}
+	}
+
+	const PulldownPatternField* GetPattern(int n) const {
+		return &fields[10 + n - 2];
+	}
+};
+
+float SplitScore(const PulldownPatternField* pattern, const float* fv, float base) {
+	int nsplit = 0, nnsplit = 0;
+	float sumsplit = 0, sumnsplit = 0;
+
+	for (int i = 0; i < 14; ++i) {
+		if (pattern[i].split) {
+			nsplit++;
+			sumsplit += fv[i] - base;
+		}
+		else {
+			nnsplit++;
+			sumnsplit += fv[i] - base;
+		}
+	}
+	
+	float splitcoef = sumsplit / nsplit;
+	float nsplitcoef = sumnsplit / nnsplit;
+	if (nsplitcoef == 0) {
+		return FLT_MAX;
+	}
+	return splitcoef / nsplitcoef;
+}
+
+float MergeScore(const PulldownPatternField* pattern, const float* mergev) {
+	int nmerge = 0, nnmerge = 0;
+	float summerge = 0, sumnmerge = 0;
+
+	for (int i = 0; i < 14; ++i) {
+		if (pattern[i].merge) {
+			nmerge++;
+			summerge += mergev[i];
+		}
+		else {
+			nnmerge++;
+			sumnmerge += mergev[i];
+		}
+	}
+
+	float splitcoef = summerge / nmerge;
+	float nsplitcoef = sumnmerge / nnmerge;
+	if (nsplitcoef == 0) {
+		return FLT_MAX;
+	}
+	return splitcoef / nsplitcoef;
+}
+
+class PulldownPatterns
+{
+	PulldownPattern p2323, p2233, p2224;
+	const PulldownPatternField* allpatterns[27];
+public:
+	PulldownPatterns()
+		: p2323(2, 3, 2, 3)
+		, p2233(2, 2, 3, 3)
+		, p2224(2, 2, 2, 4)
+	{
+		const PulldownPattern* patterns[] = { &p2323, &p2233, &p2224 };
+
+		for (int p = 0; p < 3; ++p) {
+			for (int i = 0; i < 9; ++i) {
+				allpatterns[p * 9 + i] = patterns[p]->GetPattern(i);
+			}
+		}
+	}
+
+	const PulldownPatternField* GetPattern(int n) const {
+		return allpatterns[n];
+	}
+
+	int GetFrame24(int n, int& fstart) const {
+		int cycleIndex = fstart / 4;
+		int frameIndex = fstart % 4;
+	}
+
+	std::pair<int, float> Matching(const FMData* data, int width, int height) const
+	{
+		const PulldownPattern* patterns[] = { &p2323, &p2233, &p2224 };
+
+		// 1ピクセル当たりの縞の数
+		float shimaratio = std::accumulate(data->fieldv, data->fieldlv + 14, 0.0f) / (14.0f * width * height);
+		float lshimaratio = std::accumulate(data->fieldlv, data->fieldv + 14, 0.0f) / (14.0f * width * height);
+		float moveratio = std::accumulate(data->move, data->move + 14, 0.0f) / (14.0f * width * height);
+
+		std::vector<float> shima(9 * 3);
+		std::vector<float> shimabase(9 * 3);
+		std::vector<float> lshima(9 * 3);
+		std::vector<float> lshimabase(9 * 3);
+		std::vector<float> split(9 * 3);
+		std::vector<float> merge(9 * 3);
+
+		// 各スコアを計算
+		for (int p = 0; p < 3; ++p) {
+			for (int i = 0; i < 9; ++i) {
+				auto pattern = patterns[p]->GetPattern(i);
+				shima[p * 9 + i] = SplitScore(pattern, data->fieldv, 0);
+				shimabase[p * 9 + i] = SplitScore(pattern, data->fieldv, data->fieldbase);
+				lshima[p * 9 + i] = SplitScore(pattern, data->fieldlv, 0);
+				lshimabase[p * 9 + i] = SplitScore(pattern, data->fieldlv, data->fieldlbase);
+				split[p * 9 + i] = SplitScore(pattern, data->splitv, 0);
+				merge[p * 9 + i] = MergeScore(pattern, data->mergev);
+			}
+		}
+
+		auto it = std::max_element(shima.begin(), shima.end());
+		if (moveratio >= 0.1f) {
+			// 動きが多い
+			if (*it >= 3.0f) {
+				// 高い確度で特定
+				return std::pair<int, float>(int(it - shima.begin()), *it);
+			}
+
+			// ノイズ成分が多い or テロップなどが邪魔してる //
+
+			// テロップなどの固定成分を抜いて比較
+			std::vector<float> scores(9 * 3);
+			for (int i = 0; i < (int)scores.size(); ++i) {
+				scores[i] = (shimabase[i] + lshimabase[i] + merge[i]) * 0.333f;
+			}
+			it = std::max_element(scores.begin(), scores.end());
+
+			return std::pair<int, float>(int(it - scores.begin()), *it);
+		}
+		else {
+			// 動きが少ない -> 大きい縞と動きで切るところを見つける
+			// 多数のパターンがマッチするかもしれないが、誤爆だけ防げれば良い
+
+			std::vector<float> scores(9 * 3);
+			for (int i = 0; i < (int)scores.size(); ++i) {
+				scores[i] = (lshima[i] + split[i]) * 0.5f;
+			}
+			it = std::max_element(scores.begin(), scores.end());
+
+			return std::pair<int, float>(int(it - scores.begin()), *it);
+		}
+	}
+};
+
+class KFMCycleDev : public GenericVideoFilter
+{
+	PClip fmframe;
+	PulldownPatterns patterns;
+public:
+	KFMCycleDev(PClip source, PClip fmframe, IScriptEnvironment* env)
+		: GenericVideoFilter(source)
+		, fmframe(fmframe)
+	{ }
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		int cycle = n / 5;
+
+		FMCount fmcnt[14];
+		for (int i = -1; i <= 5; ++i) {
+			PVideoFrame frame = fmframe->GetFrame(cycle * 5 + i, env);
+			memcpy(fmcnt + (i + 1) * 2, frame->GetReadPtr(), sizeof(fmcnt[0]) * 2);
+		}
+
+		FMData data = { 0 };
+		int fieldbase = INT_MAX;
+		int fieldlbase = INT_MAX;
+		for (int i = 0; i < 14; ++i) {
+			data.fieldv[i] = fmcnt[i].shima;
+			data.fieldlv[i] = fmcnt[i].lshima;
+			data.move[i] = fmcnt[i].move;
+			fieldbase = std::min(fieldbase, fmcnt[i].shima);
+			fieldlbase = std::min(fieldlbase, fmcnt[i].lshima);
+		}
+		for (int i = 0; i < 14; ++i) {
+			if (i == 0) {
+				data.splitv[i] = std::max(1.0f, (float)fmcnt[i].move / fmcnt[i + 1].move) - 1.0f;
+				data.mergev[i] = std::max(1.0f, fmcnt[i + 1].move / (float)fmcnt[i].move) - 1.0f;
+			}
+			else if (i != 13) {
+				data.splitv[i] = std::max(1.0f, fmcnt[i].move * 2.0f / (fmcnt[i - 1].move + fmcnt[i + 1].move)) - 1.0f;
+				data.mergev[i] = std::max(1.0f, (fmcnt[i - 1].move + fmcnt[i + 1].move) / (fmcnt[i].move * 2.0f)) - 1.0f;
+			}
+			else {
+				data.splitv[i] = std::max(1.0f, (float)fmcnt[i].move / fmcnt[i + 1].move) - 1.0f;
+				data.mergev[i] = std::max(1.0f, fmcnt[i + 1].move / (float)fmcnt[i].move) - 1.0f;
+			}
+		}
+		data.fieldbase = fieldbase;
+		data.fieldlbase = fieldlbase;
+
+		patterns.Matching(&data, vi.width, vi.height);
+	}
+};
+
+class KTelecineCoreBase
+{
+public:
+	virtual ~KTelecineCoreBase() { }
+	virtual void CreateWeaveFrame2F(const PVideoFrame& srct, const PVideoFrame& srcb, const PVideoFrame& dst) = 0;
+	virtual void CreateWeaveFrame3F(const PVideoFrame& src, const PVideoFrame& rf, int rfIndex, const PVideoFrame& dst) = 0;
+};
+
+template <typename pixel_t>
+class KTelecineCore : public KTelecineCoreBase
+{
+	const VideoInfo& vi;
+	int logUVx;
+	int logUVy;
+public:
+	KTelecineCore(const VideoInfo& vi)
+		: vi(vi)
+		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+	{ }
+
+	void CreateWeaveFrame2F(const PVideoFrame& srct, const PVideoFrame& srcb, const PVideoFrame& dst)
+	{
+		const pixel_t* srctY = reinterpret_cast<const pixel_t*>(srct->GetReadPtr(PLANAR_Y));
+		const pixel_t* srctU = reinterpret_cast<const pixel_t*>(srct->GetReadPtr(PLANAR_U));
+		const pixel_t* srctV = reinterpret_cast<const pixel_t*>(srct->GetReadPtr(PLANAR_V));
+		const pixel_t* srcbY = reinterpret_cast<const pixel_t*>(srcb->GetReadPtr(PLANAR_Y));
+		const pixel_t* srcbU = reinterpret_cast<const pixel_t*>(srcb->GetReadPtr(PLANAR_U));
+		const pixel_t* srcbV = reinterpret_cast<const pixel_t*>(srcb->GetReadPtr(PLANAR_V));
+		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+		int pitchY = srct->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+		int pitchUV = srct->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int widthUV = vi.width >> logUVx;
+		int heightUV = vi.height >> logUVy;
+
+		// copy top
+		Copy<pixel_t>(dstY, pitchY * 2, srctY, pitchY * 2, vi.width, vi.height / 2);
+		Copy<pixel_t>(dstU, pitchUV * 2, srctU, pitchUV * 2, widthUV, heightUV / 2);
+		Copy<pixel_t>(dstV, pitchUV * 2, srctV, pitchUV * 2, widthUV, heightUV / 2);
+
+		// copy bottom
+		Copy<pixel_t>(dstY + pitchY, pitchY * 2, srcbY + pitchY, pitchY * 2, vi.width, vi.height / 2);
+		Copy<pixel_t>(dstU + pitchUV, pitchUV * 2, srcbU + pitchUV, pitchUV * 2, widthUV, heightUV / 2);
+		Copy<pixel_t>(dstV + pitchUV, pitchUV * 2, srcbV + pitchUV, pitchUV * 2, widthUV, heightUV / 2);
+	}
+
+	// rfIndex:  0:top, 1:bottom
+	void CreateWeaveFrame3F(const PVideoFrame& src, const PVideoFrame& rf, int rfIndex, const PVideoFrame& dst)
+	{
+		const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+		const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+		const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+		const pixel_t* rfY = reinterpret_cast<const pixel_t*>(rf->GetReadPtr(PLANAR_Y));
+		const pixel_t* rfU = reinterpret_cast<const pixel_t*>(rf->GetReadPtr(PLANAR_U));
+		const pixel_t* rfV = reinterpret_cast<const pixel_t*>(rf->GetReadPtr(PLANAR_V));
+		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int widthUV = vi.width >> logUVx;
+		int heightUV = vi.height >> logUVy;
+
+		if (rfIndex == 0) {
+			// average top
+			Average<pixel_t>(dstY, pitchY * 2, srcY, rfY, pitchY * 2, vi.width, vi.height / 2);
+			Average<pixel_t>(dstU, pitchUV * 2, srcU, rfU, pitchUV * 2, widthUV, heightUV / 2);
+			Average<pixel_t>(dstV, pitchUV * 2, srcV, rfV, pitchUV * 2, widthUV, heightUV / 2);
+			// copy bottom
+			Copy<pixel_t>(dstY + pitchY, pitchY * 2, srcY + pitchY, pitchY * 2, vi.width, vi.height / 2);
+			Copy<pixel_t>(dstU + pitchUV, pitchUV * 2, srcU + pitchUV, pitchUV * 2, widthUV, heightUV / 2);
+			Copy<pixel_t>(dstV + pitchUV, pitchUV * 2, srcV + pitchUV, pitchUV * 2, widthUV, heightUV / 2);
+		}
+		else {
+			// copy top
+			Copy<pixel_t>(dstY, pitchY * 2, srcY, pitchY * 2, vi.width, vi.height / 2);
+			Copy<pixel_t>(dstU, pitchUV * 2, srcU, pitchUV * 2, widthUV, heightUV / 2);
+			Copy<pixel_t>(dstV, pitchUV * 2, srcV, pitchUV * 2, widthUV, heightUV / 2);
+			// average bottom
+			Average<pixel_t>(dstY + pitchY, pitchY * 2, srcY + pitchY, rfY + pitchY, pitchY * 2, vi.width, vi.height / 2);
+			Average<pixel_t>(dstU + pitchUV, pitchUV * 2, srcU + pitchUV, rfU + pitchUV, pitchUV * 2, widthUV, heightUV / 2);
+			Average<pixel_t>(dstV + pitchUV, pitchUV * 2, srcV + pitchUV, rfV + pitchUV, pitchUV * 2, widthUV, heightUV / 2);
+		}
+	}
+};
+
+class KTelecine : public GenericVideoFilter
+{
+	PClip fmclip;
+
+	std::unique_ptr<KTelecineCoreBase> core;
+
+	KTelecineCoreBase* CreateCore(IScriptEnvironment* env)
+	{
+		if (vi.ComponentSize() == 1) {
+			return new KTelecineCore<uint8_t>(vi);
+		}
+		else {
+			return new KTelecineCore<uint16_t>(vi);
+		}
+	}
+
+	PVideoFrame CreateWeaveFrame(PClip clip, int n, int fstart, int fnum, int parity, IScriptEnvironment* env)
+	{
+		// fstartは0or1にする
+		if (fstart < 0 || fstart >= 2) {
+			n += fstart / 2;
+			fstart &= 1;
+		}
+
+		assert(fstart == 0 || fstart == 1);
+		assert(fnum == 2 || fnum == 3);
+
+		if (fstart == 0 && fnum == 2) {
+			return clip->GetFrame(n, env);
+		}
+		else {
+			PVideoFrame cur = clip->GetFrame(n, env);
+			PVideoFrame nxt = clip->GetFrame(n + 1, env);
+			PVideoFrame dst = env->NewVideoFrame(vi);
+			if (fstart == 0 && fnum == 3) {
+				core->CreateWeaveFrame3F(cur, nxt, !parity, dst);
+			}
+			else if (fstart == 1 && fnum == 3) {
+				core->CreateWeaveFrame3F(nxt, cur, parity, dst);
+			}
+			else if (fstart == 1 && fnum == 2) {
+				if (parity) {
+					core->CreateWeaveFrame2F(nxt, cur, dst);
+				}
+				else {
+					core->CreateWeaveFrame2F(cur, nxt, dst);
+				}
+			}
+			return dst;
+		}
+	}
+
+	void DrawInfo(PVideoFrame& dst, const std::pair<int, float>* fmframe, IScriptEnvironment* env) {
+		env->MakeWritable(&dst);
+
+		char buf[100]; sprintf(buf, "KFM: %d (%.1f)", fmframe->first, fmframe->second);
+		DrawText(dst, true, 0, 0, buf);
+	}
+
+public:
+	KTelecine(PClip child, PClip fmclip, IScriptEnvironment* env)
+		: GenericVideoFilter(child)
+		, fmclip(fmclip)
+	{
+		core = std::unique_ptr<KTelecineCoreBase>(CreateCore(env));
+
+		// フレームレート
+		vi.MulDivFPS(4, 5);
+		vi.num_frames = (vi.num_frames / 5 * 4) + (vi.num_frames % 5);
+	}
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		int cycleIndex = n / 4;
+		int frameIndex24 = n % 4;
+		int parity = child->GetParity(cycleIndex * 5);
+		PVideoFrame fm = fmclip->GetFrame(cycleIndex, env);
+		const std::pair<int, float>* fmframe = (std::pair<int, float>*)fm->GetReadPtr();
+		int pattern = fmframe->first;
+
+		int fstart;
+		int fnum;
+
+		if (pattern < 5) {
+			int offsets[] = { 0, 2, 5, 7, 10, 12, 15, 17, 20 };
+			int idx24 = tbl2323[pattern][1];
+			fstart = cycleIndex * 10 + tbl2323[pattern][0] +
+				(offsets[frameIndex24 + idx24] - offsets[idx24]);
+			fnum = offsets[frameIndex24 + idx24 + 1] - offsets[frameIndex24 + idx24];
+		}
+		else {
+			int offsets[] = { 0, 2, 4, 7, 10, 12, 14, 17, 20 };
+			int idx24 = tbl2233[pattern - 5][1];
+			fstart = cycleIndex * 10 + tbl2233[pattern - 5][0] +
+				(offsets[frameIndex24 + idx24] - offsets[idx24]);
+			fnum = offsets[frameIndex24 + idx24 + 1] - offsets[frameIndex24 + idx24];
+		}
+
+		PVideoFrame out = CreateWeaveFrame(child, 0, fstart, fnum, parity, env);
+
+		//DrawInfo(out, fmframe, env);
+
+		return out;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new KTelecine(
+			args[0].AsClip(),       // clip
+			args[1].AsClip(),       // fmclip
+			env
+			);
+	}
+};
+
 void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KFM", "c", KFM::Create, 0);
@@ -1363,6 +2074,9 @@ void AddFuncFM(IScriptEnvironment* env)
 	env->AddFunction("KTCMerge", "ccc[thmatch]f[thdiff]f[temp]i[spatial]i", KTCMerge::Create, 0);
 	// 内部用
 	env->AddFunction("KTCMergeMatching", "cffii", KTCMergeMatching::Create, 0);
+
+	// 開発用
+	env->AddFunction("KFMFrameDev", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMFrameDev::Create, 0);
 }
 
 #include <Windows.h>
