@@ -3037,7 +3037,7 @@ class KMPartialSuper : public GenericVideoFilter
     unsigned int offV = PlaneSuperOffset(
       true, superParams->nHeight / yRatioUV, nDropLevels, superParams->nPel, nVPad / yRatioUV, nSrcPitchUV, yRatioUV);
 
-    if (src->IsCUDA()) {
+    if (cuda->IsEnabled()) {
       auto kernel = cuda->get(pixel_t());
       kernel->Copy(pDstY, nDstPitchY, pSrcY + offY, nSrcPitchY, nWidth, nHeight);
       kernel->Copy(pDstU, nDstPitchUV, pSrcU + offU, nSrcPitchUV, nWidth / xRatioUV, nHeight / yRatioUV);
@@ -3080,6 +3080,9 @@ public:
   PVideoFrame __stdcall	GetFrame(int n, IScriptEnvironment* env_)
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    cuda->SetEnv(env);
+
     if (params.nPixelSize == 1) {
       return Proc<uint8_t>(n, env);
     }
