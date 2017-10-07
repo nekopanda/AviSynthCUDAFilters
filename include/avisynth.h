@@ -327,31 +327,23 @@ struct AVS_Linkage {
   void    (VideoInfo::*reserved2[32])();
 /**********************************************************************/
   // AviSynth+CUDA additions
-  bool                (VideoFrameBuffer::*IsCUDA)() const;
-  int                 (VideoFrameBuffer::*GetDeviceIndex)() const;
   void                (VideoFrame::*SetProps)(const char* key, const AVSMapValue& value);
   const AVSMapValue*  (VideoFrame::*GetProps)(const char* key) const;
 
   // class AVSMapValue
   void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR0)();
-  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR1)(__int64 i);
-  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR2)(const __int64* pi, int size);
+  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR1)(PVideoFrame& frame);
+  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR2)(__int64 i);
   void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR3)(double d);
-  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR4)(const double* pd, int size);
-  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR5)(const char* pdata, int size);
-  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR6)(const AVSMapValue& other);
+  void            (AVSMapValue::*AVSMapValue_CONSTRUCTOR4)(const AVSMapValue& other);
   void            (AVSMapValue::*AVSMapValue_DESTRUCTOR)();
   AVSMapValue&    (AVSMapValue::*AVSMapValue_OPERATOR_ASSIGN)(const AVSMapValue& v);
+  bool            (AVSMapValue::*AVSMapValue_IsFrame)() const;
   bool            (AVSMapValue::*AVSMapValue_IsInt)() const;
-  bool            (AVSMapValue::*AVSMapValue_IsIntArray)() const;
   bool            (AVSMapValue::*AVSMapValue_IsFloat)() const;
-  bool            (AVSMapValue::*AVSMapValue_IsFloatArray)() const;
-  bool            (AVSMapValue::*AVSMapValue_IsData)() const;
+  PVideoFrame     (AVSMapValue::*AVSMapValue_GetFrame)() const;
   __int64         (AVSMapValue::*AVSMapValue_GetInt)() const;
-  const __int64*  (AVSMapValue::*AVSMapValue_GetIntArray)() const;
   double          (AVSMapValue::*AVSMapValue_GetFloat)() const;
-  const double*   (AVSMapValue::*AVSMapValue_GetFloatArray)() const;
-  const char*     (AVSMapValue::*AVSMapValue_GetData)() const;
   // end class AVSValue
   /**********************************************************************/
 };
@@ -799,9 +791,6 @@ public:
   int GetSequenceNumber() const AVS_BakedCode( return AVS_LinkCall(GetSequenceNumber)() )
   int GetRefcount() const AVS_BakedCode( return AVS_LinkCall(GetRefcount)() )
 
-  bool IsCUDA() const AVS_BakedCode(return AVS_LinkCallOptDefault(IsCUDA, false))
-  int GetDeviceIndex() const AVS_BakedCode(return AVS_LinkCallOptDefault(GetDeviceIndex, 0))
-
 // Ensure VideoFrameBuffer cannot be publicly assigned
 private:
     VideoFrameBuffer& operator=(const VideoFrameBuffer&);
@@ -835,6 +824,7 @@ class VideoFrame {
 
   friend class ScriptEnvironment;
   friend class Cache;
+  friend class AVSMapValue;
 
   VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height);
   VideoFrame(VideoFrameBuffer* _vfb, AVSMap* avsmap, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV, int _row_sizeUV, int _heightUV);
@@ -861,8 +851,6 @@ public:
   const BYTE* GetReadPtr(int plane=0) const AVS_BakedCode( return AVS_LinkCall(VFGetReadPtr)(plane) )
   bool IsWritable() const AVS_BakedCode( return AVS_LinkCall(IsWritable)() )
   BYTE* GetWritePtr(int plane=0) const AVS_BakedCode( return AVS_LinkCall(VFGetWritePtr)(plane) )
-
-  bool IsCUDA() const { return vfb->IsCUDA(); }
 
   void SetProps(const char* key, const AVSMapValue& value) AVS_BakedCode(return AVS_LinkCall(SetProps)(key, value))
   const AVSMapValue* GetProps(const char* key) const AVS_BakedCode(return AVS_LinkCall(GetProps)(key))
@@ -1171,51 +1159,41 @@ public:
   int __stdcall SetCacheHints(int cachehints,int frame_range) { return 0; } ;  // We do not pass cache requests upwards, only to the next filter.
 };
 
-struct AVSMapArray;
-
 class AVSMapValue
 {
 public:
   AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR0)())
-	AVSMapValue(int i) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR1)(i))
-  explicit AVSMapValue(__int64 i) AVS_BakedCode( AVS_LinkCall(AVSMapValue_CONSTRUCTOR1)(i) )
-  AVSMapValue(const __int64* pi, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR2)(pi, size))
+	AVSMapValue(PVideoFrame& frame) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR1)(frame))
+  explicit AVSMapValue(__int64 i) AVS_BakedCode( AVS_LinkCall(AVSMapValue_CONSTRUCTOR2)(i) )
+  AVSMapValue(int i) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR2)(i))
   AVSMapValue(double d) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR3)(d))
-  AVSMapValue(const double* pd, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR4)(pd, size))
-  AVSMapValue(const char* pdata, int size) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR5)(pdata, size))
-  AVSMapValue(const AVSMapValue& other) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR6)(other))
+  AVSMapValue(const AVSMapValue& other) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR4)(other))
   ~AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_DESTRUCTOR)())
   AVSMapValue& operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
 
-  bool IsInt() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsInt)())
-  bool IsIntArray() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsIntArray)())
+    bool IsFrame() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsFrame)())
+    bool IsInt() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsInt)())
   bool IsFloat() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsFloat)())
-  bool IsFloatArray() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsFloatArray)())
-  bool IsData() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsData)())
 
+    PVideoFrame GetFrame() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_GetFrame)())
   __int64 GetInt() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_GetInt)())
-  const __int64* GetIntArray() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_GetIntArray)())
   double GetFloat() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_GetFloat)())
-  const double* GetFloatArray() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_GetFloatArray)())
-  const char* GetData() const  AVS_BakedCode(return AVS_LinkCall(AVSMapValue_GetData)())
 
 private:
   int type;
   union {
     __int64 i;
     double d;
-    AVSMapArray* arr;
+    VideoFrame* frame;
   } value;
 
 #ifdef BUILDING_AVSCORE
 public:
   void            CONSTRUCTOR0();
-  void            CONSTRUCTOR1(__int64 i);
-  void            CONSTRUCTOR2(const __int64* pi, int size);
+  void            CONSTRUCTOR1(PVideoFrame& frame);
+  void            CONSTRUCTOR2(__int64 i);
   void            CONSTRUCTOR3(double d);
-  void            CONSTRUCTOR4(const double* pd, int size);
-  void            CONSTRUCTOR5(const char* pdata, int size);
-  void            CONSTRUCTOR6(const AVSMapValue& other);
+  void            CONSTRUCTOR4(const AVSMapValue& other);
   void            DESTRUCTOR();
   AVSMapValue&    OPERATOR_ASSIGN(const AVSMapValue& v);
 
