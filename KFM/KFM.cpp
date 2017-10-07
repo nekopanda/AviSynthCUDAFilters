@@ -10,6 +10,15 @@
 #include "CommonFunctions.h"
 #include "Overlap.hpp"
 #include "TextOut.h"
+#include "KMV.h"
+
+#define COMBE_FLAG_STR "KRemoveCombe_Flag"
+
+enum {
+  OVERLAP = 8,
+  BLOCK_SIZE = OVERLAP * 2,
+  VPAD = 4,
+};
 
 template <typename pixel_t>
 void Copy(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height)
@@ -48,20 +57,22 @@ void VerticalClean(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitc
   }
 }
 
-class KMergeDev : public GenericVideoFilter
+class KStaticAnalyze : public GenericVideoFilter
 {
   enum {
     DIST = 1,
-    N_REFS = DIST * 2 + 1,
-    BLK_SIZE = 8
+    N_REFS = 3,
   };
 
   typedef uint8_t pixel_t;
 
-  PClip source;
+  PClip rcclip;
 
-  float thresh;
-  int debug;
+  VideoInfo srcvi;
+  VideoInfo flagvi;
+
+  float thdiff;
+  float ratio;
 
   int logUVx;
   int logUVy;
@@ -71,22 +82,386 @@ class KMergeDev : public GenericVideoFilter
 
   PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
   {
-    ref = clamp(ref, 0, vi.num_frames);
-    return source->GetFrame(ref, env);
+    ref = clamp(ref, 0, srcvi.num_frames);
+    return child->GetFrame(ref, env);
   }
+
+  void CompareFrames(pixel_t* dst, int dstPitch,
+    const pixel_t** src,
+    int width, int height, int pitch, int thdiff)
+  {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+
+        pixel_t a = src[0][x + y * pitch];
+        pixel_t b = src[1][x + y * pitch];
+        pixel_t c = src[2][x + y * pitch];
+
+        int minv = std::min(a, std::min(b, c));
+        int maxv = std::max(a, std::max(b, c));
+
+        pixel_t flag = 0;
+        if (maxv - minv > thdiff) flag = 1;
+
+        // フラグ格納
+        dst[x + y * dstPitch] = flag;
+      }
+    }
+  }
+
+  void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, int thdiff)
+  {
+    const pixel_t* srcY[N_REFS];
+    const pixel_t* srcU[N_REFS];
+    const pixel_t* srcV[N_REFS];
+
+    for (int i = 0; i < N_REFS; ++i) {
+      srcY[i] = reinterpret_cast<const pixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
+      srcU[i] = reinterpret_cast<const pixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
+      srcV[i] = reinterpret_cast<const pixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
+    }
+
+    uint8_t* dstY = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_Y));
+    uint8_t* dstU = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_U));
+    uint8_t* dstV = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_V));
+
+    int pitchY = frames[0]->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = frames[0]->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int dstPitchY = flag->GetPitch(PLANAR_Y);
+    int dstPitchUV = flag->GetPitch(PLANAR_U);
+    int widthUV = srcvi.width >> logUVx;
+    int heightUV = srcvi.height >> logUVy;
+
+    CompareFrames(dstY, dstPitchY, srcY, srcvi.width, srcvi.height, pitchY, thdiff);
+    CompareFrames(dstU, dstPitchUV, srcU, widthUV, heightUV, pitchUV, thdiff);
+    CompareFrames(dstV, dstPitchUV, srcV, widthUV, heightUV, pitchUV, thdiff);
+  }
+
+  void MergeUVFlags(PVideoFrame& flag)
+  {
+    uint8_t* fY = flag->GetWritePtr(PLANAR_Y);
+    uint8_t* fU = flag->GetWritePtr(PLANAR_U);
+    uint8_t* fV = flag->GetWritePtr(PLANAR_V);
+    int pitchY = flag->GetPitch(PLANAR_Y);
+    int pitchUV = flag->GetPitch(PLANAR_U);
+
+    for (int y = 0; y < srcvi.height; ++y) {
+      for (int x = 0; x < srcvi.width; ++x) {
+        int offUV = (x >> logUVx) + (y >> logUVy) * pitchUV;
+        fY[x + y * pitchY] |= fU[offUV] | fV[offUV];
+      }
+    }
+  }
+
+  void CountFlags(PVideoFrame& block, PVideoFrame& flag, int ratio)
+  {
+    const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr(PLANAR_Y));
+    uint8_t* blockp = reinterpret_cast<uint8_t*>(block->GetWritePtr());
+
+    int pitch = flag->GetPitch(PLANAR_Y);
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        int yStart = by * OVERLAP;
+        int yEnd = yStart + BLOCK_SIZE;
+        int xStart = bx * OVERLAP;
+        int xEnd = xStart + BLOCK_SIZE;
+
+        int sum = 0;
+        for (int y = yStart; y < yEnd; ++y) {
+          for (int x = xStart; x < xEnd; ++x) {
+            sum += flagp[x + y * pitch];
+          }
+        }
+
+        // 差のあるピクセルがしきい値以下
+        uint8_t flag = (sum <= ratio);
+        blockp[bx + by * nBlkX] = flag;
+      }
+    }
+  }
+
+  void AndBlock(PVideoFrame& dst, PVideoFrame& block)
+  {
+    const uint8_t* blockp = reinterpret_cast<const uint8_t*>(block->GetReadPtr());
+    uint8_t* dstp = reinterpret_cast<uint8_t*>(dst->GetWritePtr());
+
+    for (int i = 0; i < nBlkX * nBlkY; ++i) {
+      dstp[i] &= blockp[i];
+    }
+  }
+
 public:
-  KMergeDev(PClip clip60, PClip source, float thresh, int debug, IScriptEnvironment* env)
-    : GenericVideoFilter(clip60)
-    , source(source)
-    , thresh(thresh)
-    , debug(debug)
+  KStaticAnalyze(PClip clip30, PClip rcclip, float thdiff, float ratio, IScriptEnvironment2* env)
+    : GenericVideoFilter(clip30)
+    , rcclip(rcclip)
+    , thdiff(thdiff)
+    , ratio(ratio)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
   {
-    nBlkX = nblocks(vi.width, BLK_SIZE);
-    nBlkY = nblocks(vi.height, BLK_SIZE);
+    if (vi.width & 7) env->ThrowError("[KMergeDev]: width must be multiple of 8");
+    if (vi.height & 7) env->ThrowError("[KMergeDev]: height must be multiple of 8");
 
-    VideoInfo srcvi = source->GetVideoInfo();
+    srcvi = vi;
+
+    nBlkX = nblocks(vi.width, OVERLAP);
+    nBlkY = nblocks(vi.height, OVERLAP);
+
+    // フラグは8bitにする
+    flagvi = vi;
+    if (vi.Is420()) flagvi.pixel_type = VideoInfo::CS_YV12;
+    else if (vi.Is422()) flagvi.pixel_type = VideoInfo::CS_YV16;
+    else if (vi.Is444()) flagvi.pixel_type = VideoInfo::CS_YV24;
+
+    // 出力形式
+    int flag_bytes = sizeof(uint8_t) * nBlkX * nBlkY;
+    vi.pixel_type = VideoInfo::CS_BGR32;
+    vi.width = 2048;
+    vi.height = nblocks(flag_bytes, vi.width * 4);
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    PVideoFrame frames[N_REFS];
+    for (int i = 0; i < N_REFS; ++i) {
+      frames[i] = GetRefFrame(i + n - DIST, env);
+    }
+    PVideoFrame rcframe = rcclip->GetFrame(n, env);
+    PVideoFrame combeframe = rcframe->GetProps(COMBE_FLAG_STR)->GetFrame();
+    PVideoFrame flag = env->NewVideoFrame(flagvi);
+    PVideoFrame block = env->NewVideoFrame(vi);
+
+    CompareFrames(frames, flag, (int)thdiff);
+    MergeUVFlags(flag);
+    CountFlags(block, flag, (int)ratio);
+    AndBlock(block, combeframe); // 最初にやれば計算量を減らせるかも
+
+    return block;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KStaticAnalyze(
+      args[0].AsClip(),       // clip30
+      args[1].AsClip(),       // rcclip
+      args[2].AsFloat(4),     // thdiff
+      args[3].AsFloat(5),     // ratio
+      env);
+  }
+};
+
+class KShowStatic : public GenericVideoFilter
+{
+  typedef uint8_t pixel_t;
+
+  PClip sttclip;
+
+  int logUVx;
+  int logUVy;
+
+  int nBlkX;
+  int nBlkY;
+
+  void CopyFrame(PVideoFrame& src, PVideoFrame& dst)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    Copy<pixel_t>(dstY, pitchY, srcY, pitchY, vi.width, vi.height);
+    Copy<pixel_t>(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV);
+    Copy<pixel_t>(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV);
+  }
+
+  void VisualizeBlock(PVideoFrame& flag, PVideoFrame& dst)
+  {
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+
+    int pitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        int yStart = by * OVERLAP;
+        int yEnd = yStart + BLOCK_SIZE;
+        int xStart = bx * OVERLAP;
+        int xEnd = xStart + BLOCK_SIZE;
+
+        bool isStatic = flagp[bx + by * nBlkX] != 0;
+
+        if (isStatic) continue;
+
+        for (int y = yStart; y < yEnd; ++y) {
+          for (int x = xStart; x < xEnd; ++x) {
+            dstY[x + y * pitchY] = 0;
+          }
+        }
+      }
+    }
+  }
+
+public:
+  KShowStatic(PClip sttclip, PClip clip30, IScriptEnvironment2* env)
+    : GenericVideoFilter(clip30)
+    , sttclip(sttclip)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    nBlkX = nblocks(vi.width, OVERLAP);
+    nBlkY = nblocks(vi.height, OVERLAP);
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    PVideoFrame block = sttclip->GetFrame(n, env);
+    PVideoFrame frame30 = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    CopyFrame(frame30, dst);
+    VisualizeBlock(block, dst);
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KShowStatic(
+      args[0].AsClip(),       // sttclip
+      args[1].AsClip(),       // clip30
+      env);
+  }
+};
+
+class KStaticMerge : public GenericVideoFilter
+{
+  typedef uint8_t pixel_t;
+
+  PClip clip30;
+  PClip sttclip;
+
+  int logUVx;
+  int logUVy;
+
+  int nBlkX;
+  int nBlkY;
+
+  bool ContainsStaticBlock(PVideoFrame& block)
+  {
+    const uint8_t* blockp = reinterpret_cast<const uint8_t*>(block->GetReadPtr());
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        if (blockp[bx + by * nBlkX]) return true;
+      }
+    }
+
+    return false;
+  }
+
+  void CopyFrame(PVideoFrame& src, PVideoFrame& dst)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    Copy<pixel_t>(dstY, pitchY, srcY, pitchY, vi.width, vi.height);
+    Copy<pixel_t>(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV);
+    Copy<pixel_t>(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV);
+  }
+
+  void MergeBlock(PVideoFrame& src60, PVideoFrame& src30, PVideoFrame& flag, PVideoFrame& dst)
+  {
+    const pixel_t* src60Y = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_Y));
+    const pixel_t* src60U = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_U));
+    const pixel_t* src60V = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_V));
+    const pixel_t* src30Y = reinterpret_cast<const pixel_t*>(src30->GetReadPtr(PLANAR_Y));
+    const pixel_t* src30U = reinterpret_cast<const pixel_t*>(src30->GetReadPtr(PLANAR_U));
+    const pixel_t* src30V = reinterpret_cast<const pixel_t*>(src30->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+
+    int pitchY = src60->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src60->GetPitch(PLANAR_U) / sizeof(pixel_t);
+
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+    int overlapUVx = OVERLAP >> logUVx;
+    int overlapUVy = OVERLAP >> logUVy;
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        int yStart = by * OVERLAP;
+        int yEnd = yStart + OVERLAP;
+        int xStart = bx * OVERLAP;
+        int xEnd = xStart + OVERLAP;
+        int yStartUV = by * overlapUVy;
+        int yEndUV = yStartUV + overlapUVy;
+        int xStartUV = bx * overlapUVx;
+        int xEndUV = xStartUV + overlapUVx;
+
+        bool isStatic = flagp[bx + by * nBlkX] != 0;
+
+        if (isStatic == false) continue;
+
+        for (int y = yStart; y < yEnd; ++y) {
+          for (int x = xStart; x < xEnd; ++x) {
+            dstY[x + y * pitchY] = src30Y[x + y * pitchY];
+          }
+        }
+
+        for (int y = yStartUV; y < yEndUV; ++y) {
+          for (int x = xStartUV; x < xEndUV; ++x) {
+            dstU[x + y * pitchUV] = src30U[x + y * pitchUV];
+            dstV[x + y * pitchUV] = src30V[x + y * pitchUV];
+          }
+        }
+      }
+    }
+  }
+
+public:
+  KStaticMerge(PClip clip60, PClip clip30, PClip sttclip, IScriptEnvironment2* env)
+    : GenericVideoFilter(clip60)
+    , clip30(clip30)
+    , sttclip(sttclip)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    if (vi.width & 7) env->ThrowError("[KMergeDev]: width must be multiple of 8");
+    if (vi.height & 7) env->ThrowError("[KMergeDev]: height must be multiple of 8");
+
+    nBlkX = nblocks(vi.width, OVERLAP);
+    nBlkY = nblocks(vi.height, OVERLAP);
+
+    VideoInfo srcvi = clip30->GetVideoInfo();
     if (vi.num_frames != srcvi.num_frames * 2) {
       env->ThrowError("[KMergeDev] Num frames don't match");
     }
@@ -97,142 +472,546 @@ public:
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 
     int n30 = n >> 1;
+    PVideoFrame block = sttclip->GetFrame(n30, env);
+    PVideoFrame frame60 = child->GetFrame(n, env);
 
-    PVideoFrame frames[N_REFS];
-    for (int i = 0; i < N_REFS; ++i) {
-      frames[i] = GetRefFrame(i + n30 - DIST, env);
-    }
-    PVideoFrame inframe = child->GetFrame(n, env);
-
-    struct DIFF { float v[3]; };
-
-    std::vector<DIFF> diffs(nBlkX * nBlkY);
-
-    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
-
-    // diffを取得
-    for (int p = 0; p < 3; ++p) {
-      const uint8_t* pRefs[N_REFS];
-      for (int i = 0; i < N_REFS; ++i) {
-        pRefs[i] = frames[i]->GetReadPtr(planes[p]);
-      }
-      int pitch = frames[0]->GetPitch(planes[p]);
-
-      int width = vi.width;
-      int height = vi.height;
-      int blksizeX = BLK_SIZE;
-      int blksizeY = BLK_SIZE;
-      if (p > 0) {
-        width >>= logUVx;
-        height >>= logUVy;
-        blksizeX >>= logUVx;
-        blksizeY >>= logUVy;
-      }
-
-      for (int by = 0; by < nBlkY; ++by) {
-        for (int bx = 0; bx < nBlkX; ++bx) {
-          int ystart = by * blksizeY;
-          int yend = std::min(ystart + blksizeY, height);
-          int xstart = bx * blksizeX;
-          int xend = std::min(xstart + blksizeX, width);
-
-          int diff = 0;
-          for (int y = ystart; y < yend; ++y) {
-            for (int x = xstart; x < xend; ++x) {
-              int off = x + y * pitch;
-              int minv = 0xFFFF;
-              int maxv = 0;
-              for (int i = 0; i < N_REFS; ++i) {
-                int v = pRefs[i][off];
-                minv = std::min(minv, v);
-                maxv = std::max(maxv, v);
-              }
-              int maxdiff = maxv - minv;
-              diff += maxdiff;
-            }
-          }
-
-          diffs[bx + by * nBlkX].v[p] = (float)diff / (blksizeX * blksizeY);
-        }
-      }
+    if (ContainsStaticBlock(block) == false) {
+      // staticブロックがないのでそのまま返す
+      return frame60;
     }
 
-    // フレーム作成
-    PVideoFrame& src = frames[DIST];
+    PVideoFrame frame30 = clip30->GetFrame(n30, env);
     PVideoFrame dst = env->NewVideoFrame(vi);
 
-    for (int p = 0; p < 3; ++p) {
-      const pixel_t* pSrc = src->GetReadPtr(planes[p]);
-      const pixel_t* pIn = inframe->GetReadPtr(planes[p]);
-      pixel_t* pDst = dst->GetWritePtr(planes[p]);
-      int pitch = src->GetPitch(planes[p]);
-
-      int width = vi.width;
-      int height = vi.height;
-      int blksizeX = BLK_SIZE;
-      int blksizeY = BLK_SIZE;
-      if (p > 0) {
-        width >>= logUVx;
-        height >>= logUVy;
-        blksizeX >>= logUVx;
-        blksizeY >>= logUVy;
-      }
-
-      for (int by = 0; by < nBlkY; ++by) {
-        for (int bx = 0; bx < nBlkX; ++bx) {
-          int ystart = by * blksizeY;
-          int yend = std::min(ystart + blksizeY, height);
-          int xstart = bx * blksizeX;
-          int xend = std::min(xstart + blksizeX, width);
-
-          DIFF& diff = diffs[bx + by * nBlkX];
-          bool isStatic = (diff.v[0] < thresh) && (diff.v[1] < thresh) && (diff.v[2] < thresh);
-
-          if ((debug == 1 && isStatic) || (debug == 2 && !isStatic)) {
-            for (int y = ystart; y < yend; ++y) {
-              for (int x = xstart; x < xend; ++x) {
-                int off = x + y * pitch;
-                pDst[off] = 20;
-              }
-            }
-          }
-          else {
-            const pixel_t* pFrom = (isStatic ? pSrc : pIn);
-            for (int y = ystart; y < yend; ++y) {
-              for (int x = xstart; x < xend; ++x) {
-                int off = x + y * pitch;
-                pDst[off] = pFrom[off];
-              }
-            }
-            if (isStatic) {
-              // 上下方向の縞をなくすため上下のしきい値以下のピクセルと平均化する
-              for (int y = ystart + 1; y < yend - 1; ++y) {
-                for (int x = xstart; x < xend; ++x) {
-                  int p0 = pFrom[x + (y - 1) * pitch];
-                  int p1 = pFrom[x + (y + 0) * pitch];
-                  int p2 = pFrom[x + (y + 1) * pitch];
-                  p0 = (std::abs(p0 - p1) <= thresh) ? p0 : p1;
-                  p2 = (std::abs(p2 - p1) <= thresh) ? p2 : p1;
-                  // 2項分布でマージ
-                  pDst[x + y * pitch] = (p0 + 2 * p1 + p2 + 2) >> 2;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    CopyFrame(frame60, dst);
+    MergeBlock(frame60, frame30, block, dst);
 
     return dst;
   }
 
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    return new KMergeDev(
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KStaticMerge(
       args[0].AsClip(),       // clip60
-      args[1].AsClip(),       // source
-      (float)args[2].AsFloat(2),     // thresh
-      args[3].AsInt(0),       // debug
+      args[1].AsClip(),       // clip30
+      args[2].AsClip(),       // sttclip
+      env);
+  }
+};
+
+class KStaticAnalyze2 : public GenericVideoFilter
+{
+  enum {
+    DIST = 1,
+    N_REFS = 3,
+  };
+
+  typedef uint8_t pixel_t;
+
+  VideoInfo padvi;
+
+  float thcombe;
+  float thdiff;
+
+  int logUVx;
+  int logUVy;
+
+  PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+  {
+    ref = clamp(ref, 0, vi.num_frames);
+    return child->GetFrame(ref, env);
+  }
+
+  void PadFrame(PVideoFrame& dst)
+  {
+    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+
+    for (int pi = 0; pi < 3; ++pi) {
+      int p = planes[pi];
+
+      pixel_t* dstptr = reinterpret_cast<pixel_t*>(dst->GetWritePtr(p));
+      int pitch = dst->GetPitch(p) / sizeof(pixel_t);
+
+      int width = vi.width;
+      int height = vi.height;
+      int vpad = VPAD;
+      if (pi > 0) {
+        width >>= logUVx;
+        height >>= logUVy;
+        vpad >>= logUVy;
+      }
+
+      for (int y = 0; y < vpad; ++y) {
+        for (int x = 0; x < width; ++x) {
+          dstptr[x + (-y - 1) * pitch] = dstptr[x + (y)* pitch];
+          dstptr[x + (height + y) * pitch] = dstptr[x + (height - y - 1)* pitch];
+        }
+      }
+    }
+  }
+
+  void CopyFrame(PVideoFrame& src, PVideoFrame& dst)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    Copy<pixel_t>(dstY, pitchY, srcY, pitchY, vi.width, vi.height);
+    Copy<pixel_t>(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV);
+    Copy<pixel_t>(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV);
+  }
+
+  static int CalcCombe(int a, int b, int c, int d, int e) {
+    return (a + 4 * c + e - 3 * (b + d));
+  }
+
+  void CompareFields(pixel_t* dst, const pixel_t* src, int width, int height, int pitch)
+  {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        int t = CalcCombe(
+          src[x + (y - 2) * pitch],
+          src[x + (y - 1) * pitch],
+          src[x + (y + 0) * pitch],
+          src[x + (y + 1) * pitch],
+          src[x + (y + 2) * pitch]);
+
+        dst[x + y * pitch] = min(max(t, 0) >> 2, 255);
+      }
+    }
+  }
+
+  void CompareFields(PVideoFrame& src, PVideoFrame& flag, int thresh)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    CompareFields(dstY, srcY, vi.width, vi.height, pitchY);
+    CompareFields(dstU, srcU, widthUV, heightUV, pitchUV);
+    CompareFields(dstV, srcV, widthUV, heightUV, pitchUV);
+  }
+
+  void ExtendFlag(pixel_t* dst, const pixel_t* src, int width, int height, int pitch)
+  {
+    for (int y = 1; y < height - 1; ++y) {
+      for (int x = 0; x < width; ++x) {
+        dst[x + y * pitch] = std::max(src[x + (y - 1) * pitch], std::max(src[x + y * pitch], src[x + (y + 1) * pitch]));
+      }
+    }
+  }
+
+  void ExtendFlag(PVideoFrame& src, PVideoFrame& dst)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    ExtendFlag(dstY, srcY, vi.width, vi.height, pitchY);
+    ExtendFlag(dstU, srcU, widthUV, heightUV, pitchUV);
+    ExtendFlag(dstV, srcV, widthUV, heightUV, pitchUV);
+  }
+
+  void CompareFrames(pixel_t* dst, const pixel_t** src, int width, int height, int pitch)
+  {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        pixel_t a = src[0][x + y * pitch];
+        pixel_t b = src[1][x + y * pitch];
+        pixel_t c = src[2][x + y * pitch];
+
+        int minv = std::min(a, std::min(b, c));
+        int maxv = std::max(a, std::max(b, c));
+
+        // フラグ格納
+        dst[x + y * pitch] = maxv - minv;
+      }
+    }
+  }
+
+  void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, int thdiff)
+  {
+    const pixel_t* srcY[N_REFS];
+    const pixel_t* srcU[N_REFS];
+    const pixel_t* srcV[N_REFS];
+
+    for (int i = 0; i < N_REFS; ++i) {
+      srcY[i] = reinterpret_cast<const pixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
+      srcU[i] = reinterpret_cast<const pixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
+      srcV[i] = reinterpret_cast<const pixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
+    }
+
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_V));
+
+    int pitchY = frames[0]->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = frames[0]->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    CompareFrames(dstY, srcY, vi.width, vi.height, pitchY);
+    CompareFrames(dstU, srcU, widthUV, heightUV, pitchUV);
+    CompareFrames(dstV, srcV, widthUV, heightUV, pitchUV);
+  }
+
+  void MergeUVFlags(PVideoFrame& flag)
+  {
+    pixel_t* fY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
+    pixel_t* fU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
+    pixel_t* fV = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_V));
+    int pitchY = flag->GetPitch(PLANAR_Y);
+    int pitchUV = flag->GetPitch(PLANAR_U);
+
+    for (int y = 0; y < vi.height; ++y) {
+      for (int x = 0; x < vi.width; ++x) {
+        int offUV = (x >> logUVx) + (y >> logUVy) * pitchUV;
+        fY[x + y * pitchY] = std::max(fY[x + y * pitchY], std::max(fU[offUV], fV[offUV]));
+      }
+    }
+  }
+
+  void ApplyUVFlags(PVideoFrame& flag)
+  {
+    uint8_t* fY = flag->GetWritePtr(PLANAR_Y);
+    uint8_t* fU = flag->GetWritePtr(PLANAR_U);
+    uint8_t* fV = flag->GetWritePtr(PLANAR_V);
+    int pitchY = flag->GetPitch(PLANAR_Y);
+    int pitchUV = flag->GetPitch(PLANAR_U);
+
+    for (int y = 0; y < vi.height; ++y) {
+      for (int x = 0; x < vi.width; ++x) {
+        int offUV = (x >> logUVx) + (y >> logUVy) * pitchUV;
+        fU[offUV] = fV[offUV] = fY[x + y * pitchY];
+      }
+    }
+  }
+
+  void AndFlag(PVideoFrame& dst, PVideoFrame& flagd)
+  {
+    const uint8_t* flagdp = reinterpret_cast<const uint8_t*>(flagd->GetReadPtr());
+    uint8_t* dstp = reinterpret_cast<uint8_t*>(dst->GetWritePtr());
+    int pitch = dst->GetPitch();
+
+    // dst: combeありフラグ
+    // flagd: diffありフラグ
+    float invcombe = 1.0f / thcombe;
+    float invdiff = 1.0f / thdiff;
+
+    for (int y = 0; y < vi.height; ++y) {
+      for (int x = 0; x < vi.width; ++x) {
+        float combe = clamp(dstp[x + y * pitch] * invcombe - 1.0f, -0.5f, 0.5f);
+        float diff = clamp(1.0f - flagdp[x + y * pitch] * invdiff, -0.5f, 0.5f);
+        dstp[x + y * pitch] = pixel_t(max(combe + diff, 0.0f) * 128.0f + 0.5f);
+      }
+    }
+  }
+
+  PVideoFrame OffsetPadFrame(PVideoFrame& frame, IScriptEnvironment* env)
+  {
+    int vpad = VPAD;
+    int vpadUV = VPAD >> logUVy;
+
+    return env->SubframePlanar(frame,
+      frame->GetPitch(PLANAR_Y) * vpad, frame->GetPitch(PLANAR_Y), frame->GetRowSize(PLANAR_Y), frame->GetHeight(PLANAR_Y) - vpad * 2,
+      frame->GetPitch(PLANAR_U) * vpadUV, frame->GetPitch(PLANAR_U) * vpadUV, frame->GetPitch(PLANAR_U));
+  }
+
+public:
+  KStaticAnalyze2(PClip clip30, float thcombe, float thdiff, IScriptEnvironment2* env)
+    : GenericVideoFilter(clip30)
+    , thcombe(thcombe)
+    , thdiff(thdiff)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+    , padvi(vi)
+  {
+    padvi.height += VPAD * 2;
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    PVideoFrame frames[N_REFS];
+    for (int i = 0; i < N_REFS; ++i) {
+      frames[i] = GetRefFrame(i + n - DIST, env);
+    }
+    PVideoFrame& src = frames[DIST];
+    PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
+    PVideoFrame flagtmp = env->NewVideoFrame(vi);
+    PVideoFrame flagc = env->NewVideoFrame(vi);
+    PVideoFrame flagd = env->NewVideoFrame(vi);
+
+    CopyFrame(src, padded);
+    PadFrame(padded);
+    CompareFields(padded, flagtmp, (int)thcombe);
+    MergeUVFlags(flagtmp);
+    ExtendFlag(flagtmp, flagc);
+
+    CompareFrames(frames, flagtmp, (int)thdiff);
+    MergeUVFlags(flagtmp);
+    ExtendFlag(flagtmp, flagd);
+    
+    AndFlag(flagc, flagd); // combeありdiffなし -> flagc
+    ApplyUVFlags(flagc);
+
+    return flagc;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KStaticAnalyze2(
+      args[0].AsClip(),       // clip30
+      args[1].AsFloat(30),     // thcombe
+      args[2].AsFloat(15),     // thdiff
+      env);
+  }
+};
+
+class KShowStatic2 : public GenericVideoFilter
+{
+  typedef uint8_t pixel_t;
+
+  PClip sttclip;
+
+  int logUVx;
+  int logUVy;
+
+  void CopyFrame(PVideoFrame& src, PVideoFrame& dst)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    Copy<pixel_t>(dstY, pitchY, srcY, pitchY, vi.width, vi.height);
+    Copy<pixel_t>(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV);
+    Copy<pixel_t>(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV);
+  }
+
+  void MaskFill(pixel_t* dstp, int dstPitch,
+    const uint8_t* flagp, int flagPitch, int width, int height, int val)
+  {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        int coef = flagp[x + y * flagPitch];
+        pixel_t& v = dstp[x + y * dstPitch];
+        v = (coef * v + (128 - coef) * val + 64) >> 7;
+      }
+    }
+  }
+
+  void VisualizeBlock(PVideoFrame& flag, PVideoFrame& dst)
+  {
+    const pixel_t* flagY = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_Y));
+    const pixel_t* flagU = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_U));
+    const pixel_t* flagV = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int flagPitchY = flag->GetPitch(PLANAR_Y);
+    int flagPitchUV = flag->GetPitch(PLANAR_U);
+    int dstPitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int dstPitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    int blue[] = { 73, 230, 111 };
+
+    MaskFill(dstY, dstPitchY, flagY, flagPitchY, vi.width, vi.height, blue[0]);
+    MaskFill(dstU, dstPitchUV, flagU, flagPitchUV, widthUV, heightUV, blue[1]);
+    MaskFill(dstV, dstPitchUV, flagV, flagPitchUV, widthUV, heightUV, blue[2]);
+  }
+
+public:
+  KShowStatic2(PClip sttclip, PClip clip30, IScriptEnvironment2* env)
+    : GenericVideoFilter(clip30)
+    , sttclip(sttclip)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    PVideoFrame flag = sttclip->GetFrame(n, env);
+    PVideoFrame frame30 = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    CopyFrame(frame30, dst);
+    VisualizeBlock(flag, dst);
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KShowStatic2(
+      args[0].AsClip(),       // sttclip
+      args[1].AsClip(),       // clip30
+      env);
+  }
+};
+
+class KStaticMerge2 : public GenericVideoFilter
+{
+  typedef uint8_t pixel_t;
+
+  PClip clip30;
+  PClip sttclip;
+
+  int logUVx;
+  int logUVy;
+
+  int nBlkX;
+  int nBlkY;
+
+  bool ContainsStaticBlock(PVideoFrame& block)
+  {
+    const uint8_t* blockp = reinterpret_cast<const uint8_t*>(block->GetReadPtr());
+
+    for (int by = 0; by < nBlkY; ++by) {
+      for (int bx = 0; bx < nBlkX; ++bx) {
+        if (blockp[bx + by * nBlkX]) return true;
+      }
+    }
+
+    return false;
+  }
+
+  void CopyFrame(PVideoFrame& src, PVideoFrame& dst)
+  {
+    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    Copy<pixel_t>(dstY, pitchY, srcY, pitchY, vi.width, vi.height);
+    Copy<pixel_t>(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV);
+    Copy<pixel_t>(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV);
+  }
+
+  void MergeStatic(pixel_t* dstp, const pixel_t* src60, const pixel_t* src30, int pitch,
+    const pixel_t* flagp, int width, int height)
+  {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        int coef = flagp[x + y * pitch];
+        int v30 = src30[x + y * pitch];
+        int v60 = src60[x + y * pitch];
+        dstp[x + y * pitch] = (coef * v30 + (128 - coef) * v60 + 64) >> 7;
+      }
+    }
+  }
+
+  void MergeStatic(PVideoFrame& src60, PVideoFrame& src30, PVideoFrame& flag, PVideoFrame& dst)
+  {
+    const pixel_t* src60Y = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_Y));
+    const pixel_t* src60U = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_U));
+    const pixel_t* src60V = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_V));
+    const pixel_t* src30Y = reinterpret_cast<const pixel_t*>(src30->GetReadPtr(PLANAR_Y));
+    const pixel_t* src30U = reinterpret_cast<const pixel_t*>(src30->GetReadPtr(PLANAR_U));
+    const pixel_t* src30V = reinterpret_cast<const pixel_t*>(src30->GetReadPtr(PLANAR_V));
+    const pixel_t* flagY = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_Y));
+    const pixel_t* flagU = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_U));
+    const pixel_t* flagV = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_V));
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src60->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+    int pitchUV = src60->GetPitch(PLANAR_U) / sizeof(pixel_t);
+
+    int widthUV = vi.width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    MergeStatic(dstY, src60Y, src30Y, pitchY, flagY, vi.width, vi.height);
+    MergeStatic(dstU, src60U, src30U, pitchUV, flagU, widthUV, heightUV);
+    MergeStatic(dstV, src60V, src30V, pitchUV, flagV, widthUV, heightUV);
+  }
+
+public:
+  KStaticMerge2(PClip clip60, PClip clip30, PClip sttclip, IScriptEnvironment2* env)
+    : GenericVideoFilter(clip60)
+    , clip30(clip30)
+    , sttclip(sttclip)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    VideoInfo srcvi = clip30->GetVideoInfo();
+    if (vi.num_frames != srcvi.num_frames * 2) {
+      env->ThrowError("[KMergeDev] Num frames don't match");
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int n30 = n >> 1;
+    PVideoFrame flag = sttclip->GetFrame(n30, env);
+    PVideoFrame frame60 = child->GetFrame(n, env);
+    PVideoFrame frame30 = clip30->GetFrame(n30, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    CopyFrame(frame60, dst);
+    MergeStatic(frame60, frame30, flag, dst);
+
+    return dst;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    return new KStaticMerge2(
+      args[0].AsClip(),       // clip60
+      args[1].AsClip(),       // clip30
+      args[2].AsClip(),       // sttclip
       env);
   }
 };
@@ -315,6 +1094,8 @@ class KFMFrameDev : public GenericVideoFilter
 {
 	typedef uint8_t pixel_t;
 
+  VideoInfo blockvi;
+
 	int threshMY;
 	int threshSY;
 	int threshLSY;
@@ -394,20 +1175,20 @@ public:
 		, threshLSC(threshSC * 6 * 3)
 		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
 		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-	{ }
+    , blockvi(vi)
+	{
+    if (vi.Is420()) blockvi.pixel_type = VideoInfo::CS_YV12;
+    else if (vi.Is422()) blockvi.pixel_type = VideoInfo::CS_YV16;
+    else if (vi.Is444()) blockvi.pixel_type = VideoInfo::CS_YV24;
+    blockvi.width = vi.width;
+    blockvi.height = vi.height;
+  }
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
 	{
 		PVideoFrame f0 = child->GetFrame(n, env);
 		PVideoFrame f1 = child->GetFrame(n + 1, env);
-
-    VideoInfo flagvi;
-    if (vi.Is420()) flagvi.pixel_type = VideoInfo::CS_YV12;
-    else if (vi.Is422()) flagvi.pixel_type = VideoInfo::CS_YV16;
-    else if (vi.Is444()) flagvi.pixel_type = VideoInfo::CS_YV24;
-    flagvi.width = vi.width;
-    flagvi.height = vi.height;
-		PVideoFrame fflag = env->NewVideoFrame(flagvi);
+		PVideoFrame fflag = env->NewVideoFrame(blockvi);
 
 		int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
@@ -1325,20 +2106,12 @@ public:
 	}
 };
 
-enum {
-  OVERLAP = 8,
-  BLOCK_SIZE = OVERLAP * 2,
-  VPAD = 4,
-};
-
-#define COMBE_FLAG_STR "KRemoveCombe_Flag"
-
 class KRemoveCombe : public GenericVideoFilter
 {
   typedef uint8_t pixel_t;
 
   VideoInfo padvi;
-  VideoInfo flagvi;
+  VideoInfo blockvi;
   int logUVx;
   int logUVy;
   int nBlkX, nBlkY;
@@ -1348,6 +2121,7 @@ class KRemoveCombe : public GenericVideoFilter
   float thcombe;
   float ratio1;
   float ratio2;
+  bool outcombe;
   bool show;
 
   void PadFrame(PVideoFrame& dst)
@@ -1697,7 +2471,7 @@ class KRemoveCombe : public GenericVideoFilter
   }
 
 public:
-  KRemoveCombe(PClip clip, float thsmooth, float smooth, float thcombe, float ratio1, float ratio2, bool show, IScriptEnvironment* env)
+  KRemoveCombe(PClip clip, float thsmooth, float smooth, float thcombe, float ratio1, float ratio2, bool outcombe, bool show, IScriptEnvironment* env)
     : GenericVideoFilter(clip)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
@@ -1707,6 +2481,7 @@ public:
     , thcombe(thcombe)
     , ratio1(ratio1)
     , ratio2(ratio2)
+    , outcombe(outcombe)
     , show(show)
   {
     if (vi.width & 7) env->ThrowError("[KRemoveCombe]: width must be multiple of 8");
@@ -1718,9 +2493,9 @@ public:
     nBlkY = nblocks(vi.height, OVERLAP);
 
     int flag_bytes = sizeof(uint8_t) * nBlkX * nBlkY;
-    flagvi.pixel_type = VideoInfo::CS_BGR32;
-    flagvi.width = 2048;
-    flagvi.height = nblocks(flag_bytes, flagvi.width * 4);
+    blockvi.pixel_type = VideoInfo::CS_BGR32;
+    blockvi.width = 2048;
+    blockvi.height = nblocks(flag_bytes, blockvi.width * 4);
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
@@ -1730,7 +2505,7 @@ public:
     PVideoFrame dst = OffsetPadFrame(env->NewVideoFrame(padvi), env);
     PVideoFrame flag = env->NewVideoFrame(vi);
     PVideoFrame flage = env->NewVideoFrame(vi);
-    PVideoFrame blocks = env->NewVideoFrame(flagvi);
+    PVideoFrame blocks = env->NewVideoFrame(blockvi);
 
     CopyFrame(src, padded);
     PadFrame(padded);
@@ -1739,20 +2514,27 @@ public:
     MergeUVFlags(flage);
     ApplyUVFlags(flage);
     RemoveCombe(padded, flage, dst, (int)smooth);
-    PadFrame(dst);
-    FindCombe3(dst, flag, (int)thcombe);
-    MergeUVFlags(flag);
-    CountFlags(blocks, flag, (int)ratio1, (int)ratio2);
-    CleanBlocks(blocks);
-    ExtendBlocks(blocks);
+
+    if (outcombe) {
+      PadFrame(dst);
+      FindCombe3(dst, flag, (int)thcombe);
+      MergeUVFlags(flag);
+      CountFlags(blocks, flag, (int)ratio1, (int)ratio2);
+      CleanBlocks(blocks);
+      ExtendBlocks(blocks);
+    }
 
     if (show) {
       VisualizeFlags(padded, flag);
-      padded->SetProps(COMBE_FLAG_STR, blocks);
+      if (outcombe) {
+        padded->SetProps(COMBE_FLAG_STR, blocks);
+      }
       return padded;
     }
 
-    dst->SetProps(COMBE_FLAG_STR, blocks);
+    if (outcombe) {
+      dst->SetProps(COMBE_FLAG_STR, blocks);
+    }
     return dst;
   }
 
@@ -1765,7 +2547,8 @@ public:
       (float)args[3].AsFloat(150), // thcombe
       (float)args[4].AsFloat(0), // ratio1
       (float)args[5].AsFloat(5), // ratio2
-      args[6].AsBool(false), // show
+      args[6].AsBool(true), // outcombe
+      args[7].AsBool(false), // show
       env
     );
   }
@@ -2051,12 +2834,19 @@ public:
 
 void AddFuncFM(IScriptEnvironment* env)
 {
-  env->AddFunction("KMergeDev", "cc[thresh]f[debug]i", KMergeDev::Create, 0);
+  env->AddFunction("KStaticAnalyze", "cc[thdiff]f[ratio]f", KStaticAnalyze::Create, 0);
+  env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
+  env->AddFunction("KStaticMerge", "ccc", KStaticMerge::Create, 0);
+
+  env->AddFunction("KStaticAnalyze2", "c[thcombe]f[thdiff]f", KStaticAnalyze2::Create, 0);
+  env->AddFunction("KShowStatic2", "cc", KShowStatic2::Create, 0);
+  env->AddFunction("KStaticMerge2", "ccc", KStaticMerge2::Create, 0);
+
   env->AddFunction("KFMFrameDev", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMFrameDev::Create, 0);
   env->AddFunction("KFMFrameAnalyze", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMFrameAnalyze::Create, 0);
   env->AddFunction("KFMCycleAnalyze", "cc", KFMCycleAnalyze::Create, 0);
   env->AddFunction("KTelecine", "cc[show]b", KTelecine::Create, 0);
-  env->AddFunction("KRemoveCombe", "c[thsmooth]f[smooth]f[thcombe]f[ratio1]f[ratio2]f[show]b", KRemoveCombe::Create, 0);
+  env->AddFunction("KRemoveCombe", "c[thsmooth]f[smooth]f[thcombe]f[ratio1]f[ratio2]f[outcombe]b[show]b", KRemoveCombe::Create, 0);
   env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
   env->AddFunction("KFMSwitch", "cccc[thresh]f[show]b", KFMSwitch::Create, 0);
 }

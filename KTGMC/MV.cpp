@@ -14,6 +14,7 @@
 #include "MVKernel.h"
 #include "DeviceLocalData.h"
 #include "Misc.h"
+#include "KMV.h"
 
 #if 1
 #include "DebugWriter.h"
@@ -35,110 +36,8 @@ enum MVPlaneSet
 };
 
 enum {
-  N_PER_BLOCK = 3,
   MAX_DEGRAIN = 2,
   MAX_BLOCK_SIZE = 32,
-};
-
-struct LevelInfo {
-  int nBlkX; // number of blocks along X
-  int nBlkY; // number of blocks along Y
-};
-
-struct KMVParam
-{
-  enum
-  {
-    VERSION = 5,
-    MAGIC_KEY = 0x4A6C2DE4,
-    SUPER_FRAME = 1,
-    MV_FRAME = 2,
-  };
-
-  /*! \brief Unique identifier, not very useful */
-  int nMagicKey; // placed to head in v.1.2.6
-  int nVersion; // MVAnalysisData and outfile format version - added in v1.2.6
-  int nDataType;
-
-  // Super Frame parameter //
-
-  /*! \brief Width of the frame */
-  int nWidth;
-
-  /*! \brief Height of the frame */
-  int nHeight;
-
-  // スーパーフレームの縦横と実際の縦横が異なる場合のみ0以外の値が入る
-  int nActualWidth;
-  int nActualHeight;
-
-  int yRatioUV; // ratio of luma plane height to chroma plane height
-  int xRatioUV; // ratio of luma plane height to chroma plane width (fixed to 2 for YV12 and YUY2) PF used!
-
-  int nHPad; // Horizontal padding - v1.8.1
-  int nVPad; // Vertical padding - v1.8.1
-
-  /*! \brief pixel refinement of the motion estimation */
-  int nPel;
-
-  bool chroma;
-
-  /*! \brief number of level for the hierarchal search */
-  int nLevels;
-  int nDropLevels;
-
-  int nPixelSize; // PF
-  int nBitsPerPixel;
-  int nPixelShift;
-
-  int pixelType; // color format
-
-  // Analyze Frame Parameter //
-
-  /*! \brief difference between the index of the reference and the index of the current frame */
-  // If nDeltaFrame <= 0, the reference frame is the absolute value of nDeltaFrame.
-  // Only a few functions accept negative nDeltaFrames.
-  int nDeltaFrame;
-
-  /*! \brief direction of the search ( forward / backward ) */
-  bool isBackward;
-
-  /*! \brief size of a block, in pixel */
-  int nBlkSizeX; // horizontal block size
-  int nBlkSizeY; // vertical block size - v1.7
-
-  int nOverlapX; // overlap block size - v1.1
-  int nOverlapY; // vertical overlap - v1.7
-
-  std::vector<LevelInfo> levelInfo;
-
-  int chromaSADScale; // P.F. chroma SAD ratio, 0:stay(YV12) 1:div2 2:div4(e.g.YV24)
-
-
-  KMVParam(int data_type)
-    : nMagicKey(MAGIC_KEY)
-    , nVersion(VERSION)
-    , nDataType(data_type)
-  { }
-
-  static const KMVParam* GetParam(const VideoInfo& vi, IScriptEnvironment2* env)
-  {
-    if (vi.sample_type != MAGIC_KEY) {
-      env->ThrowError("Invalid source (sample_type signature does not match)");
-    }
-    const KMVParam* param = (const KMVParam*)(void*)vi.num_audio_samples;
-    if (param->nMagicKey != MAGIC_KEY) {
-      env->ThrowError("Invalid source (magic key does not match)");
-    }
-    return param;
-  }
-
-  static void SetParam(VideoInfo& vi, KMVParam* param)
-  {
-    vi.audio_samples_per_second = 0; // kill audio
-    vi.sample_type = MAGIC_KEY;
-    vi.num_audio_samples = (size_t)param;
-  }
 };
 
 #pragma region Super
@@ -2369,7 +2268,7 @@ class GroupOfPlanes
 {
 	IMVCUDA* cuda;
 
-	const std::vector<LevelInfo> linfo;
+	const LevelInfo* linfo;
   const int nLevelCount;
   const int nPreAnalyzedCount;
   const bool global;
@@ -2382,7 +2281,7 @@ public:
 	GroupOfPlanes(
 		int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nDropLevels, int nPreAnalyzedCount,
 		int nPel, bool chroma,
-		int nOverlapX, int nOverlapY, const std::vector<LevelInfo>& linfo, int xRatioUV, int yRatioUV,
+		int nOverlapX, int nOverlapY, const LevelInfo* linfo, int xRatioUV, int yRatioUV,
     int divideExtra, int nPixelSize, int nBitsPerPixel,
     bool mt_flag, int chromaSADScale, int batch,
     
@@ -2717,13 +2616,13 @@ public:
     params.isBackward = isb;
 
     // 各階層のブロック数を計算
-    params.levelInfo.clear();
+    params.nAnalyzeLevels = nAnalyzeLevel;
     for (int i = 0; i < nAnalyzeLevel; i++) {
       LevelInfo linfo = {
         ((nWidth_B >> i) - params.nOverlapX) / (params.nBlkSizeX - params.nOverlapX),
         ((nHeight_B >> i) - params.nOverlapY) / (params.nBlkSizeY - params.nOverlapY)
       };
-      params.levelInfo.push_back(linfo);
+      params.levelInfo[i] = linfo;
     }
 
     KMVParam::SetParam(vi, &params);
@@ -2781,9 +2680,9 @@ public:
 		pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
       params.nBlkSizeY,
-      int(params.levelInfo.size()),
+      params.nAnalyzeLevels,
       params.nDropLevels,
-      partialParams ? int(partialParams->levelInfo.size()) : 0,
+      partialParams ? partialParams->nAnalyzeLevels : 0,
       params.nPel,
       params.chroma,
       params.nOverlapX,
@@ -3278,7 +3177,7 @@ public:
     int data_size;
     GetMVData(n, pMv, data_size, env);
 
-    std::vector<LevelInfo> linfo = params->levelInfo;
+    const LevelInfo *linfo = params->levelInfo;
     PVideoFrame ret = env->NewVideoFrame(vi);
     VECTOR* kdata = reinterpret_cast<VECTOR*>(ret->GetWritePtr());
 
@@ -3287,7 +3186,7 @@ public:
     pMv += 2;
 
     // mvデータ
-    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+    for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
 
@@ -3370,7 +3269,7 @@ public:
     const VECTOR* kdata = reinterpret_cast<const VECTOR*>(kmvframe->GetReadPtr());
 
     PVideoFrame ret = env->NewVideoFrame(vi);
-    std::vector<LevelInfo> linfo = params->levelInfo;
+    const LevelInfo *linfo = params->levelInfo;
     int* pMv = reinterpret_cast<int*>(ret->GetWritePtr());
 
     // テンプレートからコピー
@@ -3384,7 +3283,7 @@ public:
     pMv += 2;
 
     // mvデータ
-    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+    for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
 
@@ -3462,7 +3361,7 @@ public:
     PVideoFrame ret = child->GetFrame(n, env);
     PVideoFrame kmvframe = kmv->GetFrame(n, env);
 
-		std::vector<LevelInfo> linfo = params->levelInfo;
+		const LevelInfo* linfo = params->levelInfo;
 		const VECTOR* kdata = reinterpret_cast<const VECTOR*>(kmvframe->GetReadPtr());
 
     const int* pMv;
@@ -3476,7 +3375,7 @@ public:
     }
     pMv += 2;
 
-    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+    for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
       
@@ -3525,7 +3424,7 @@ public:
     PVideoFrame kmvframe1 = kmv1->GetFrame(n, env);
     PVideoFrame kmvframe2 = kmv2->GetFrame(n, env);
 
-		std::vector<LevelInfo> linfo = params->levelInfo;
+		const LevelInfo* linfo = params->levelInfo;
 		const VECTOR* kdata1 = reinterpret_cast<const VECTOR*>(kmvframe1->GetReadPtr());
 		const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
 
@@ -3541,7 +3440,7 @@ public:
 
 		int misCount = 0;
 
-    for (int i = int(params->levelInfo.size()) - 1; i >= 0; i--) {
+    for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
 			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
 
 			for (int v = 0; v < nBlks; ++v) {
@@ -3993,7 +3892,7 @@ class KMVClip
 public:
   KMVClip(const KMVParam* params, int _nSCD1, int _nSCD2)
     : params(params)
-    , pFrames(new std::unique_ptr<KMVFrame>[params->levelInfo.size()])
+    , pFrames(new std::unique_ptr<KMVFrame>[params->nAnalyzeLevels])
   {
 
     // SCD thresholds
@@ -4012,7 +3911,7 @@ public:
     int nBlkCount = params->levelInfo[0].nBlkX * params->levelInfo[0].nBlkY;
     nSCD2 = _nSCD2 * nBlkCount / 256;
 
-    for (int i = 0; i < (int)params->levelInfo.size(); ++i) {
+    for (int i = 0; i < params->nAnalyzeLevels; ++i) {
       LevelInfo info = params->levelInfo[i];
       pFrames[i] = std::unique_ptr<KMVFrame>(new KMVFrame(
         info.nBlkX, info.nBlkY,
@@ -4024,7 +3923,7 @@ public:
   {
 		isValid = isValid_;
 		const VECTOR* pdata = pgroup;
-    for (int i = (int)params->levelInfo.size() - 1; i >= 0; --i) {
+    for (int i = params->nAnalyzeLevels - 1; i >= 0; --i) {
 			int nBlks = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
 			pFrames[i]->SetData(pdata, nBlks);
 			pdata += nBlks;

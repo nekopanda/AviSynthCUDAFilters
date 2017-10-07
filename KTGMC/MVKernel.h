@@ -4,16 +4,10 @@
 #include "avisynth.h"
 
 #include "CommonFunctions.h"
+#include "KMV.h"
 
 enum {
 	ANALYZE_MAX_BATCH = 8
-};
-
-struct VECTOR
-{
-  int x;
-  int y;
-  int sad;
 };
 
 template <typename pixel_t>

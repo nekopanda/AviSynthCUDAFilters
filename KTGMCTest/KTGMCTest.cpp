@@ -2236,42 +2236,9 @@ TEST_F(TestBase, DeviceMatchingBug)
   }
 }
 
-TEST_F(TestBase, KFMTest)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KFM.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "bb = src.Bob()" << std::endl;
-    out << "KMergeDev(bb, src)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      clip->GetFrame(546, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.KFMTest*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
