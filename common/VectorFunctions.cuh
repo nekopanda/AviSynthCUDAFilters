@@ -92,6 +92,12 @@ static __device__ __host__ int4 operator-(int4 a, int4 b) {
   return r;
 }
 
+// int - int4
+static __device__ __host__ int4 operator-(int a, int4 b) {
+  int4 r = { a - b.x, a - b.y, a - b.z, a - b.w };
+  return r;
+}
+
 // float4 - float4
 static __device__ __host__ float4 operator-(float4 a, float4 b) {
   float4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
@@ -101,6 +107,12 @@ static __device__ __host__ float4 operator-(float4 a, float4 b) {
 // int4 * int
 static __device__ __host__ int4 operator*(int4 a, int b) {
   int4 r = { a.x * b, a.y * b, a.z * b, a.w * b };
+  return r;
+}
+
+// int4 * int4
+static __device__ __host__ int4 operator*(int4 a, int4 b) {
+  int4 r = { a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w };
   return r;
 }
 

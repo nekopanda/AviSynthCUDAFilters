@@ -447,7 +447,7 @@ class KTGMC_Bob : public CUDAFilterBase {
       MakeFrameT<uint16_t>(top, src, dst, program_y, program_uv, env);
       break;
     default:
-      env->ThrowError("[KTGMC_Bob] 未対応フォーマット");
+      env->ThrowError("[KTGMC_Bob] Unsupported pixel format");
     }
   }
 
@@ -753,7 +753,7 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[KBinomialTemporalSoften] 未対応フォーマット");
+      env->ThrowError("[KBinomialTemporalSoften] Unsupported pixel format");
     }
     return PVideoFrame();
   }
@@ -1163,7 +1163,7 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[KRemoveGrain] 未対応フォーマット");
+      env->ThrowError("[KRemoveGrain] Unsupported pixel format");
     }
     return PVideoFrame();
   }
@@ -1320,7 +1320,7 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[KRepair] 未対応フォーマット");
+      env->ThrowError("[KRepair] Unsupported pixel format");
     }
     return PVideoFrame();
   }
@@ -1469,7 +1469,7 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[KVerticalCleaner] 未対応フォーマット");
+      env->ThrowError("[KVerticalCleaner] Unsupported pixel format");
     }
     return PVideoFrame();
   }
@@ -1622,7 +1622,7 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[KGaussResize] 未対応フォーマット");
+      env->ThrowError("[KGaussResize] Unsupported pixel format");
     }
     return PVideoFrame();
   }
@@ -1783,7 +1783,7 @@ public:
     case 2:
       return Proc<uint16_t>(n, env);
     default:
-      env->ThrowError("[KMasktoolFilterBase] 未対応フォーマット");
+      env->ThrowError("[KMasktoolFilterBase] Unsupported pixel format");
     }
     return PVideoFrame();
   }
@@ -3179,7 +3179,7 @@ public:
       Proc<uint16_t>(dst, a, b, env);
       break;
     default:
-      env->ThrowError("[KDoubleWeave] 未対応フォーマット");
+      env->ThrowError("[KDoubleWeave] Unsupported pixel format");
     }
 
     return dst;
@@ -3270,7 +3270,7 @@ public:
       Proc<uint16_t>(dst, src, env);
       break;
     default:
-      env->ThrowError("[KCopy] 未対応フォーマット");
+      env->ThrowError("[KCopy] Unsupported pixel format");
     }
 
     return dst;
