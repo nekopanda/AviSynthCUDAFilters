@@ -2048,6 +2048,235 @@ public:
   }
 };
 
+template <typename vpixel_t>
+void cpu_merge(vpixel_t* dst,
+	const vpixel_t* src24, const vpixel_t* src60, const uint8_t* flagp,
+	int width, int height, int pitch, int bshiftX, int bshiftY, int nBlkX, int nBlkY)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			bool isCombe = flagp[(x >> bshiftX) + (y >> bshiftY) * nBlkX] != 0;
+			dstY[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
+		}
+	}
+}
+
+template <typename vpixel_t>
+__global__ void kl_merge(vpixel_t* dst,
+	const vpixel_t* src24, const vpixel_t* src60, const uint8_t* flagp,
+	int width, int height, int pitch, int bshiftX, int bshiftY, int nBlkX, int nBlkY)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		bool isCombe = flagp[(x >> bshiftX) + (y >> bshiftY) * nBlkX] != 0;
+		dstY[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
+	}
+}
+
+enum KFMSWTICH_FLAG {
+	FRAME_60 = 1,
+	FRAME_24,
+};
+
+class KFMSwitch : public GenericVideoFilter
+{
+	typedef uint8_t pixel_t;
+
+	PClip clip24;
+	PClip fmclip;
+	PClip combeclip;
+	float thresh;
+	bool show;
+
+	int logUVx;
+	int logUVy;
+	int nBlkX, nBlkY;
+
+	PulldownPatterns patterns;
+
+	bool ContainsDurtyBlock(PVideoFrame& flag)
+	{
+		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+
+		for (int by = 0; by < nBlkY; ++by) {
+			for (int bx = 0; bx < nBlkX; ++bx) {
+				if (flagp[bx + by * nBlkX]) return true;
+			}
+		}
+
+		return false;
+	}
+
+	template <typename pixel_t>
+	void MergeBlock(PVideoFrame& src24, PVideoFrame& src60, PVideoFrame& flag, PVideoFrame& dst, IScriptEnvironment2* env)
+	{
+		const pixel_t* src24Y = reinterpret_cast<const pixel_t*>(src24->GetReadPtr(PLANAR_Y));
+		const pixel_t* src24U = reinterpret_cast<const pixel_t*>(src24->GetReadPtr(PLANAR_U));
+		const pixel_t* src24V = reinterpret_cast<const pixel_t*>(src24->GetReadPtr(PLANAR_V));
+		const pixel_t* src60Y = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_Y));
+		const pixel_t* src60U = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_U));
+		const pixel_t* src60V = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_V));
+		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+
+		int pitchY = src24->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+		int pitchUV = src24->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int width4 = vi.width >> 2;
+		int width4UV = width4 >> logUVx;
+		int heightUV = vi.height >> logUVy;
+		int bshiftUVx = 1 - logUVx;
+		int bshiftUVy = 3 - logUVy;
+
+		if (IS_CUDA) {
+			dim3 threads(32, 16);
+			dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+			dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+			kl_merge << <blocks, threads >> >(
+				dstY, srcY, flagY, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
+			DEBUG_SYNC;
+			kl_merge << <blocksUV, threads >> >(
+				dstU, srcU, flagU, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			DEBUG_SYNC;
+			kl_merge << <blocksUV, threads >> >(
+				dstV, srcV, flagV, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			DEBUG_SYNC;
+		}
+		else {
+			cpu_merge(dstY, src24Y, src60Y, flagp, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
+			cpu_merge(dstU, srcU, flagU, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			cpu_merge(dstV, srcV, flagV, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+		}
+	}
+
+	template <typename pixel_t>
+	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, IScriptEnvironment* env)
+	{
+		int cycleIndex = n60 / 10;
+		const std::pair<int, float>* pfm = (std::pair<int, float>*)fmframe->GetReadPtr();
+
+		if (pfm->second > thresh) {
+			// コストが高いので60pと判断
+			PVideoFrame frame60 = child->GetFrame(n60, env);
+			type = FRAME_60;
+			return frame60;
+		}
+
+		type = FRAME_24;
+
+		// 24pフレーム番号を取得
+		Frame24Info frameInfo = patterns.GetFrame60(pfm->first, n60);
+		int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex;
+
+		if (frameInfo.frameIndex < 0) {
+			// 前に空きがあるので前のサイクル
+			n24 = frameInfo.cycleIndex * 4 - 1;
+		}
+		else if (frameInfo.frameIndex >= 4) {
+			// 後ろのサイクルのパターンを取得
+			PVideoFrame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
+			const std::pair<int, float>* pnextfm = (std::pair<int, float>*)nextfmframe->GetReadPtr();
+			int fstart = patterns.GetFrame24(pnextfm->first, 0).fieldStartIndex;
+			if (fstart > 0) {
+				// 前に空きがあるので前のサイクル
+				n24 = frameInfo.cycleIndex * 4 + 3;
+			}
+			else {
+				// 前に空きがないので後ろのサイクル
+				n24 = frameInfo.cycleIndex * 4 + 4;
+			}
+		}
+
+		PVideoFrame frame24 = clip24->GetFrame(n24, env);
+		PVideoFrame flag = combeclip->GetFrame(n24, env)->GetProps(COMBE_FLAG_STR)->GetFrame();
+
+		if (ContainsDurtyBlock(flag) == false) {
+			// ダメなブロックはないのでそのまま返す
+			return frame24;
+		}
+
+		// ダメなブロックは60pフレームからコピー
+		PVideoFrame frame60 = child->GetFrame(n60, env);
+		PVideoFrame dst = env->NewVideoFrame(vi);
+
+		MergeBlock<pixel_t>(frame24, frame60, flag, dst);
+
+		return dst;
+	}
+
+	void DrawInfo(PVideoFrame& dst, const char* fps, int pattern, float score, IScriptEnvironment* env) {
+		env->MakeWritable(&dst);
+
+		char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.1f", fps, pattern, score);
+		DrawText(dst, true, 0, 0, buf);
+	}
+
+public:
+	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip, float thresh, bool show, IScriptEnvironment* env)
+		: GenericVideoFilter(clip60)
+		, clip24(clip24)
+		, fmclip(fmclip)
+		, combeclip(combeclip)
+		, thresh(thresh)
+		, show(show)
+		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+	{
+		if (vi.width & 7) env->ThrowError("[KFMSwitch]: width must be multiple of 8");
+		if (vi.height & 7) env->ThrowError("[KFMSwitch]: height must be multiple of 8");
+
+		nBlkX = nblocks(vi.width, OVERLAP);
+		nBlkY = nblocks(vi.height, OVERLAP);
+	}
+
+	PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
+	{
+		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+		int cycleIndex = n60 / 10;
+		PVideoFrame fmframe = fmclip->GetFrame(cycleIndex, env);
+		int frameType;
+
+		PVideoFrame dst;
+		int pixelSize = vi.ComponentSize();
+		switch (pixelSize) {
+		case 1:
+			dst = InternalGetFrame<uint8_t>(n60, fmframe, frameType, env);
+			break;
+		case 2:
+			dst = InternalGetFrame<uint16_t>(n60, fmframe, frameType, env);
+			break;
+		default:
+			env->ThrowError("[KFMSwitch] Unsupported pixel format");
+			break;
+		}
+
+		if (!IS_CUDA && pixelSize == 1 && show) {
+			const std::pair<int, float>* pfm = (std::pair<int, float>*)fmframe->GetReadPtr();
+			const char* fps = (frameType == FRAME_60) ? "60p" : "24p";
+			DrawInfo(dst, fps, pfm->first, pfm->second, env);
+		}
+
+		return dst;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new KFMSwitch(
+			args[0].AsClip(),           // clip60
+			args[1].AsClip(),           // clip24
+			args[2].AsClip(),           // fmclip
+			args[3].AsClip(),           // combeclip
+			(float)args[4].AsFloat(),   // thresh
+			args[5].AsBool(),           // show
+			env
+			);
+	}
+};
+
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f", KAnalyzeStatic::Create, 0);
@@ -2060,5 +2289,7 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 
   env->AddFunction("KTelecine", "cc[show]b", KTelecine::Create, 0);
   env->AddFunction("KRemoveCombe", "c[thsmooth]f[smooth]f[thcombe]f[ratio1]f[ratio2]f[show]b", KRemoveCombe::Create, 0);
-  env->AddFunction("KRemoveCombeCheck", "cc", KRemoveCombeCheck::Create, 0);
+	env->AddFunction("KRemoveCombeCheck", "cc", KRemoveCombeCheck::Create, 0);
+
+	env->AddFunction("KFMSwitch", "cccc[thresh]f[show]b", KFMSwitch::Create, 0);
 }

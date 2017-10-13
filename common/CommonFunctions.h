@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <intrin.h>
 
 #ifdef ENABLE_CUDA
 #include <cuda_runtime_api.h>
