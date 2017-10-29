@@ -485,6 +485,7 @@ public:
     uint8_t* dstp = dst->GetWritePtr();
     memcpy(dstp, &result, sizeof(result));
 
+		// フレームをCUDAに持っていった後、
     // CPUからも取得できるようにプロパティにも入れておく
     dst->SetProps("KFM_Pattern", result.first);
     dst->SetProps("KFM_Cost", result.second);

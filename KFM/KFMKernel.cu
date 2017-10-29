@@ -2048,6 +2048,33 @@ public:
   }
 };
 
+bool cpu_contains_durty_block(const uint8_t* flagp, int nBlkX, int nBlkY, int* work)
+{
+	for (int by = 0; by < nBlkY; ++by) {
+		for (int bx = 0; bx < nBlkX; ++bx) {
+			if (flagp[bx + by * nBlkX]) return true;
+		}
+	}
+	return false;
+}
+
+__global__ void kl_init_contains_durty_block(int* work)
+{
+	*work = 0;
+}
+
+__global__ void kl_contains_durty_block(const uint8_t* flagp, int nBlkX, int nBlkY, int* work)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < nBlkX && y < nBlkY) {
+		if (flagp[x + y * nBlkX]) {
+			*work = 1;
+		}
+	}
+}
+
 template <typename vpixel_t>
 void cpu_merge(vpixel_t* dst,
 	const vpixel_t* src24, const vpixel_t* src60, const uint8_t* flagp,
@@ -2056,7 +2083,7 @@ void cpu_merge(vpixel_t* dst,
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
 			bool isCombe = flagp[(x >> bshiftX) + (y >> bshiftY) * nBlkX] != 0;
-			dstY[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
+			dst[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
 		}
 	}
 }
@@ -2071,7 +2098,7 @@ __global__ void kl_merge(vpixel_t* dst,
 
 	if (x < width && y < height) {
 		bool isCombe = flagp[(x >> bshiftX) + (y >> bshiftY) * nBlkX] != 0;
-		dstY[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
+		dst[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
 	}
 }
 
@@ -2080,7 +2107,7 @@ enum KFMSWTICH_FLAG {
 	FRAME_24,
 };
 
-class KFMSwitch : public GenericVideoFilter
+class KFMSwitch : public KFMFilterBase
 {
 	typedef uint8_t pixel_t;
 
@@ -2094,19 +2121,27 @@ class KFMSwitch : public GenericVideoFilter
 	int logUVy;
 	int nBlkX, nBlkY;
 
+	VideoInfo workvi;
+
 	PulldownPatterns patterns;
 
-	bool ContainsDurtyBlock(PVideoFrame& flag)
+	bool ContainsDurtyBlock(PVideoFrame& flag, PVideoFrame& work, IScriptEnvironment2* env)
 	{
 		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+		int* pwork = reinterpret_cast<int*>(work->GetWritePtr());
 
-		for (int by = 0; by < nBlkY; ++by) {
-			for (int bx = 0; bx < nBlkX; ++bx) {
-				if (flagp[bx + by * nBlkX]) return true;
-			}
+		if (IS_CUDA) {
+			dim3 threads(32, 16);
+			dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
+			kl_init_contains_durty_block << <1, 1 >> > (pwork);
+			kl_contains_durty_block << <blocks, threads >> > (flagp, nBlkX, nBlkY, pwork);
+			int result;
+			CUDA_CHECK(cudaMemcpy(&result, pwork, sizeof(int), cudaMemcpyDeviceToHost));
+			return result != 0;
 		}
-
-		return false;
+		else {
+			return cpu_contains_durty_block(flagp, nBlkX, nBlkY, pwork);
+		}
 	}
 
 	template <typename pixel_t>
@@ -2136,29 +2171,30 @@ class KFMSwitch : public GenericVideoFilter
 			dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
 			dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
 			kl_merge << <blocks, threads >> >(
-				dstY, srcY, flagY, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
+				dstY, src24Y, src60Y, flagp, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
 			DEBUG_SYNC;
 			kl_merge << <blocksUV, threads >> >(
-				dstU, srcU, flagU, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+				dstU, src24U, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
 			DEBUG_SYNC;
 			kl_merge << <blocksUV, threads >> >(
-				dstV, srcV, flagV, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+				dstV, src24V, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
 			DEBUG_SYNC;
 		}
 		else {
 			cpu_merge(dstY, src24Y, src60Y, flagp, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
-			cpu_merge(dstU, srcU, flagU, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
-			cpu_merge(dstV, srcV, flagV, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			cpu_merge(dstU, src24U, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			cpu_merge(dstV, src24V, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
 		}
 	}
 
 	template <typename pixel_t>
-	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, IScriptEnvironment* env)
+	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, IScriptEnvironment2* env)
 	{
 		int cycleIndex = n60 / 10;
-		const std::pair<int, float>* pfm = (std::pair<int, float>*)fmframe->GetReadPtr();
+		int kfmPattern = (int)fmframe->GetProps("KFM_Pattern")->GetInt();
+		float kfmCost = (float)fmframe->GetProps("KFM_Cost")->GetFloat();
 
-		if (pfm->second > thresh) {
+		if (kfmCost > thresh) {
 			// コストが高いので60pと判断
 			PVideoFrame frame60 = child->GetFrame(n60, env);
 			type = FRAME_60;
@@ -2168,7 +2204,7 @@ class KFMSwitch : public GenericVideoFilter
 		type = FRAME_24;
 
 		// 24pフレーム番号を取得
-		Frame24Info frameInfo = patterns.GetFrame60(pfm->first, n60);
+		Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
 		int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex;
 
 		if (frameInfo.frameIndex < 0) {
@@ -2193,7 +2229,8 @@ class KFMSwitch : public GenericVideoFilter
 		PVideoFrame frame24 = clip24->GetFrame(n24, env);
 		PVideoFrame flag = combeclip->GetFrame(n24, env)->GetProps(COMBE_FLAG_STR)->GetFrame();
 
-		if (ContainsDurtyBlock(flag) == false) {
+		PVideoFrame work = env->NewVideoFrame(workvi);
+		if (ContainsDurtyBlock(flag, work, env) == false) {
 			// ダメなブロックはないのでそのまま返す
 			return frame24;
 		}
@@ -2202,7 +2239,7 @@ class KFMSwitch : public GenericVideoFilter
 		PVideoFrame frame60 = child->GetFrame(n60, env);
 		PVideoFrame dst = env->NewVideoFrame(vi);
 
-		MergeBlock<pixel_t>(frame24, frame60, flag, dst);
+		MergeBlock<pixel_t>(frame24, frame60, flag, dst, env);
 
 		return dst;
 	}
@@ -2216,7 +2253,7 @@ class KFMSwitch : public GenericVideoFilter
 
 public:
 	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip, float thresh, bool show, IScriptEnvironment* env)
-		: GenericVideoFilter(clip60)
+		: KFMFilterBase(clip60)
 		, clip24(clip24)
 		, fmclip(fmclip)
 		, combeclip(combeclip)
@@ -2230,6 +2267,11 @@ public:
 
 		nBlkX = nblocks(vi.width, OVERLAP);
 		nBlkY = nblocks(vi.height, OVERLAP);
+
+		int work_bytes = sizeof(int);
+		workvi.pixel_type = VideoInfo::CS_BGR32;
+		workvi.width = 4;
+		workvi.height = nblocks(work_bytes, workvi.width * 4);
 	}
 
 	PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
@@ -2277,6 +2319,24 @@ public:
 	}
 };
 
+class AssertOnCUDA : public GenericVideoFilter
+{
+public:
+	AssertOnCUDA(PClip clip) : GenericVideoFilter(clip) { }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_DEV_TYPE) {
+			return DEV_TYPE_CUDA;
+		}
+		return 0;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new AssertOnCUDA(args[0].AsClip());
+	}
+};
+
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f", KAnalyzeStatic::Create, 0);
@@ -2292,4 +2352,6 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 	env->AddFunction("KRemoveCombeCheck", "cc", KRemoveCombeCheck::Create, 0);
 
 	env->AddFunction("KFMSwitch", "cccc[thresh]f[show]b", KFMSwitch::Create, 0);
+
+	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }
