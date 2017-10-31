@@ -1538,7 +1538,7 @@ void cpu_remove_combe(pixel_t* dst,
 {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-      if (combe[x + y * pitch] < thcombe) {
+      if (combe[x + y * pitch] >= thcombe) {
         dst[x + y * pitch] = BinomialMerge(
           src[x + (y - 2) * pitch],
           src[x + (y - 1) * pitch],
@@ -1563,7 +1563,7 @@ __global__ void kl_remove_combe(pixel_t* dst,
   int y = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (x < width && y < height) {
-    if (combe[x + y * pitch] < thcombe) {
+    if (combe[x + y * pitch] >= thcombe) {
       dst[x + y * pitch] = BinomialMerge(
         src[x + (y - 2) * pitch],
         src[x + (y - 1) * pitch],
@@ -1822,7 +1822,7 @@ class KRemoveCombe : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  void VisualizeFlags(PVideoFrame& dst, PVideoFrame& fflag, IScriptEnvironment2* env)
+  void VisualizeFlags(PVideoFrame& dst, PVideoFrame& fflag, int thresh, IScriptEnvironment2* env)
   {
     // 判定結果を表示
     int blue[] = { 73, 230, 111 };
@@ -1842,7 +1842,7 @@ class KRemoveCombe : public KFMFilterBase
         int flag = fflagp[x + y * flagPitch];
 
         int* color = nullptr;
-        if (flag) {
+        if (flag >= thresh) {
           color = blue;
         }
 
@@ -1938,7 +1938,7 @@ class KRemoveCombe : public KFMFilterBase
     ExtendBlocks(blockse, blocks, env);
 
     if (!IS_CUDA && show) {
-      VisualizeFlags<pixel_t>(padded, flag, env);
+      VisualizeFlags<pixel_t>(padded, flag, (int)thcombe, env);
       padded->SetProps(COMBE_FLAG_STR, blockse);
       return padded;
     }
@@ -1994,10 +1994,10 @@ public:
     return new KRemoveCombe(
       args[0].AsClip(),       // source
       (float)args[1].AsFloat(30), // thsmooth
-      (float)args[2].AsFloat(50), // smooth
-      (float)args[3].AsFloat(150), // thcombe
+      (float)args[2].AsFloat(100), // smooth
+      (float)args[3].AsFloat(100), // thcombe
       (float)args[4].AsFloat(0), // ratio1
-      (float)args[5].AsFloat(5), // ratio2
+      (float)args[5].AsFloat(0), // ratio2
       args[6].AsBool(false), // show
       env
     );
@@ -2147,19 +2147,20 @@ class KFMSwitch : public KFMFilterBase
 	template <typename pixel_t>
 	void MergeBlock(PVideoFrame& src24, PVideoFrame& src60, PVideoFrame& flag, PVideoFrame& dst, IScriptEnvironment2* env)
 	{
-		const pixel_t* src24Y = reinterpret_cast<const pixel_t*>(src24->GetReadPtr(PLANAR_Y));
-		const pixel_t* src24U = reinterpret_cast<const pixel_t*>(src24->GetReadPtr(PLANAR_U));
-		const pixel_t* src24V = reinterpret_cast<const pixel_t*>(src24->GetReadPtr(PLANAR_V));
-		const pixel_t* src60Y = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_Y));
-		const pixel_t* src60U = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_U));
-		const pixel_t* src60V = reinterpret_cast<const pixel_t*>(src60->GetReadPtr(PLANAR_V));
-		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+		typedef typename VectorType<pixel_t>::type vpixel_t;
+		const vpixel_t* src24Y = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_Y));
+		const vpixel_t* src24U = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_U));
+		const vpixel_t* src24V = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_V));
+		const vpixel_t* src60Y = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_Y));
+		const vpixel_t* src60U = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_U));
+		const vpixel_t* src60V = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_V));
+		vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
+		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
 		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
 
-		int pitchY = src24->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int pitchUV = src24->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int pitchY = src24->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+		int pitchUV = src24->GetPitch(PLANAR_U) / sizeof(vpixel_t);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
@@ -2177,13 +2178,13 @@ class KFMSwitch : public KFMFilterBase
 				dstU, src24U, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
 			DEBUG_SYNC;
 			kl_merge << <blocksUV, threads >> >(
-				dstV, src24V, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+				dstV, src24V, src60V, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
 			DEBUG_SYNC;
 		}
 		else {
 			cpu_merge(dstY, src24Y, src60Y, flagp, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
 			cpu_merge(dstU, src24U, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
-			cpu_merge(dstV, src24V, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			cpu_merge(dstV, src24V, src60V, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
 		}
 	}
 
@@ -2214,8 +2215,8 @@ class KFMSwitch : public KFMFilterBase
 		else if (frameInfo.frameIndex >= 4) {
 			// 後ろのサイクルのパターンを取得
 			PVideoFrame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-			const std::pair<int, float>* pnextfm = (std::pair<int, float>*)nextfmframe->GetReadPtr();
-			int fstart = patterns.GetFrame24(pnextfm->first, 0).fieldStartIndex;
+			int nextPattern = (int)nextfmframe->GetProps("KFM_Pattern")->GetInt();
+			int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
 			if (fstart > 0) {
 				// 前に空きがあるので前のサイクル
 				n24 = frameInfo.cycleIndex * 4 + 3;

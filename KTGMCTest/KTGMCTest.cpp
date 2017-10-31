@@ -2117,7 +2117,7 @@ TEST_F(TestBase, NNEDI3Test_Perf)
 
 #pragma endregion
 
-#pragma region DeviceCheck
+#pragma region AviSynthPlus
 
 TEST_F(TestBase, DeviceCheck)
 {
@@ -2138,6 +2138,44 @@ TEST_F(TestBase, DeviceCheck)
     printf("%s\n", err.msg);
     GTEST_FAIL();
   }
+}
+
+TEST_F(TestBase, StartupTime)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		AVSValue result;
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+		out << "SetCacheMode(CACHE_OPTIMAL_SIZE)" << std::endl;
+		out << "LWLibavVideoSource(\"test.ts\").QTGMC()" << std::endl;
+		out.close();
+
+		PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+
+		int64_t sum = 0, prev, cur;
+		for (int i = 100; i < 120; ++i) {
+			QueryPerformanceCounter((LARGE_INTEGER*)&prev);
+
+			PVideoFrame frame = clip->GetFrame(i, env.get());
+
+			QueryPerformanceCounter((LARGE_INTEGER*)&cur);
+			int64_t frametime = cur - prev;
+			sum += frametime;
+
+			int64_t freq;
+			QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+			printf("%d: %.1f (elapsed: %.1f)\n", i - 100 + 1,
+				(double)frametime / freq * 1000.0, (double)sum / freq * 1000.0);
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
 }
 
 #pragma endregion
@@ -2438,7 +2476,7 @@ TEST_F(TestBase, RemoveCombeTest)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.RemoveCombeTest*";
+	::testing::GTEST_FLAG(filter) = "TestBase.StartupTime*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
