@@ -20,7 +20,7 @@ srch = src.ConvertBits(12)
 srcg = srch.OnCPU(2)
 
 #srcg.KTemporalNR(3, 1).KDeband(25, 1, 1, false).OnCUDA(0)
-srcg.KEdgeLevel(10,25,0,0,false).OnCUDA(0)
+return srcg.KEdgeLevel(10,25,0,0,true).OnCUDA(0).ConvertBits(8)
 #srch
 #return src
 #src.KTemporalNR(3, 4)

@@ -601,7 +601,7 @@ public:
 			args[0].AsClip(),          // clip
 			args[1].AsInt(25),         // range
 			(float)args[2].AsFloat(1), // thresh
-			args[3].AsInt(0),          // sample_mode
+			args[3].AsInt(1),          // sample_mode
 			args[4].AsBool(false),     // blur_first
 			env);
 	}
@@ -628,6 +628,27 @@ __global__ void kl_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width
 	}
 }
 
+template <typename pixel_t>
+void cpu_fill (pixel_t* dst, pixel_t v, int width, int height, int pitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			dst[x + y * pitch] = v;
+		}
+	}
+}
+
+template <typename pixel_t>
+__global__ void kl_fill(pixel_t* dst, pixel_t v, int width, int height, int pitch)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		dst[x + y * pitch] = v;
+	}
+}
+
 enum {
 	EDGE_CHECK_NONE = 16,
 	EDGE_CHECK_DARK = 180,
@@ -635,6 +656,7 @@ enum {
 	EDGE_CHECK_BLACK = 240,
 	EDGE_CHECK_WHITE = 50,
 };
+#define SCALE(c) (int)(((float)c / 255.0f) * maxv)
 
 template <typename pixel_t, bool check, bool bw_enable>
 void cpu_edgelevel(
@@ -648,7 +670,7 @@ void cpu_edgelevel(
 
 			if (y <= 1 || y >= height - 2 || x <= 1 || x >= width - 2) {
 				if (x < width && y < height) {
-					*dst = check ? EDGE_CHECK_NONE : *src;
+					*dst = check ? SCALE(EDGE_CHECK_NONE) : *src;
 				}
 			}
 			else {
@@ -673,14 +695,14 @@ void cpu_edgelevel(
 					if (hmax - hmin > thrs) {
 						avg = (hmax + hmin) >> 1;
 						if (bw_enable && srcv == hmin)
-							dstv = EDGE_CHECK_BLACK;
+							dstv = SCALE(EDGE_CHECK_BLACK);
 						else if (bw_enable && srcv == hmax)
-							dstv = EDGE_CHECK_WHITE;
+							dstv = SCALE(EDGE_CHECK_WHITE);
 						else
-							dstv = (srcv > avg) ? EDGE_CHECK_BRIGHT : EDGE_CHECK_DARK;
+							dstv = (srcv > avg) ? SCALE(EDGE_CHECK_BRIGHT) : SCALE(EDGE_CHECK_DARK);
 					}
 					else {
-						dstv = EDGE_CHECK_NONE;
+						dstv = SCALE(EDGE_CHECK_NONE);
 					}
 				}
 				else {
@@ -723,7 +745,7 @@ __global__ void kl_edgelevel(
 
 	if (y <= 1 || y >= height - 2 || x <= 1 || x >= width - 2) {
 		if (x < width && y < height) {
-			*dst = check ? EDGE_CHECK_NONE : *src;
+			*dst = check ? SCALE(EDGE_CHECK_NONE) : *src;
 		}
 	}
 	else {
@@ -748,14 +770,14 @@ __global__ void kl_edgelevel(
 			if (hmax - hmin > thrs) {
 				avg = (hmax + hmin) >> 1;
 				if (bw_enable && srcv == hmin)
-					dstv = EDGE_CHECK_BLACK;
+					dstv = SCALE(EDGE_CHECK_BLACK);
 				else if (bw_enable && srcv == hmax)
-					dstv = EDGE_CHECK_WHITE;
+					dstv = SCALE(EDGE_CHECK_WHITE);
 				else
-					dstv = (srcv > avg) ? EDGE_CHECK_BRIGHT : EDGE_CHECK_DARK;
+					dstv = (srcv > avg) ? SCALE(EDGE_CHECK_BRIGHT) : SCALE(EDGE_CHECK_DARK);
 			}
 			else {
-				dstv = EDGE_CHECK_NONE;
+				dstv = SCALE(EDGE_CHECK_NONE);
 			}
 		}
 		else {
@@ -831,6 +853,34 @@ class KEdgeLevel : public KDebandBase
 	}
 
 	template <typename pixel_t>
+	void ClearUV(PVideoFrame& dst, IScriptEnvironment2* env)
+	{
+		typedef typename VectorType<pixel_t>::type vpixel_t;
+		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
+		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+		int pitchUV = dst->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int width4 = vi.width >> 2;
+		int width4UV = width4 >> logUVx;
+		int heightUV = vi.height >> logUVy;
+
+		vpixel_t zerov = VHelper<vpixel_t>::make(1 << (vi.BitsPerComponent() - 1));
+
+		if (IS_CUDA) {
+			dim3 threads(32, 16);
+			dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+			kl_fill << <blocksUV, threads >> >(dstU, zerov, width4UV, heightUV, pitchUV);
+			DEBUG_SYNC;
+			kl_fill << <blocksUV, threads >> >(dstV, zerov, width4UV, heightUV, pitchUV);
+			DEBUG_SYNC;
+		}
+		else {
+			cpu_fill<vpixel_t>(dstU, zerov, width4UV, heightUV, pitchUV);
+			cpu_fill<vpixel_t>(dstV, zerov, width4UV, heightUV, pitchUV);
+		}
+	}
+
+	template <typename pixel_t>
 	PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
 	{
 		PVideoFrame src = child->GetFrame(n, env);
@@ -869,7 +919,12 @@ class KEdgeLevel : public KDebandBase
 			table[0][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs, bc, wc);
 		}
 
-		CopyUV<pixel_t>(dst, src, env);
+		if (show) {
+			ClearUV<pixel_t>(dst, env);
+		}
+		else {
+			CopyUV<pixel_t>(dst, src, env);
+		}
 
 		return dst;
 	}
@@ -919,7 +974,7 @@ public:
 void AddFuncDebandKernel(IScriptEnvironment* env)
 {
 	env->AddFunction("KTemporalNR", "c[dist]i[thresh]f", KTemporalNR::Create, 0);
-	env->AddFunction("KDeband", "c[range]i[thresh]f[sample_mode]i[blur_first]b", KDeband::Create, 0);
+	env->AddFunction("KDeband", "c[range]i[thresh]f[sample]i[blur_first]b", KDeband::Create, 0);
 	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[bc]f[wc]f[show]b", KEdgeLevel::Create, 0);
 }
 
