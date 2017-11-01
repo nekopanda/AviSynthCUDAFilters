@@ -1,6 +1,6 @@
 #SetGraphAnalysis(true)
 SetLogParams("avsp.log", LOG_WARNING)
-SetMemoryMax(8192, type=DEV_TYPE_CUDA)
+SetMemoryMax(2048, type=DEV_TYPE_CUDA)
 platform = "x64"
 #config = "Debug"
 config = "Release"
@@ -14,20 +14,18 @@ LoadPlugin(prefixKFM + "KFM.dll")
 Import(".\KTGMC.avsi")
 Import(".\KSMDegrain.avsi") 
 
-src = LWLibavVideoSource("test.ts")
-srcg = src.OnCPU(2)
+src = LWLibavVideoSource("banding.ts")
+#return src
+srch = src.ConvertBits(12)
+srcg = srch.OnCPU(2)
 
-#p60 = srcg.KTGMC_Bob(0, 0.5)
-p60 = srcg.KTGMC()
-stt = srcg.KAnalyzeStatic(30, 15)
-#return stt.OnCUDA(0).KShowStatic(src)
-p60 = p60.KMergeStatic(srcg,stt).OnCUDA(2)
-return p60
+#srcg.KTemporalNR(3, 1).KDeband(25, 1, 1, false).OnCUDA(0)
+srcg.KEdgeLevel(10,25,0,0,false).OnCUDA(0)
+#srch
+#return src
+#src.KTemporalNR(3, 4)
+#src.KFMFrameAnalyzeShow()
 
-fm = srcg.KFMFrameAnalyze(15, 7, 20, 8).OnCUDA(2).KFMCycleAnalyze(src)
-combe = srcg.KTelecine(fm.OnCPU(2)).KRemoveCombe(30, 50, 150, 0, 5)
-p24 = combe.KSMDegrain().OnCUDA(2)
-
-p60.KFMSwitch(p24, fm, combe.OnCUDA(2), 2, show=True)
+ConvertBits(8, dither=0)
 
 #DumpFilterGraph("T:\sandbox\t28\17\out.dot", mode=1)

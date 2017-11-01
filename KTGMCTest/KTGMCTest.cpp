@@ -101,6 +101,10 @@ protected:
   void CopyTest(TEST_FRAMES tf, bool cuda);
 
   void NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn);
+
+	void TemporalNRTest(TEST_FRAMES tf);
+	void DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first);
+	void EdgeLevelTest(TEST_FRAMES tf);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -2379,7 +2383,7 @@ TEST_F(TestBase, AnalyzeFrameTest)
     out << "ref = src.KFMFrameAnalyze()" << std::endl;
     out << "cuda = srcuda.KFMFrameAnalyze().OnCUDA(0)" << std::endl;
 
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+    out << "KFMFrameAnalyzeCheck(ref, cuda)" << std::endl;
 
     out.close();
 
@@ -2474,9 +2478,174 @@ TEST_F(TestBase, RemoveCombeTest)
 
 #pragma endregion
 
+#pragma region TemporalNR
+
+void TestBase::TemporalNRTest(TEST_FRAMES tf)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		AVSValue result;
+		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+		std::string ktgmcPath = modulePath + "\\KFM.dll";
+		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+
+		out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+		out << "srcuda = src.OnCPU(0)" << std::endl;
+
+		out << "ref = src.KTemporalNR(3, 4)" << std::endl;
+		out << "cuda = srcuda.KTemporalNR(3, 4).OnCUDA(0)" << std::endl;
+
+		out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+		out.close();
+
+		{
+			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+			GetFrames(clip, tf, env.get());
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
+
+TEST_F(TestBase, TemporalNRTest)
+{
+	TemporalNRTest(TF_MID);
+}
+
+#pragma endregion
+
+#pragma region Deband
+
+void TestBase::DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		AVSValue result;
+		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+		std::string ktgmcPath = modulePath + "\\KFM.dll";
+		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+
+		const char* blur_str = blur_first ? "true" : "false";
+
+		out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+		out << "srcuda = src.OnCPU(0)" << std::endl;
+
+		out << "ref = src.KDeband(25, 4, " << sample_mode << ", " << blur_str << ")" << std::endl;
+		out << "cuda = srcuda.KDeband(25, 4, " << sample_mode << ", " << blur_str << ").OnCUDA(0)" << std::endl;
+
+		out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+		out.close();
+
+		{
+			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+			GetFrames(clip, tf, env.get());
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
+
+TEST_F(TestBase, DebandTest_Mode0F)
+{
+	DebandTest(TF_MID, 0, false);
+}
+
+TEST_F(TestBase, DebandTest_Mode1F)
+{
+	DebandTest(TF_MID, 1, false);
+}
+
+TEST_F(TestBase, DebandTest_Mode2F)
+{
+	DebandTest(TF_MID, 2, false);
+}
+
+TEST_F(TestBase, DebandTest_Mode0T)
+{
+	DebandTest(TF_MID, 0, true);
+}
+
+TEST_F(TestBase, DebandTest_Mode1T)
+{
+	DebandTest(TF_MID, 1, true);
+}
+
+TEST_F(TestBase, DebandTest_Mode2T)
+{
+	DebandTest(TF_MID, 2, true);
+}
+
+#pragma endregion
+
+#pragma region EdgeLevel
+
+void TestBase::EdgeLevelTest(TEST_FRAMES tf)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		AVSValue result;
+		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+		std::string ktgmcPath = modulePath + "\\KFM.dll";
+		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+
+		out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+		out << "srcuda = src.OnCPU(0)" << std::endl;
+
+		out << "ref = src.KEdgeLevel(10,25,0,0,false)" << std::endl;
+		out << "cuda = srcuda.KEdgeLevel(10,25,0,0,false).OnCUDA(0)" << std::endl;
+
+		out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+		out.close();
+
+		{
+			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+			GetFrames(clip, tf, env.get());
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
+
+TEST_F(TestBase, EdgeLevelTest)
+{
+	EdgeLevelTest(TF_MID);
+}
+
+#pragma endregion
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.StartupTime*";
+	::testing::GTEST_FLAG(filter) = "TestBase.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

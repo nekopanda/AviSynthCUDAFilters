@@ -230,8 +230,8 @@ static __device__ __host__ int4 absdiff(uchar4 a, uchar4 b) {
   int4 r2 = {
     (r.x >= 0) ? r.x : -r.x,
     (r.y >= 0) ? r.y : -r.y,
-    (r.z >= 0) ? r.x : -r.z,
-    (r.w >= 0) ? r.x : -r.w
+    (r.z >= 0) ? r.z : -r.z,
+    (r.w >= 0) ? r.w : -r.w
   };
   return r2;
 }
@@ -241,8 +241,8 @@ static __device__ __host__ int4 absdiff(ushort4 a, ushort4 b) {
   int4 r2 = {
     (r.x >= 0) ? r.x : -r.x,
     (r.y >= 0) ? r.y : -r.y,
-    (r.z >= 0) ? r.x : -r.z,
-    (r.w >= 0) ? r.x : -r.w
+    (r.z >= 0) ? r.z : -r.z,
+    (r.w >= 0) ? r.w : -r.w
   };
   return r2;
 }

@@ -176,6 +176,7 @@
     <ClInclude Include="TextOut.h" />
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="KDeband.cu" />
     <CudaCompile Include="KFMKernel.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

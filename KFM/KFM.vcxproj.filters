@@ -34,5 +34,8 @@
     <CudaCompile Include="KFMKernel.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
+    <CudaCompile Include="KDeband.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>
