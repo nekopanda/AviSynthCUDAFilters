@@ -14,18 +14,18 @@ LoadPlugin(prefixKFM + "KFM.dll")
 Import(".\KTGMC.avsi")
 Import(".\KSMDegrain.avsi") 
 
-src = LWLibavVideoSource("banding.ts")
+src = LWLibavVideoSource("banding.ts").Trim(3198,4666)
 #return src
 srch = src.ConvertBits(12)
 srcg = srch.OnCPU(2)
 
-#srcg.KTemporalNR(3, 1).KDeband(25, 1, 1, false).OnCUDA(0)
-return srcg.KEdgeLevel(10,25,0,0,true).OnCUDA(0).ConvertBits(8)
+srcg.KTemporalNR(3, 1).KDeband(25, 1, 1, false).OnCUDA(0)
+#return srcg.KEdgeLevel(10,25,0,0,true).OnCUDA(0).ConvertBits(8)
 #srch
 #return src
 #src.KTemporalNR(3, 4)
 #src.KFMFrameAnalyzeShow()
 
-ConvertBits(8, dither=0)
+ConvertBits(10, dither=0)
 
 #DumpFilterGraph("T:\sandbox\t28\17\out.dot", mode=1)

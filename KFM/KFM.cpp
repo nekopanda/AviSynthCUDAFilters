@@ -271,12 +271,24 @@ PulldownPattern::PulldownPattern(int nf0, int nf1, int nf2, int nf3)
   }
 }
 
+PulldownPattern::PulldownPattern()
+	: fields()
+{
+	for (int c = 0, fstart = 0; c < 4; ++c) {
+		for (int i = 0; i < 4; ++i) {
+			int nf = 2;
+			fields[fstart + nf - 1].split = true;
+			fstart += nf;
+		}
+	}
+}
+
 PulldownPatterns::PulldownPatterns()
   : p2323(2, 3, 2, 3)
   , p2233(2, 2, 3, 3)
-  , p2224(2, 2, 2, 4)
+  , p30()
 {
-  const PulldownPattern* patterns[] = { &p2323, &p2233, &p2224 };
+  const PulldownPattern* patterns[] = { &p2323, &p2233, &p30 };
 
   for (int p = 0; p < 3; ++p) {
     for (int i = 0; i < 9; ++i) {
@@ -342,7 +354,7 @@ Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
 
 std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height) const
 {
-  const PulldownPattern* patterns[] = { &p2323, &p2233, &p2224 };
+  const PulldownPattern* patterns[] = { &p2323, &p2233, &p30 };
 
   // 1ƒsƒNƒZƒ‹“–‚½‚è‚ÌŽÈ‚Ì”
   float shimaratio = std::accumulate(data->fieldv, data->fieldv + 14, 0.0f) / (14.0f * width * height);
@@ -370,11 +382,14 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
       lshima[p * 9 + i] = SplitScore(pattern, data->fieldlv, 0);
       lshimabase[p * 9 + i] = SplitScore(pattern, data->fieldlv, data->fieldlbase);
       split[p * 9 + i] = SplitScore(pattern, data->splitv, 0);
-      merge[p * 9 + i] = MergeScore(pattern, data->mergev);
 
       shimacost[p * 9 + i] = SplitCost(pattern, data->fieldv);
       lshimacost[p * 9 + i] = SplitCost(pattern, data->fieldlv);
-      mergecost[p * 9 + i] = MergeScore(pattern, data->move);
+
+			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
+				merge[p * 9 + i] = MergeScore(pattern, data->mergev);
+				mergecost[p * 9 + i] = MergeScore(pattern, data->move);
+			}
     }
   }
 

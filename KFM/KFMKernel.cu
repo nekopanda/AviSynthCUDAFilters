@@ -2195,8 +2195,8 @@ class KFMSwitch : public KFMFilterBase
 		int kfmPattern = (int)fmframe->GetProps("KFM_Pattern")->GetInt();
 		float kfmCost = (float)fmframe->GetProps("KFM_Cost")->GetFloat();
 
-		if (kfmCost > thresh) {
-			// コストが高いので60pと判断
+		if (kfmCost > thresh || PulldownPatterns::Is30p(kfmPattern)) {
+			// コストが高いので60pと判断 or 30pの場合
 			PVideoFrame frame60 = child->GetFrame(n60, env);
 			type = FRAME_60;
 			return frame60;

@@ -22,7 +22,8 @@ struct PulldownPatternField {
 struct PulldownPattern {
   PulldownPatternField fields[10 * 4];
 
-  PulldownPattern(int nf0, int nf1, int nf2, int nf3);
+	PulldownPattern(int nf0, int nf1, int nf2, int nf3);
+	PulldownPattern();
 
   const PulldownPatternField* GetPattern(int n) const {
     return &fields[10 + n - 2];
@@ -40,7 +41,7 @@ struct FMData;
 
 class PulldownPatterns
 {
-  PulldownPattern p2323, p2233, p2224;
+  PulldownPattern p2323, p2233, p30;
   const PulldownPatternField* allpatterns[27];
 public:
   PulldownPatterns();
@@ -58,6 +59,8 @@ public:
   Frame24Info GetFrame60(int patternIndex, int n60) const;
 
   std::pair<int, float> Matching(const FMData* data, int width, int height) const;
+
+	static bool Is30p(int patternIndex) { return patternIndex >= 18; }
 };
 
 #define COMBE_FLAG_STR "KRemoveCombe_Flag"
