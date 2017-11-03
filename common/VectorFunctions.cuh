@@ -225,6 +225,11 @@ static __device__ __host__ float4 abs(float4 a) {
   return r;
 }
 
+static __device__ __host__ int4 abs(int4 a) {
+	int4 r = { abs(a.x), abs(a.y), abs(a.z), abs(a.w) };
+	return r;
+}
+
 static __device__ __host__ int4 absdiff(uchar4 a, uchar4 b) {
   int4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
   int4 r2 = {

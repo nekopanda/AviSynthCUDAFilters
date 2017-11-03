@@ -52,6 +52,12 @@ __host__ __device__ T max(T v1, T v2)
 {
   return v1 > v2 ? v1 : v2;
 }
+
+template<typename T>
+__host__ __device__ T abs(T v1)
+{
+	return v1 >= 0 ? v1 : -v1;
+}
 #endif
 
 template<typename T>

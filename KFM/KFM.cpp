@@ -138,11 +138,13 @@ struct FMData {
 	// ¬‚³‚¢È‚Ì—Ê
 	float fieldv[14];
 	float fieldbase[14];
-	float fieldrv[14];
+	float fieldrv[14]; // —¼—×‚Æ”äŠr‚µ‚½‘Š‘Î—Ê
+	float fieldvcost[14]; // —¼—×‚Ì˜a
 	// ‘å‚«‚¢È‚Ì—Ê
 	float fieldlv[14];
 	float fieldlbase[14];
 	float fieldrlv[14];
+	float fieldlvcost[14];
 	// “®‚«—Ê
 	float move[14];
 	// “®‚«‚©‚çŒ©‚½•ª—£“x
@@ -250,7 +252,7 @@ float SplitCost(const PulldownPatternField* pattern, const float* fv) {
   return nsplitcoef / (splitcoef + 0.1f * nsplitcoef);
 }
 
-float RSplitCost(const PulldownPatternField* pattern, const float* rawfv, const float* fv, int vbase) {
+float RSplitCost(const PulldownPatternField* pattern, const float* fv, const float* fvcost) {
 	int nsplit = 0;
 	float sumcost = 0;
 
@@ -258,7 +260,7 @@ float RSplitCost(const PulldownPatternField* pattern, const float* rawfv, const 
 		if (pattern[i].split) {
 			nsplit++;
 			if (fv[i] < 1.0f) {
-				sumcost += (1.0f - fv[i]) * (rawfv[i] / vbase);
+				sumcost += (1.0f - fv[i]) * fvcost[i];
 			}
 		}
 	}
@@ -422,7 +424,7 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
       lshimabase[p * 9 + i] = SplitScore(pattern, data->fieldlv, data->fieldlbase);
       split[p * 9 + i] = SplitScore(pattern, data->splitv, 0);
 
-      shimacost[p * 9 + i] = RSplitCost(pattern, data->fieldv, data->fieldrv, data->vbase);
+      shimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrv, data->fieldvcost);
       //lshimacost[p * 9 + i] = RSplitCost(pattern, data->fieldlv, data->fieldrlv, data->vbase);
 
 			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
@@ -431,6 +433,11 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 			}
     }
   }
+
+#if 0
+	auto it = std::min_element(shimacost.begin(), shimacost.end());
+	return std::pair<int, float>((int)(it - shimacost.begin()), *it);
+#else
 
   auto makeRet = [&](int n) {
     //float cost = shimacost[n] + lshimacost[n] + mergecost[n];
@@ -483,6 +490,7 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
   it = std::max_element(scores.begin(), scores.end());
 
   return makeRet(int(it - scores.begin()));
+#endif
 }
 
 #pragma endregion
@@ -528,6 +536,8 @@ public:
 			// relative
 			data.fieldrv[i] = (fmcnt[i + 2].shima + data.vbase) * 2.0f / (fmcnt[i + 1].shima + fmcnt[i + 3].shima + data.vbase * 2.0f) - 1.0f;
 			data.fieldrlv[i] = (fmcnt[i + 2].lshima + data.vbase) * 2.0f / (fmcnt[i + 1].lshima + fmcnt[i + 3].lshima + data.vbase * 2.0f) - 1.0f;
+			data.fieldvcost[i] = (float)(fmcnt[i + 1].shima + fmcnt[i + 3].shima) / data.vbase;
+			data.fieldlvcost[i] = (float)(fmcnt[i + 1].lshima + fmcnt[i + 3].lshima) / data.vbase;
 
       if (fmcnt[i + 1].move > fmcnt[i + 2].move && fmcnt[i + 3].move > fmcnt[i + 2].move) {
         float sum = (float)(fmcnt[i + 1].move + fmcnt[i + 3].move);

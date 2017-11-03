@@ -297,7 +297,7 @@ __global__ void kl_extend_coef(vpixel_t* dst, const vpixel_t* __restrict__ src, 
 }
 
 __device__ __host__ int4 CalcCombe(int4 a, int4 b, int4 c, int4 d, int4 e) {
-  return (a + c * 4 + e - (b + d) * 3);
+  return abs(a + c * 4 + e - (b + d) * 3);
 }
 
 template <typename vpixel_t>
