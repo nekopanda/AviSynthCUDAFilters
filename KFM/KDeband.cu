@@ -658,10 +658,10 @@ enum {
 };
 #define SCALE(c) (int)(((float)c / 255.0f) * maxv)
 
-template <typename pixel_t, bool check, bool bw_enable>
+template <typename pixel_t, bool check, bool selective>
 void cpu_edgelevel(
 	pixel_t* dsttop, const pixel_t* srctop,
-	int width, int height, int pitch, int maxv, int str, int thrs, int bc, int wc)
+	int width, int height, int pitch, int maxv, int str, int thrs)
 {
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
@@ -678,28 +678,44 @@ void cpu_edgelevel(
 				int dstv;
 
 				int hmax, hmin, vmax, vmin, avg;
-				hmax = hmin = src[-2];
-				vmax = vmin = src[-2 * pitch];
+				int hdiffmax = 0, vdiffmax = 0;
+				int hprev = hmax = hmin = src[-2];
+				int vprev = vmax = vmin = src[-2 * pitch];
 
 				for (int i = -1; i < 3; ++i) {
-					hmax = max(hmax, src[i]);
-					hmin = min(hmin, src[i]);
-					vmax = max(vmax, src[i*pitch]);
-					vmin = min(vmin, src[i*pitch]);
+					int hcur = src[i];
+					int vcur = src[i*pitch];
+
+					hmax = max(hmax, hcur);
+					hmin = min(hmin, hcur);
+					vmax = max(vmax, vcur);
+					vmin = min(vmin, vcur);
+
+					if (selective) {
+						hdiffmax = max(hdiffmax, abs(hcur - hprev));
+						vdiffmax = max(vdiffmax, abs(vcur - vprev));
+					}
+
+					hprev = hcur;
+					vprev = vcur;
 				}
 
-				if (hmax - hmin < vmax - vmin)
+				if (hmax - hmin < vmax - vmin) {
 					hmax = vmax, hmin = vmin;
+					hdiffmax = vdiffmax;
+				}
+
+				float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
 
 				if (check) {
-					if (hmax - hmin > thrs) {
+					if (hmax - hmin > thrs && factor > 0.0f) {
 						avg = (hmax + hmin) >> 1;
-						if (bw_enable && srcv == hmin)
-							dstv = SCALE(EDGE_CHECK_BLACK);
-						else if (bw_enable && srcv == hmax)
-							dstv = SCALE(EDGE_CHECK_WHITE);
-						else
-							dstv = (srcv > avg) ? SCALE(EDGE_CHECK_BRIGHT) : SCALE(EDGE_CHECK_DARK);
+						if (srcv > avg) {
+							dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_WHITE) : SCALE(EDGE_CHECK_BRIGHT);
+						}
+						else {
+							dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_BLACK) : SCALE(EDGE_CHECK_DARK);
+						}
 					}
 					else {
 						dstv = SCALE(EDGE_CHECK_NONE);
@@ -709,16 +725,7 @@ void cpu_edgelevel(
 					if (hmax - hmin > thrs) {
 						avg = (hmin + hmax) >> 1;
 
-						if (bw_enable) {
-							if (srcv == hmin)
-								hmin -= bc;
-							hmin -= bc;
-							if (srcv == hmax)
-								hmax += wc;
-							hmax += wc;
-						}
-
-						dstv = min(max(srcv + ((srcv - avg) * str >> 4), hmin), hmax);
+						dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
 						dstv = clamp(dstv, 0, maxv);
 					}
 					else {
@@ -732,10 +739,10 @@ void cpu_edgelevel(
 	}
 }
 
-template <typename pixel_t, bool check, bool bw_enable>
+template <typename pixel_t, bool check, bool selective>
 __global__ void kl_edgelevel(
 	pixel_t* __restrict__ dst, const pixel_t* __restrict__ src,
-	int width, int height, int pitch, int maxv, int str, int thrs, int bc, int wc)
+	int width, int height, int pitch, int maxv, int str, int thrs)
 {
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -753,28 +760,44 @@ __global__ void kl_edgelevel(
 		int dstv;
 
 		int hmax, hmin, vmax, vmin, avg;
-		hmax = hmin = src[-2];
-		vmax = vmin = src[-2 * pitch];
+		int hdiffmax = 0, vdiffmax = 0;
+		int hprev = hmax = hmin = src[-2];
+		int vprev = vmax = vmin = src[-2 * pitch];
 
 		for (int i = -1; i < 3; ++i) {
-			hmax = max(hmax, src[i]);
-			hmin = min(hmin, src[i]);
-			vmax = max(vmax, src[i*pitch]);
-			vmin = min(vmin, src[i*pitch]);
+			int hcur = src[i];
+			int vcur = src[i*pitch];
+
+			hmax = max(hmax, hcur);
+			hmin = min(hmin, hcur);
+			vmax = max(vmax, vcur);
+			vmin = min(vmin, vcur);
+
+			if (selective) {
+				hdiffmax = max(hdiffmax, abs(hcur - hprev));
+				vdiffmax = max(vdiffmax, abs(vcur - vprev));
+			}
+
+			hprev = hcur;
+			vprev = vcur;
 		}
 
-		if (hmax - hmin < vmax - vmin)
+		if (hmax - hmin < vmax - vmin) {
 			hmax = vmax, hmin = vmin;
+			hdiffmax = vdiffmax;
+		}
+
+		float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
 
 		if (check) {
-			if (hmax - hmin > thrs) {
+			if (hmax - hmin > thrs && factor > 0.0f) {
 				avg = (hmax + hmin) >> 1;
-				if (bw_enable && srcv == hmin)
-					dstv = SCALE(EDGE_CHECK_BLACK);
-				else if (bw_enable && srcv == hmax)
-					dstv = SCALE(EDGE_CHECK_WHITE);
-				else
-					dstv = (srcv > avg) ? SCALE(EDGE_CHECK_BRIGHT) : SCALE(EDGE_CHECK_DARK);
+				if (srcv > avg) {
+					dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_WHITE) : SCALE(EDGE_CHECK_BRIGHT);
+				}
+				else {
+					dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_BLACK) : SCALE(EDGE_CHECK_DARK);
+				}
 			}
 			else {
 				dstv = SCALE(EDGE_CHECK_NONE);
@@ -784,16 +807,7 @@ __global__ void kl_edgelevel(
 			if (hmax - hmin > thrs) {
 				avg = (hmin + hmax) >> 1;
 
-				if (bw_enable) {
-					if (srcv == hmin)
-						hmin -= bc;
-					hmin -= bc;
-					if (srcv == hmax)
-						hmax += wc;
-					hmax += wc;
-				}
-
-				dstv = min(max(srcv + ((srcv - avg) * str >> 4), hmin), hmax);
+				dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
 				dstv = clamp(dstv, 0, maxv);
 			}
 			else {
@@ -805,23 +819,22 @@ __global__ void kl_edgelevel(
 	}
 }
 
-template <typename pixel_t, bool check, bool bw_enable>
+template <typename pixel_t, bool check, bool selective>
 void launch_edgelevel(
 	pixel_t* dsttop, const pixel_t* srctop,
-	int width, int height, int pitch, int maxv, int str, int thrs, int bc, int wc)
+	int width, int height, int pitch, int maxv, int str, int thrs)
 {
 	dim3 threads(32, 16);
 	dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-	kl_edgelevel<pixel_t, check, bw_enable> << <blocks, threads >> > (
-		dsttop, srctop, width, height, pitch, maxv, str, thrs, bc, wc);
+	kl_edgelevel<pixel_t, check, selective> << <blocks, threads >> > (
+		dsttop, srctop, width, height, pitch, maxv, str, thrs);
 }
 
 class KEdgeLevel : public KDebandBase
 {
 	int str;
 	int thrs;
-	int bc;
-	int wc;
+	bool selective;
 	bool show;
 
 	template <typename pixel_t>
@@ -892,7 +905,7 @@ class KEdgeLevel : public KDebandBase
 
 		void(*table[2][4])(
 			pixel_t* dsttop, const pixel_t* srctop,
-			int width, int height, int pitch, int maxv, int str, int thrs, int bc, int wc) =
+			int width, int height, int pitch, int maxv, int str, int thrs) =
 		{
 			{
 				cpu_edgelevel<pixel_t, false, false>,
@@ -908,15 +921,15 @@ class KEdgeLevel : public KDebandBase
 			}
 		};
 
-		int table_idx = (show ? 2 : 0) + ((bc | wc) ? 1 : 0);
+		int table_idx = (show ? 2 : 0) + (selective ? 1 : 0);
 		int maxv = (1 << vi.BitsPerComponent()) - 1;
 
 		if (IS_CUDA) {
-			table[1][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs, bc, wc);
+			table[1][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs);
 			DEBUG_SYNC;
 		}
 		else {
-			table[0][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs, bc, wc);
+			table[0][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs);
 		}
 
 		if (show) {
@@ -930,12 +943,11 @@ class KEdgeLevel : public KDebandBase
 	}
 
 public:
-	KEdgeLevel(PClip clip, int str, float thrs, float bc, float wc, bool show, IScriptEnvironment2* env)
+	KEdgeLevel(PClip clip, int str, float thrs, bool selective, bool show, IScriptEnvironment2* env)
 		: KDebandBase(clip)
 		, str(str)
 		, thrs(scaleParam(thrs, vi.BitsPerComponent()))
-		, bc(scaleParam(bc, vi.BitsPerComponent()))
-		, wc(scaleParam(wc, vi.BitsPerComponent()))
+		, selective(selective)
 		, show(show)
 	{
 	}
@@ -963,9 +975,8 @@ public:
 			args[0].AsClip(),           // clip
 			args[1].AsInt(10),          // str
 			(float)args[2].AsFloat(25), // thrs
-			(float)args[3].AsFloat(0),  // bc
-			(float)args[4].AsFloat(0),  // wc
-			args[5].AsBool(false),      // show
+			args[3].AsBool(false),      // selective
+			args[4].AsBool(false),      // show
 			env);
 	}
 };
@@ -975,6 +986,6 @@ void AddFuncDebandKernel(IScriptEnvironment* env)
 {
 	env->AddFunction("KTemporalNR", "c[dist]i[thresh]f", KTemporalNR::Create, 0);
 	env->AddFunction("KDeband", "c[range]i[thresh]f[sample]i[blur_first]b", KDeband::Create, 0);
-	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[bc]f[wc]f[show]b", KEdgeLevel::Create, 0);
+	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[selective]b[show]b", KEdgeLevel::Create, 0);
 }
 
