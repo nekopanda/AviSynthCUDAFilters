@@ -252,15 +252,15 @@ float SplitCost(const PulldownPatternField* pattern, const float* fv) {
   return nsplitcoef / (splitcoef + 0.1f * nsplitcoef);
 }
 
-float RSplitCost(const PulldownPatternField* pattern, const float* fv, const float* fvcost) {
+float RSplitCost(const PulldownPatternField* pattern, const float* fv, const float* fvcost, float costth) {
 	int nsplit = 0;
 	float sumcost = 0;
 
 	for (int i = 0; i < 14; ++i) {
 		if (pattern[i].split) {
 			nsplit++;
-			if (fv[i] < 1.0f) {
-				sumcost += (1.0f - fv[i]) * fvcost[i];
+			if (fv[i] < costth) {
+				sumcost += (costth - fv[i]) * fvcost[i];
 			}
 		}
 	}
@@ -393,7 +393,7 @@ Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
   return info;
 }
 
-std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height) const
+std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth) const
 {
   const PulldownPattern* patterns[] = { &p2323, &p2233, &p30 };
 
@@ -424,8 +424,8 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
       lshimabase[p * 9 + i] = SplitScore(pattern, data->fieldlv, data->fieldlbase);
       split[p * 9 + i] = SplitScore(pattern, data->splitv, 0);
 
-      shimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrv, data->fieldvcost);
-      //lshimacost[p * 9 + i] = RSplitCost(pattern, data->fieldlv, data->fieldrlv, data->vbase);
+      shimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrv, data->fieldvcost, costth);
+      //lshimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrlv, data->fieldlvcost, costth);
 
 			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
 				merge[p * 9 + i] = MergeScore(pattern, data->mergev);
@@ -500,11 +500,13 @@ class KFMCycleAnalyze : public GenericVideoFilter
 	PClip source;
   VideoInfo srcvi;
 	PulldownPatterns patterns;
+	float costth;
 public:
-  KFMCycleAnalyze(PClip fmframe, PClip source, IScriptEnvironment* env)
+  KFMCycleAnalyze(PClip fmframe, PClip source, float costth, IScriptEnvironment* env)
 		: GenericVideoFilter(fmframe)
 		, source(source)
     , srcvi(source->GetVideoInfo())
+		, costth(costth)
 	{
     int out_bytes = sizeof(std::pair<int, float>);
     vi.pixel_type = VideoInfo::CS_BGR32;
@@ -550,7 +552,7 @@ public:
     CalcBaseline(data.fieldv, data.fieldbase, 14);
     CalcBaseline(data.fieldlv, data.fieldlbase, 14);
 
-		auto result = patterns.Matching(&data, srcvi.width, srcvi.height);
+		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth);
 
     PVideoFrame dst = env->NewVideoFrame(vi);
     uint8_t* dstp = dst->GetWritePtr();
@@ -569,6 +571,7 @@ public:
     return new KFMCycleAnalyze(
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
+			(float)args[2].AsFloat(1.0f), // costth
       env
     );
   }
@@ -663,7 +666,7 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
-  env->AddFunction("KFMCycleAnalyze", "cc", KFMCycleAnalyze::Create, 0);
+  env->AddFunction("KFMCycleAnalyze", "cc[costth]f", KFMCycleAnalyze::Create, 0);
   env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
 }
 

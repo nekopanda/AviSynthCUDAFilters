@@ -58,7 +58,7 @@ public:
   // fieldStartIndex‚ÆnumFields‚Í³‚µ‚­‚È‚¢‰Â”\«‚ª‚ ‚é‚Ì‚Å’ˆÓ
   Frame24Info GetFrame60(int patternIndex, int n60) const;
 
-  std::pair<int, float> Matching(const FMData* data, int width, int height) const;
+  std::pair<int, float> Matching(const FMData* data, int width, int height, float costth) const;
 
 	static bool Is30p(int patternIndex) { return patternIndex >= 18; }
 };
