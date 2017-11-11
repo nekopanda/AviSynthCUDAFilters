@@ -2608,7 +2608,7 @@ public:
   { }
 
 #if LOG_PRINT
-  virtual PVideoFrame GetFrame(int n, IScriptEnvironment* env) {
+  virtual PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) {
     printf("KTGMC_LimitOverSharpen[CUDA]: N=%d\n", n);
     return KMasktoolFilterBase::GetFrame(n, env);
   }
@@ -2699,7 +2699,7 @@ public:
   { }
 
 #if LOG_PRINT
-  virtual PVideoFrame GetFrame(int n, IScriptEnvironment* env) {
+  virtual PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) {
     printf("KTGMC_ToFullRange[CUDA]: N=%d\n", n);
     return KMasktoolFilterBase::GetFrame(n, env);
   }

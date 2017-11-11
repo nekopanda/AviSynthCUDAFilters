@@ -276,7 +276,7 @@ public:
 		}
 	}
 
-	PVideoFrame GetFrame(int n, IScriptEnvironment* env_)
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
 		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 		int cycle = n / BATCH;
@@ -578,7 +578,7 @@ public:
 		
 	}
 
-	PVideoFrame GetFrame(int n, IScriptEnvironment* env_)
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
 		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 		int pixelSize = vi.ComponentSize();
@@ -952,7 +952,7 @@ public:
 	{
 	}
 
-	PVideoFrame GetFrame(int n, IScriptEnvironment* env_)
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
 		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 		int pixelSize = vi.ComponentSize();
