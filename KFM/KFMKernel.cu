@@ -646,7 +646,7 @@ public:
 };
 
 template <typename vpixel_t>
-void cpu_compare_frames(vpixel_t* dst,
+void cpu_min_frames(vpixel_t* dst,
   const vpixel_t* src0, const vpixel_t* src1, const vpixel_t* src2,
   int width, int height, int pitch)
 {
@@ -657,16 +657,15 @@ void cpu_compare_frames(vpixel_t* dst,
       int4 c = to_int(src2[x + y * pitch]);
 
       int4 minv = min(a, min(b, c));
-      int4 maxv = max(a, max(b, c));
 
       // ƒtƒ‰ƒOŠi”[
-      dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(maxv - minv);
+      dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(minv);
     }
   }
 }
 
 template <typename vpixel_t>
-__global__ void kl_compare_frames(vpixel_t* dst,
+__global__ void kl_min_frames(vpixel_t* dst,
   const vpixel_t* __restrict__ src0, 
   const vpixel_t* __restrict__ src1, 
   const vpixel_t* __restrict__ src2,
@@ -681,11 +680,59 @@ __global__ void kl_compare_frames(vpixel_t* dst,
     int4 c = to_int(src2[x + y * pitch]);
 
     int4 minv = min(a, min(b, c));
-    int4 maxv = max(a, max(b, c));
 
     // ƒtƒ‰ƒOŠi”[
-    dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(maxv - minv);
+    dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(minv);
   }
+}
+
+template <typename vpixel_t>
+void cpu_compare_frames(vpixel_t* dst,
+	const vpixel_t* src0, const vpixel_t* src1, const vpixel_t* src2, const vpixel_t* src3, const vpixel_t* src4,
+	int width, int height, int pitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int4 a = to_int(src0[x + y * pitch]);
+			int4 b = to_int(src1[x + y * pitch]);
+			int4 c = to_int(src2[x + y * pitch]);
+			int4 d = to_int(src3[x + y * pitch]);
+			int4 e = to_int(src4[x + y * pitch]);
+
+			int4 minv = min(min(a, b), min(c, min(d, e)));
+			int4 maxv = max(max(a, b), max(c, max(d, e)));
+
+			// ƒtƒ‰ƒOŠi”[
+			dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(maxv - minv);
+		}
+	}
+}
+
+template <typename vpixel_t>
+__global__ void kl_compare_frames(vpixel_t* dst,
+	const vpixel_t* __restrict__ src0,
+	const vpixel_t* __restrict__ src1,
+	const vpixel_t* __restrict__ src2,
+	const vpixel_t* __restrict__ src3,
+	const vpixel_t* __restrict__ src4,
+	int width, int height, int pitch)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		int4 a = to_int(src0[x + y * pitch]);
+		int4 b = to_int(src1[x + y * pitch]);
+		int4 c = to_int(src2[x + y * pitch]);
+		int4 d = to_int(src3[x + y * pitch]);
+		int4 e = to_int(src4[x + y * pitch]);
+
+		int4 minv = min(min(a, b), min(c, min(d, e)));
+		int4 maxv = max(max(a, b), max(c, max(d, e)));
+
+		// ƒtƒ‰ƒOŠi”[
+		dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(maxv - minv);
+	}
 }
 
 template <typename vpixel_t>
@@ -703,34 +750,140 @@ __global__ void kl_and_coefs(vpixel_t* dstp, const vpixel_t* __restrict__ diffp,
   }
 }
 
+class KTemporalDiff : public KFMFilterBase
+{
+	enum {
+		DIST = 2,
+		N_REFS = DIST * 2 + 1,
+	};
+
+	PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+	{
+		ref = clamp(ref, 0, vi.num_frames);
+		return child->GetFrame(ref, env);
+	}
+
+	template <typename pixel_t>
+	void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, IScriptEnvironment2* env)
+	{
+		typedef typename VectorType<pixel_t>::type vpixel_t;
+
+		const vpixel_t* srcY[N_REFS];
+		const vpixel_t* srcU[N_REFS];
+		const vpixel_t* srcV[N_REFS];
+
+		for (int i = 0; i < N_REFS; ++i) {
+			srcY[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
+			srcU[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
+			srcV[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
+		}
+
+		vpixel_t* dstY = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_Y));
+		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_U));
+		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_V));
+
+		int pitchY = frames[0]->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+		int pitchUV = frames[0]->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int width4 = vi.width >> 2;
+		int width4UV = width4 >> logUVx;
+		int heightUV = vi.height >> logUVy;
+
+		if (IS_CUDA) {
+			dim3 threads(32, 16);
+			dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+			dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+			kl_compare_frames << <blocks, threads >> >(dstY,
+				srcY[0], srcY[1], srcY[2], srcY[3], srcY[4], width4, vi.height, pitchY);
+			DEBUG_SYNC;
+			kl_compare_frames << <blocksUV, threads >> >(dstU,
+				srcU[0], srcU[1], srcU[2], srcU[3], srcU[4], width4UV, heightUV, pitchUV);
+			DEBUG_SYNC;
+			kl_compare_frames << <blocksUV, threads >> >(dstV,
+				srcV[0], srcV[1], srcV[2], srcV[3], srcV[4], width4UV, heightUV, pitchUV);
+			DEBUG_SYNC;
+		}
+		else {
+			cpu_compare_frames(dstY, srcY[0], srcY[1], srcY[2], srcY[3], srcY[4], width4, vi.height, pitchY);
+			cpu_compare_frames(dstU, srcU[0], srcU[1], srcU[2], srcU[3], srcU[4], width4UV, heightUV, pitchUV);
+			cpu_compare_frames(dstV, srcV[0], srcV[1], srcV[2], srcV[3], srcV[4], width4UV, heightUV, pitchUV);
+		}
+	}
+
+	template <typename pixel_t>
+	PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+	{
+		PVideoFrame frames[N_REFS];
+		for (int i = 0; i < N_REFS; ++i) {
+			frames[i] = GetRefFrame(i + n - DIST, env);
+		}
+		PVideoFrame diff = env->NewVideoFrame(vi);
+
+		CompareFrames<pixel_t>(frames, diff, env);
+
+		return diff;
+	}
+
+public:
+	KTemporalDiff(PClip clip30, IScriptEnvironment2* env)
+		: KFMFilterBase(clip30)
+	{ }
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+	{
+		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+		int pixelSize = vi.ComponentSize();
+		switch (pixelSize) {
+		case 1:
+			return GetFrameT<uint8_t>(n, env);
+		case 2:
+			return GetFrameT<uint16_t>(n, env);
+		default:
+			env->ThrowError("[KTemporalDiff] Unsupported pixel format");
+		}
+
+		return PVideoFrame();
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
+	{
+		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		return new KTemporalDiff(
+			args[0].AsClip(),       // clip30
+			env);
+	}
+};
+
 class KAnalyzeStatic : public KFMFilterBase
 {
   enum {
-    DIST = 1,
-    N_REFS = 3,
+		DIST = 1,
+    N_DIFFS = DIST * 2 + 1,
   };
+
+	PClip diffclip;
 
   VideoInfo padvi;
 
   float thcombe;
   float thdiff;
 
-  PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+  PVideoFrame GetDiffFrame(int ref, IScriptEnvironment2* env)
   {
     ref = clamp(ref, 0, vi.num_frames);
-    return child->GetFrame(ref, env);
+    return diffclip->GetFrame(ref, env);
   }
 
   template <typename pixel_t>
-  void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, IScriptEnvironment2* env)
+  void GetTemporalDiff(PVideoFrame* frames, PVideoFrame& flag, IScriptEnvironment2* env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
-    const vpixel_t* srcY[N_REFS];
-    const vpixel_t* srcU[N_REFS];
-    const vpixel_t* srcV[N_REFS];
+    const vpixel_t* srcY[N_DIFFS];
+    const vpixel_t* srcU[N_DIFFS];
+    const vpixel_t* srcV[N_DIFFS];
 
-    for (int i = 0; i < N_REFS; ++i) {
+    for (int i = 0; i < N_DIFFS; ++i) {
       srcY[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
       srcU[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
       srcV[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
@@ -746,25 +899,25 @@ class KAnalyzeStatic : public KFMFilterBase
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
 
-    if (IS_CUDA) {
-      dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
-      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_compare_frames << <blocks, threads >> >(dstY,
-        srcY[0], srcY[1], srcY[2], width4, vi.height, pitchY);
-      DEBUG_SYNC;
-      kl_compare_frames << <blocksUV, threads >> >(dstU,
-        srcU[0], srcU[1], srcU[2], width4UV, heightUV, pitchUV);
-      DEBUG_SYNC;
-      kl_compare_frames << <blocksUV, threads >> >(dstV,
-        srcV[0], srcV[1], srcV[2], width4UV, heightUV, pitchUV);
-      DEBUG_SYNC;
-    }
-    else {
-      cpu_compare_frames(dstY, srcY[0], srcY[1], srcY[2], width4, vi.height, pitchY);
-      cpu_compare_frames(dstU, srcU[0], srcU[1], srcU[2], width4UV, heightUV, pitchUV);
-      cpu_compare_frames(dstV, srcV[0], srcV[1], srcV[2], width4UV, heightUV, pitchUV);
-    }
+		if (IS_CUDA) {
+			dim3 threads(32, 16);
+			dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+			dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+			kl_min_frames << <blocks, threads >> >(dstY,
+				srcY[0], srcY[1], srcY[2], width4, vi.height, pitchY);
+			DEBUG_SYNC;
+			kl_min_frames << <blocksUV, threads >> >(dstU,
+				srcU[0], srcU[1], srcU[2], width4UV, heightUV, pitchUV);
+			DEBUG_SYNC;
+			kl_min_frames << <blocksUV, threads >> >(dstV,
+				srcV[0], srcV[1], srcV[2], width4UV, heightUV, pitchUV);
+			DEBUG_SYNC;
+		}
+		else {
+			cpu_min_frames(dstY, srcY[0], srcY[1], srcY[2], width4, vi.height, pitchY);
+			cpu_min_frames(dstU, srcU[0], srcU[1], srcU[2], width4UV, heightUV, pitchUV);
+			cpu_min_frames(dstV, srcV[0], srcV[1], srcV[2], width4UV, heightUV, pitchUV);
+		}
   }
 
   template <typename pixel_t>
@@ -796,11 +949,11 @@ class KAnalyzeStatic : public KFMFilterBase
   template <typename pixel_t>
   PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
   {
-    PVideoFrame frames[N_REFS];
-    for (int i = 0; i < N_REFS; ++i) {
-      frames[i] = GetRefFrame(i + n - DIST, env);
+    PVideoFrame diffframes[N_DIFFS];
+    for (int i = 0; i < N_DIFFS; ++i) {
+			diffframes[i] = GetDiffFrame(i + n - DIST, env);
     }
-    PVideoFrame& src = frames[DIST];
+    PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
     PVideoFrame flagtmp = env->NewVideoFrame(vi);
     PVideoFrame flagc = env->NewVideoFrame(vi);
@@ -812,7 +965,7 @@ class KAnalyzeStatic : public KFMFilterBase
     MergeUVCoefs<pixel_t>(flagtmp, env);
     ExtendCoefs<pixel_t>(flagtmp, flagc, env);
 
-    CompareFrames<pixel_t>(frames, flagtmp, env);
+		GetTemporalDiff<pixel_t>(diffframes, flagtmp, env);
     MergeUVCoefs<pixel_t>(flagtmp, env);
     ExtendCoefs<pixel_t>(flagtmp, flagd, env);
 
@@ -823,8 +976,9 @@ class KAnalyzeStatic : public KFMFilterBase
   }
 
 public:
-  KAnalyzeStatic(PClip clip30, float thcombe, float thdiff, IScriptEnvironment2* env)
+  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, IScriptEnvironment2* env)
     : KFMFilterBase(clip30)
+		, diffclip(diffclip)
     , thcombe(thcombe)
     , thdiff(thdiff)
     , padvi(vi)
@@ -854,8 +1008,11 @@ public:
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PClip clip30 = args[0].AsClip();
+		PClip diffclip = env_->Invoke("KTemporalDiff", clip30).AsClip();
     return new KAnalyzeStatic(
-      args[0].AsClip(),       // clip30
+			clip30,       // clip30
+			diffclip,     // 
       (float)args[1].AsFloat(30),     // thcombe
       (float)args[2].AsFloat(15),     // thdiff
       env);
@@ -2340,7 +2497,8 @@ public:
 
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
-  env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f", KAnalyzeStatic::Create, 0);
+	env->AddFunction("KTemporalDiff", "c", KTemporalDiff::Create, 0);
+	env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f", KAnalyzeStatic::Create, 0);
   env->AddFunction("KMergeStatic", "ccc", KMergeStatic::Create, 0);
 
   env->AddFunction("KFMFrameAnalyzeShow", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMFrameAnalyzeShow::Create, 0);
