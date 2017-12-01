@@ -151,6 +151,13 @@ struct FMData {
 	float splitv[14];
 	// 動きから見た3フィールド結合度
 	float mergev[14];
+	// 縞と動きの和
+	float mf[14];
+	float mfr[14]; // 両隣と比較した相対量
+	float mfcost[14]; // 両隣の和
+	float mfl[14];
+	float mflr[14];
+	float mflcost[14];
 };
 
 void CalcBaseline(const float* data, float* baseline, int N)
@@ -413,6 +420,10 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
   std::vector<float> shimacost(9 * 3);
   //std::vector<float> lshimacost(9 * 3);
 
+	std::vector<float> mshima(9 * 3);
+	std::vector<float> mlshima(9 * 3);
+	std::vector<float> mshimacost(9 * 3);
+
   // 各スコアを計算
   for (int p = 0; p < 3; ++p) {
     for (int i = 0; i < 9; ++i) {
@@ -427,6 +438,10 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
       shimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrv, data->fieldvcost, costth);
       //lshimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrlv, data->fieldlvcost, costth);
 
+			mshima[p * 9 + i] = RSplitScore(pattern, data->mfr);
+			mlshima[p * 9 + i] = RSplitScore(pattern, data->mflr);
+			mshimacost[p * 9 + i] = RSplitCost(pattern, data->mfr, data->mfcost, costth);
+
 			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
 				merge[p * 9 + i] = MergeScore(pattern, data->mergev);
 				//mergecost[p * 9 + i] = MergeScore(pattern, data->move);
@@ -434,16 +449,22 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
     }
   }
 
-#if 0
-	auto it = std::min_element(shimacost.begin(), shimacost.end());
-	return std::pair<int, float>((int)(it - shimacost.begin()), *it);
+#if 1
+	auto makeRet = [&](int n) {
+		//float cost = shimacost[n] + lshimacost[n] + mergecost[n];
+		float cost = mshimacost[n];
+		return std::pair<int, float>(n, cost);
+	};
+
+	auto it = std::max_element(mshima.begin(), mshima.end());
+	return makeRet((int)(it - mshima.begin()));
 #else
 
-  auto makeRet = [&](int n) {
-    //float cost = shimacost[n] + lshimacost[n] + mergecost[n];
+	auto makeRet = [&](int n) {
+		//float cost = shimacost[n] + lshimacost[n] + mergecost[n];
 		float cost = shimacost[n];
-    return std::pair<int, float>(n, cost);
-  };
+		return std::pair<int, float>(n, cost);
+	};
 
   auto it = std::max_element(shima.begin(), shima.end());
   if (moveratio >= 0.002f) { // TODO:
@@ -522,6 +543,17 @@ public:
 			memcpy(fmcnt + (i + 2) * 2, frame->GetReadPtr(), sizeof(fmcnt[0]) * 2);
 		}
 
+		// shima, lshima, moveの画素数がマチマチなので大きさの違いによる重みの違いが出る
+		// shima, lshimaをmoveに合わせる（平均が同じになるようにする）
+
+		int split[18] = { 0 };
+		int mf[18] = { 0 };
+		int mfl[18] = { 0 };
+		for (int i = 1; i < 17; ++i) {
+			split[i] = std::min(fmcnt[i - 1].move, fmcnt[i].move);
+			mf[i] = split[i] + fmcnt[i].shima;
+			mfl[i] = split[i] + fmcnt[i].lshima;
+		}
 
 		FMData data = { 0 };
 		data.vbase = (int)(srcvi.width * srcvi.height * 0.001f);
@@ -531,7 +563,9 @@ public:
 			data.fieldv[i] = (float)fmcnt[i + 2].shima;
 			data.fieldlv[i] = (float)fmcnt[i + 2].lshima;
 			data.move[i] = (float)fmcnt[i + 2].move;
-      data.splitv[i] = (float)std::min(fmcnt[i + 1].move, fmcnt[i + 2].move);
+			data.splitv[i] = (float)split[i + 2];
+			data.mf[i] = (float)mf[i + 2];
+			data.mfl[i] = (float)mfl[i + 2];
 			fieldbase = std::min(fieldbase, fmcnt[i + 2].shima);
 			fieldlbase = std::min(fieldlbase, fmcnt[i + 2].lshima);
 
@@ -540,6 +574,11 @@ public:
 			data.fieldrlv[i] = (fmcnt[i + 2].lshima + data.vbase) * 2.0f / (fmcnt[i + 1].lshima + fmcnt[i + 3].lshima + data.vbase * 2.0f) - 1.0f;
 			data.fieldvcost[i] = (float)(fmcnt[i + 1].shima + fmcnt[i + 3].shima) / data.vbase;
 			data.fieldlvcost[i] = (float)(fmcnt[i + 1].lshima + fmcnt[i + 3].lshima) / data.vbase;
+
+			data.mfr[i] = (mf[i + 2] + data.vbase) * 2.0f / (mf[i + 1] + mf[i + 3] + data.vbase * 2.0f) - 1.0f;
+			data.mflr[i] = (mfl[i + 2] + data.vbase) * 2.0f / (mfl[i + 1] + mfl[i + 3] + data.vbase * 2.0f) - 1.0f;
+			data.mfcost[i] = (float)(mf[i + 1] + mf[i + 3]) / data.vbase;
+			data.mflcost [i] = (float)(mfl[i + 1] + mfl[i + 3]) / data.vbase;
 
       if (fmcnt[i + 1].move > fmcnt[i + 2].move && fmcnt[i + 3].move > fmcnt[i + 2].move) {
         float sum = (float)(fmcnt[i + 1].move + fmcnt[i + 3].move);
