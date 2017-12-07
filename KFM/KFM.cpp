@@ -217,22 +217,22 @@ float SplitScore(const PulldownPatternField* pattern, const float* fv, const flo
 }
 
 float RSplitScore(const PulldownPatternField* pattern, const float* fv) {
-	int nsplit = 0, nnsplit = 0;
+	//int nsplit = 0, nnsplit = 0;
 	float sumsplit = 0, sumnsplit = 0;
 
 	for (int i = 0; i < 14; ++i) {
 		if (pattern[i].split) {
-			nsplit++;
+			//nsplit++;
 			sumsplit += fv[i];
 		}
 		else {
-			nnsplit++;
+			//nnsplit++;
 			sumnsplit += fv[i];
 		}
 	}
 
-	float splitcoef = sumsplit / nsplit;
-	float nsplitcoef = sumnsplit / nnsplit;
+	float splitcoef = sumsplit/* / nsplit*/;
+	float nsplitcoef = sumnsplit/* / nnsplit*/;
 	return splitcoef - nsplitcoef;
 }
 
@@ -423,6 +423,7 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 	std::vector<float> mshima(9 * 3);
 	std::vector<float> mlshima(9 * 3);
 	std::vector<float> mshimacost(9 * 3);
+	std::vector<float> mlshimacost(9 * 3);
 
   // 各スコアを計算
   for (int p = 0; p < 3; ++p) {
@@ -441,6 +442,7 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 			mshima[p * 9 + i] = RSplitScore(pattern, data->mfr);
 			mlshima[p * 9 + i] = RSplitScore(pattern, data->mflr);
 			mshimacost[p * 9 + i] = RSplitCost(pattern, data->mfr, data->mfcost, costth);
+			mlshimacost[p * 9 + i] = RSplitCost(pattern, data->mflr, data->mflcost, costth);
 
 			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
 				merge[p * 9 + i] = MergeScore(pattern, data->mergev);

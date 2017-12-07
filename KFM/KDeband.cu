@@ -705,7 +705,9 @@ void cpu_edgelevel(
 					hdiffmax = vdiffmax;
 				}
 
+				//float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
 				float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
+				factor *= clamp((float)(hmax - hmin) / thrs - 1.0f, 0.0f, 1.0f);
 
 				if (check) {
 					if (hmax - hmin > thrs && factor > 0.0f) {
@@ -722,15 +724,9 @@ void cpu_edgelevel(
 					}
 				}
 				else {
-					if (hmax - hmin > thrs) {
-						avg = (hmin + hmax) >> 1;
-
-						dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
-						dstv = clamp(dstv, 0, maxv);
-					}
-					else {
-						dstv = srcv;
-					}
+					avg = (hmin + hmax) >> 1;
+					dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
+					dstv = clamp(dstv, 0, maxv);
 				}
 
 				*dst = dstv;
@@ -787,7 +783,9 @@ __global__ void kl_edgelevel(
 			hdiffmax = vdiffmax;
 		}
 
+		//float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
 		float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
+		factor *= clamp((float)(hmax - hmin) / thrs - 1.0f, 0.0f, 1.0f);
 
 		if (check) {
 			if (hmax - hmin > thrs && factor > 0.0f) {
@@ -804,15 +802,9 @@ __global__ void kl_edgelevel(
 			}
 		}
 		else {
-			if (hmax - hmin > thrs) {
-				avg = (hmin + hmax) >> 1;
-
-				dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
-				dstv = clamp(dstv, 0, maxv);
-			}
-			else {
-				dstv = srcv;
-			}
+			avg = (hmin + hmax) >> 1;
+			dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
+			dstv = clamp(dstv, 0, maxv);
 		}
 
 		*dst = dstv;
