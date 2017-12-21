@@ -2470,8 +2470,8 @@ public:
 			args[1].AsClip(),           // clip24
 			args[2].AsClip(),           // fmclip
 			args[3].AsClip(),           // combeclip
-			(float)args[4].AsFloat(),   // thresh
-			args[5].AsBool(),           // show
+			(float)args[4].AsFloat(0.8f),// thresh
+			args[5].AsBool(false),      // show
 			env
 			);
 	}

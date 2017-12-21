@@ -350,13 +350,25 @@ Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
   info.cycleIndex = n24 / 4;
   info.frameIndex = n24 % 4;
 
+	int searchFrame = info.frameIndex;
+
+	// パターンが30pの場合は、5枚中真ん中の1枚を消す
+	// 30pの場合は、24pにした時点で5枚中1枚が失われてしまうので、正しく60pに復元することはできない
+	// 30p部分は60pクリップから取得されるので基本的には問題ないが、
+	// 前後のサイクルが24pで、サイクル境界の空きフレームとして30p部分も取得されることがある
+	// なので、5枚中、最初と最後のフレームだけは正しく60pに復元する必要がある
+	// 以下の処理がないと最後のフレーム(4枚目)がズレてしまう
+	if (patternIndex >= 18) {
+		if (searchFrame >= 2) ++searchFrame;
+	}
+
   const PulldownPatternField* ptn = allpatterns[patternIndex];
   int fldstart = 0;
   int nframes = 0;
   for (int i = 0; i < 14; ++i) {
     if (ptn[i].split) {
       if (fldstart >= 1) {
-        if (nframes++ == info.frameIndex) {
+        if (nframes++ == searchFrame) {
           int nextfldstart = i + 1;
           info.fieldStartIndex = fldstart - 2;
           info.numFields = nextfldstart - fldstart;
