@@ -663,12 +663,13 @@ void cpu_edgelevel(
 	pixel_t* dsttop, const pixel_t* srctop,
 	int width, int height, int pitch, int maxv, int str, int thrs)
 {
+	enum { S = (int)selective };
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
 			const pixel_t* src = srctop + y * pitch + x;
 			pixel_t* dst = dsttop + y * pitch + x;
 
-			if (y <= 1 || y >= height - 2 || x <= 1 || x >= width - 2) {
+			if (y <= (1 + S) || y >= height - (2 + S) || x <= (1 + S) || x >= width - (2 + S)) {
 				if (x < width && y < height) {
 					*dst = check ? SCALE(EDGE_CHECK_NONE) : *src;
 				}
@@ -679,10 +680,10 @@ void cpu_edgelevel(
 
 				int hmax, hmin, vmax, vmin, avg;
 				int hdiffmax = 0, vdiffmax = 0;
-				int hprev = hmax = hmin = src[-2];
-				int vprev = vmax = vmin = src[-2 * pitch];
+				int hprev = hmax = hmin = src[-(2 + S)];
+				int vprev = vmax = vmin = src[-(2 + S) * pitch];
 
-				for (int i = -1; i < 3; ++i) {
+				for (int i = -(1 + S); i < (3 + S); ++i) {
 					int hcur = src[i];
 					int vcur = src[i*pitch];
 
@@ -702,12 +703,17 @@ void cpu_edgelevel(
 
 				if (hmax - hmin < vmax - vmin) {
 					hmax = vmax, hmin = vmin;
-					hdiffmax = vdiffmax;
 				}
+				hdiffmax = max(hdiffmax, vdiffmax);
 
-				//float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
-				float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
-				factor *= clamp((float)(hmax - hmin) / thrs - 1.0f, 0.0f, 1.0f);
+				float rdiff = hdiffmax / (float)(hmax - hmin);
+
+				// ～0.2: エッジでない可能性が高いのでなし
+				// 0.2～0.3: ボーダー
+				// 0.3～0.4: 甘いエッジなので強化
+				// 0.4～0.5: ボーダー
+				// 0.5～: 十分エッジなのでなし
+				float factor = selective ? (clamp((0.5f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.3f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
 				if (check) {
 					if (hmax - hmin > thrs && factor > 0.0f) {
@@ -724,9 +730,15 @@ void cpu_edgelevel(
 					}
 				}
 				else {
-					avg = (hmin + hmax) >> 1;
-					dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
-					dstv = clamp(dstv, 0, maxv);
+					if (hmax - hmin > thrs) {
+						avg = (hmin + hmax) >> 1;
+
+						dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
+						dstv = clamp(dstv, 0, maxv);
+				}
+					else {
+						dstv = srcv;
+					}
 				}
 
 				*dst = dstv;
@@ -740,13 +752,14 @@ __global__ void kl_edgelevel(
 	pixel_t* __restrict__ dst, const pixel_t* __restrict__ src,
 	int width, int height, int pitch, int maxv, int str, int thrs)
 {
+	enum { S = (int)selective };
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
 	src += y * pitch + x;
 	dst += y * pitch + x;
 
-	if (y <= 1 || y >= height - 2 || x <= 1 || x >= width - 2) {
+	if (y <= (1 + S) || y >= height - (2 + S) || x <= (1 + S) || x >= width - (2 + S)) {
 		if (x < width && y < height) {
 			*dst = check ? SCALE(EDGE_CHECK_NONE) : *src;
 		}
@@ -757,10 +770,10 @@ __global__ void kl_edgelevel(
 
 		int hmax, hmin, vmax, vmin, avg;
 		int hdiffmax = 0, vdiffmax = 0;
-		int hprev = hmax = hmin = src[-2];
-		int vprev = vmax = vmin = src[-2 * pitch];
+		int hprev = hmax = hmin = src[-(2 + S)];
+		int vprev = vmax = vmin = src[-(2 + S) * pitch];
 
-		for (int i = -1; i < 3; ++i) {
+		for (int i = -(1 + S); i < (3 + S); ++i) {
 			int hcur = src[i];
 			int vcur = src[i*pitch];
 
@@ -780,12 +793,17 @@ __global__ void kl_edgelevel(
 
 		if (hmax - hmin < vmax - vmin) {
 			hmax = vmax, hmin = vmin;
-			hdiffmax = vdiffmax;
 		}
+		hdiffmax = max(hdiffmax, vdiffmax);
 
-		//float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
-		float factor = selective ? clamp((0.5f - hdiffmax / (float)(hmax - hmin)) * 10.0f, 0.0f, 1.0f) : 1.0f;
-		factor *= clamp((float)(hmax - hmin) / thrs - 1.0f, 0.0f, 1.0f);
+		float rdiff = hdiffmax / (float)(hmax - hmin);
+
+		// ～0.2: エッジでない可能性が高いのでなし
+		// 0.2～0.3: ボーダー
+		// 0.3～0.4: 甘いエッジなので強化
+		// 0.4～0.5: ボーダー
+		// 0.5～: 十分エッジなのでなし
+		float factor = selective ? (clamp((0.5f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
 		if (check) {
 			if (hmax - hmin > thrs && factor > 0.0f) {
@@ -802,9 +820,15 @@ __global__ void kl_edgelevel(
 			}
 		}
 		else {
-			avg = (hmin + hmax) >> 1;
-			dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
-			dstv = clamp(dstv, 0, maxv);
+			if (hmax - hmin > thrs) {
+				avg = (hmin + hmax) >> 1;
+
+				dstv = clamp(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin, hmax);
+				dstv = clamp(dstv, 0, maxv);
+			}
+			else {
+				dstv = srcv;
+			}
 		}
 
 		*dst = dstv;
@@ -822,11 +846,160 @@ void launch_edgelevel(
 		dsttop, srctop, width, height, pitch, maxv, str, thrs);
 }
 
+template<typename T, typename CompareAndSwap>
+__device__ __host__ void dev_sort_8elem(T& a0, T& a1, T& a2, T& a3, T& a4, T& a5, T& a6, T& a7)
+{
+	CompareAndSwap cas;
+
+	// Batcher's odd-even mergesort
+	// 8要素なら19comparisonなので最小のソーティングネットワークになるっぽい
+	cas(a0, a1);
+	cas(a2, a3);
+	cas(a4, a5);
+	cas(a6, a7);
+
+	cas(a0, a2);
+	cas(a1, a3);
+	cas(a4, a6);
+	cas(a5, a7);
+
+	cas(a1, a2);
+	cas(a5, a6);
+
+	cas(a0, a4);
+	cas(a1, a5);
+	cas(a2, a6);
+	cas(a3, a7);
+
+	cas(a2, a4);
+	cas(a3, a5);
+
+	cas(a1, a2);
+	cas(a3, a4);
+	cas(a5, a6);
+}
+
+struct IntCompareAndSwap {
+	__device__ __host__ void operator()(int& a, int& b) {
+		int a_ = min(a, b);
+		int b_ = max(a, b);
+		a = a_; b = b_;
+	}
+};
+
+template <typename pixel_t, int N>
+void cpu_edgelevel_repair(
+	pixel_t* dst, const pixel_t* el, const pixel_t* src,
+	int width, int height, int pitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			// eltopはedgelevelの出力であること前提でボーダー処理は入れない
+			// 必ずボーダー付近はel==srcであること
+			// そうでないとメモリエラーが発生する
+
+			int srcv = src[x + y * pitch];
+			int elv = el[x + y * pitch];
+			int dstv = srcv;
+
+			if (elv != srcv) {
+				int a0 = src[x - 1 + (y - 1) * pitch];
+				int a1 = src[x + (y - 1) * pitch];
+				int a2 = src[x + 1 + (y - 1) * pitch];
+				int a3 = src[x - 1 + y * pitch];
+				int a4 = src[x + 1 + y * pitch];
+				int a5 = src[x - 1 + (y + 1) * pitch];
+				int a6 = src[x + (y + 1) * pitch];
+				int a7 = src[x + 1 + (y + 1) * pitch];
+
+				dev_sort_8elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7);
+
+				switch (N) {
+				case 1: // 1st
+					dstv = clamp(elv, min(srcv, a0), max(srcv, a7));
+					break;
+				case 2: // 2nd
+					dstv = clamp(elv, min(srcv, a1), max(srcv, a6));
+					break;
+				case 3: // 3rd
+					dstv = clamp(elv, min(srcv, a2), max(srcv, a5));
+					break;
+				case 4: // 4th
+					dstv = clamp(elv, min(srcv, a3), max(srcv, a4));
+					break;
+				}
+			}
+
+			dst[x + y * pitch] = dstv;
+		}
+	}
+}
+
+template <typename pixel_t, int N>
+__global__ void kl_edgelevel_repair(
+	pixel_t* __restrict__ dst, const pixel_t* __restrict__ el, const pixel_t* __restrict__ src,
+	int width, int height, int pitch)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x < width && y < height) {
+		// eltopはedgelevelの出力であること前提でボーダー処理は入れない
+		// 必ずボーダー付近はel==srcであること
+		// そうでないとメモリエラーが発生する
+
+		int srcv = src[x + y * pitch];
+		int elv = el[x + y * pitch];
+		int dstv = srcv;
+
+		if (elv != srcv) {
+			int a0 = src[x - 1 + (y - 1) * pitch];
+			int a1 = src[x + (y - 1) * pitch];
+			int a2 = src[x + 1 + (y - 1) * pitch];
+			int a3 = src[x - 1 + y * pitch];
+			int a4 = src[x + 1 + y * pitch];
+			int a5 = src[x - 1 + (y + 1) * pitch];
+			int a6 = src[x + (y + 1) * pitch];
+			int a7 = src[x + 1 + (y + 1) * pitch];
+
+			dev_sort_8elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7);
+
+			switch (N) {
+			case 1: // 1st
+				dstv = clamp(elv, min(srcv, a0), max(srcv, a7));
+				break;
+			case 2: // 2nd
+				dstv = clamp(elv, min(srcv, a1), max(srcv, a6));
+				break;
+			case 3: // 3rd
+				dstv = clamp(elv, min(srcv, a2), max(srcv, a5));
+				break;
+			case 4: // 4th
+				dstv = clamp(elv, min(srcv, a3), max(srcv, a4));
+				break;
+			}
+		}
+
+		dst[x + y * pitch] = dstv;
+	}
+}
+
+template <typename pixel_t, int N>
+void launch_edgelevel_repair(
+	pixel_t* dsttop, const pixel_t* __restrict__ eltop, const pixel_t* srctop,
+	int width, int height, int pitch)
+{
+	dim3 threads(32, 16);
+	dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+	kl_edgelevel_repair<pixel_t, N> << <blocks, threads >> > (
+		dsttop, eltop, srctop, width, height, pitch);
+}
+
 class KEdgeLevel : public KDebandBase
 {
 	int str;
 	int thrs;
-	bool selective;
+	int repair;
 	bool show;
 
 	template <typename pixel_t>
@@ -890,9 +1063,13 @@ class KEdgeLevel : public KDebandBase
 	{
 		PVideoFrame src = child->GetFrame(n, env);
 		PVideoFrame dst = env->NewVideoFrame(vi);
+		PVideoFrame el = (repair > 0) ? env->NewVideoFrame(vi) : PVideoFrame();
+		PVideoFrame tmp = (repair > 0) ? env->NewVideoFrame(vi) : PVideoFrame();
 
 		const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
 		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* elY = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_Y)) : nullptr;
+		pixel_t* tmpY = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_Y)) : nullptr;
 		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
 
 		void(*table[2][4])(
@@ -913,21 +1090,51 @@ class KEdgeLevel : public KDebandBase
 			}
 		};
 
-		int table_idx = (show ? 2 : 0) + (selective ? 1 : 0);
 		int maxv = (1 << vi.BitsPerComponent()) - 1;
+		int numel = max((repair + 1) / 2, 1);
 
-		if (IS_CUDA) {
-			table[1][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs);
-			DEBUG_SYNC;
-		}
-		else {
-			table[0][table_idx](dstY, srcY, vi.width, vi.height, pitchY, maxv, str, thrs);
+		for (int i = 0; i < numel; ++i) {
+			int table_idx = ((show && (i + 1 == numel)) ? 2 : 0) + (repair ? 1 : 0);
+			const pixel_t* elsrcY = srcY;
+			if (i > 0) {
+				std::swap(dst, tmp);
+				std::swap(dstY, tmpY);
+				elsrcY = tmpY;
+			}
+			if (IS_CUDA) {
+				table[1][table_idx](dstY, elsrcY, vi.width, vi.height, pitchY, maxv, str, thrs);
+				DEBUG_SYNC;
+			}
+			else {
+				table[0][table_idx](dstY, elsrcY, vi.width, vi.height, pitchY, maxv, str, thrs);
+			}
 		}
 
 		if (show) {
 			ClearUV<pixel_t>(dst, env);
 		}
 		else {
+			if (repair > 0) {
+				// リペアする
+				std::swap(dst, el);
+				std::swap(dstY, elY);
+				for (int i = 0; i < repair; ++i) {
+					const pixel_t* repsrcY = srcY;
+					if (i > 0) {
+						std::swap(dst, tmp);
+						std::swap(dstY, tmpY);
+						repsrcY = tmpY;
+					}
+					if (IS_CUDA) {
+						launch_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY);
+						DEBUG_SYNC;
+					}
+					else {
+						cpu_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY);
+					}
+				}
+			}
+
 			CopyUV<pixel_t>(dst, src, env);
 		}
 
@@ -935,11 +1142,11 @@ class KEdgeLevel : public KDebandBase
 	}
 
 public:
-	KEdgeLevel(PClip clip, int str, float thrs, bool selective, bool show, IScriptEnvironment2* env)
+	KEdgeLevel(PClip clip, int str, float thrs, int repair, bool show, IScriptEnvironment2* env)
 		: KDebandBase(clip)
 		, str(str)
 		, thrs(scaleParam(thrs, vi.BitsPerComponent()))
-		, selective(selective)
+		, repair(repair)
 		, show(show)
 	{
 	}
@@ -967,7 +1174,7 @@ public:
 			args[0].AsClip(),           // clip
 			args[1].AsInt(10),          // str
 			(float)args[2].AsFloat(25), // thrs
-			args[3].AsBool(false),      // selective
+			args[3].AsInt(0),           // repair
 			args[4].AsBool(false),      // show
 			env);
 	}
@@ -978,6 +1185,6 @@ void AddFuncDebandKernel(IScriptEnvironment* env)
 {
 	env->AddFunction("KTemporalNR", "c[dist]i[thresh]f", KTemporalNR::Create, 0);
 	env->AddFunction("KDeband", "c[range]i[thresh]f[sample]i[blur_first]b", KDeband::Create, 0);
-	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[selective]b[show]b", KEdgeLevel::Create, 0);
+	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[repair]i[show]b", KEdgeLevel::Create, 0);
 }
 
