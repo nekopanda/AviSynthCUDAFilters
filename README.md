@@ -5,6 +5,7 @@ AviSynthのCUDA実装フィルタプラグインです。
 
 - KTGMC (QTGMCのCUDA版)
 - KNNEDI3 (NNEDI3のCUDA版)
+- KFM (独自実装のフィルタ)
 
 # 使い方
 
