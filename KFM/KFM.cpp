@@ -158,6 +158,9 @@ struct FMData {
 	float mfl[14];
 	float mflr[14];
 	float mflcost[14];
+	float mft[14]; // shimaとlshimaを足した
+	float mftr[14];
+	float mftcost[14];
 };
 
 void CalcBaseline(const float* data, float* baseline, int N)
@@ -434,8 +437,10 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 
 	std::vector<float> mshima(9 * 3);
 	std::vector<float> mlshima(9 * 3);
+	std::vector<float> mtshima(9 * 3);
 	std::vector<float> mshimacost(9 * 3);
 	std::vector<float> mlshimacost(9 * 3);
+	std::vector<float> mtshimacost(9 * 3);
 
   // 各スコアを計算
   for (int p = 0; p < 3; ++p) {
@@ -453,8 +458,10 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 
 			mshima[p * 9 + i] = RSplitScore(pattern, data->mfr);
 			mlshima[p * 9 + i] = RSplitScore(pattern, data->mflr);
+			mtshima[p * 9 + i] = RSplitScore(pattern, data->mftr);
 			mshimacost[p * 9 + i] = RSplitCost(pattern, data->mfr, data->mfcost, costth);
 			mlshimacost[p * 9 + i] = RSplitCost(pattern, data->mflr, data->mflcost, costth);
+			mtshimacost[p * 9 + i] = RSplitCost(pattern, data->mftr, data->mftcost, costth);
 
 			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
 				merge[p * 9 + i] = MergeScore(pattern, data->mergev);
@@ -466,12 +473,12 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 #if 1
 	auto makeRet = [&](int n) {
 		//float cost = shimacost[n] + lshimacost[n] + mergecost[n];
-		float cost = mshimacost[n];
+		float cost = mtshimacost[n];
 		return std::pair<int, float>(n, cost);
 	};
 
-	auto it = std::max_element(mshima.begin(), mshima.end());
-	return makeRet((int)(it - mshima.begin()));
+	auto it = std::max_element(mtshima.begin(), mtshima.end());
+	return makeRet((int)(it - mtshima.begin()));
 #else
 
 	auto makeRet = [&](int n) {
@@ -535,12 +542,14 @@ class KFMCycleAnalyze : public GenericVideoFilter
 	PClip source;
   VideoInfo srcvi;
 	PulldownPatterns patterns;
+	float lscale;
 	float costth;
 public:
-  KFMCycleAnalyze(PClip fmframe, PClip source, float costth, IScriptEnvironment* env)
+  KFMCycleAnalyze(PClip fmframe, PClip source, float lscale, float costth, IScriptEnvironment* env)
 		: GenericVideoFilter(fmframe)
 		, source(source)
     , srcvi(source->GetVideoInfo())
+		, lscale(lscale)
 		, costth(costth)
 	{
     int out_bytes = sizeof(std::pair<int, float>);
@@ -563,10 +572,12 @@ public:
 		int split[18] = { 0 };
 		int mf[18] = { 0 };
 		int mfl[18] = { 0 };
+		int mft[18] = { 0 };
 		for (int i = 1; i < 17; ++i) {
 			split[i] = std::min(fmcnt[i - 1].move, fmcnt[i].move);
 			mf[i] = split[i] + fmcnt[i].shima;
 			mfl[i] = split[i] + fmcnt[i].lshima;
+			mft[i] = split[i] + fmcnt[i].shima + fmcnt[i].lshima * lscale;
 		}
 
 		FMData data = { 0 };
@@ -580,6 +591,7 @@ public:
 			data.splitv[i] = (float)split[i + 2];
 			data.mf[i] = (float)mf[i + 2];
 			data.mfl[i] = (float)mfl[i + 2];
+			data.mft[i] = (float)mft[i + 2];
 			fieldbase = std::min(fieldbase, fmcnt[i + 2].shima);
 			fieldlbase = std::min(fieldlbase, fmcnt[i + 2].lshima);
 
@@ -591,8 +603,10 @@ public:
 
 			data.mfr[i] = (mf[i + 2] + data.vbase) * 2.0f / (mf[i + 1] + mf[i + 3] + data.vbase * 2.0f) - 1.0f;
 			data.mflr[i] = (mfl[i + 2] + data.vbase) * 2.0f / (mfl[i + 1] + mfl[i + 3] + data.vbase * 2.0f) - 1.0f;
+			data.mftr[i] = (mft[i + 2] + data.vbase) * 2.0f / (mft[i + 1] + mft[i + 3] + data.vbase * 2.0f) - 1.0f;
 			data.mfcost[i] = (float)(mf[i + 1] + mf[i + 3]) / data.vbase;
-			data.mflcost [i] = (float)(mfl[i + 1] + mfl[i + 3]) / data.vbase;
+			data.mflcost[i] = (float)(mfl[i + 1] + mfl[i + 3]) / data.vbase;
+			data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / data.vbase;
 
       if (fmcnt[i + 1].move > fmcnt[i + 2].move && fmcnt[i + 3].move > fmcnt[i + 2].move) {
         float sum = (float)(fmcnt[i + 1].move + fmcnt[i + 3].move);
@@ -624,7 +638,8 @@ public:
     return new KFMCycleAnalyze(
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
-			(float)args[2].AsFloat(1.0f), // costth
+			(float)args[2].AsFloat(1.0f), // lscale
+			(float)args[3].AsFloat(1.0f), // costth
       env
     );
   }
@@ -719,7 +734,7 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
-  env->AddFunction("KFMCycleAnalyze", "cc[costth]f", KFMCycleAnalyze::Create, 0);
+  env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f", KFMCycleAnalyze::Create, 0);
   env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
 }
 
