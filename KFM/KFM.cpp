@@ -134,132 +134,25 @@ public:
 };
 
 struct FMData {
-	int vbase;
-	// 小さい縞の量
-	float fieldv[14];
-	float fieldbase[14];
-	float fieldrv[14]; // 両隣と比較した相対量
-	float fieldvcost[14]; // 両隣の和
-	// 大きい縞の量
-	float fieldlv[14];
-	float fieldlbase[14];
-	float fieldrlv[14];
-	float fieldlvcost[14];
-	// 動き量
-	float move[14];
-	// 動きから見た分離度
-	float splitv[14];
-	// 動きから見た3フィールド結合度
-	float mergev[14];
 	// 縞と動きの和
-	float mf[14];
-	float mfr[14]; // 両隣と比較した相対量
-	float mfcost[14]; // 両隣の和
-	float mfl[14];
-	float mflr[14];
-	float mflcost[14];
-	float mft[14]; // shimaとlshimaを足した
+	float mft[14];
 	float mftr[14];
 	float mftcost[14];
 };
 
-void CalcBaseline(const float* data, float* baseline, int N)
-{
-  baseline[0] = data[0];
-  float ra = FLT_MAX, ry;
-  for (int pos = 0; pos < N - 1;) {
-    float mina = FLT_MAX;
-    int ni;
-    for (int i = 1; pos + i < N; ++i) {
-      float a = (data[pos + i] - data[pos]) / i;
-      if (a < mina) {
-        mina = a; ni = i;
-      }
-    }
-    bool ok = true;
-    for (int i = 0; i < N; ++i) {
-      if (data[i] < data[pos] + mina * (i - pos)) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) {
-      if (std::abs(mina) < std::abs(ra)) {
-        ra = mina;
-        ry = data[pos] + mina * (-pos);
-      }
-    }
-    pos = pos + ni;
-  }
-  for (int i = 0; i < N; ++i) {
-    baseline[i] = ry + ra * i;
-  }
-}
-
-float SplitScore(const PulldownPatternField* pattern, const float* fv, const float* base) {
-	int nsplit = 0, nnsplit = 0;
-	float sumsplit = 0, sumnsplit = 0;
-
-	for (int i = 0; i < 14; ++i) {
-		if (pattern[i].split) {
-			nsplit++;
-			sumsplit += fv[i] - (base ? base[i] : 0);
-		}
-		else {
-			nnsplit++;
-			sumnsplit += fv[i] - (base ? base[i] : 0);
-		}
-	}
-	
-  float splitcoef = sumsplit / nsplit;
-  float nsplitcoef = sumnsplit / nnsplit;
-  if (nsplitcoef == 0 && splitcoef == 0) {
-    return 0;
-  }
-  return splitcoef / (nsplitcoef + 0.1f * splitcoef);
-}
-
 float RSplitScore(const PulldownPatternField* pattern, const float* fv) {
-	//int nsplit = 0, nnsplit = 0;
 	float sumsplit = 0, sumnsplit = 0;
 
 	for (int i = 0; i < 14; ++i) {
 		if (pattern[i].split) {
-			//nsplit++;
 			sumsplit += fv[i];
 		}
 		else {
-			//nnsplit++;
 			sumnsplit += fv[i];
 		}
 	}
 
-	float splitcoef = sumsplit/* / nsplit*/;
-	float nsplitcoef = sumnsplit/* / nnsplit*/;
-	return splitcoef - nsplitcoef;
-}
-
-float SplitCost(const PulldownPatternField* pattern, const float* fv) {
-  int nsplit = 0, nnsplit = 0;
-  float sumsplit = 0, sumnsplit = 0;
-
-  for (int i = 0; i < 14; ++i) {
-    if (pattern[i].split) {
-      nsplit++;
-      sumsplit += fv[i];
-    }
-    else {
-      nnsplit++;
-      sumnsplit += fv[i];
-    }
-  }
-
-  float splitcoef = sumsplit / nsplit;
-  float nsplitcoef = sumnsplit / nnsplit;
-  if (nsplitcoef == 0 && splitcoef == 0) {
-    return 0;
-  }
-  return nsplitcoef / (splitcoef + 0.1f * nsplitcoef);
+	return sumsplit - sumnsplit;
 }
 
 float RSplitCost(const PulldownPatternField* pattern, const float* fv, const float* fvcost, float costth) {
@@ -276,29 +169,6 @@ float RSplitCost(const PulldownPatternField* pattern, const float* fv, const flo
 	}
 
 	return sumcost / nsplit;
-}
-
-float MergeScore(const PulldownPatternField* pattern, const float* mergev) {
-	int nmerge = 0, nnmerge = 0;
-	float summerge = 0, sumnmerge = 0;
-
-	for (int i = 0; i < 14; ++i) {
-		if (pattern[i].merge) {
-			nmerge++;
-			summerge += mergev[i];
-		}
-		else {
-			nnmerge++;
-			sumnmerge += mergev[i];
-		}
-	}
-
-  float splitcoef = summerge / nmerge;
-  float nsplitcoef = sumnmerge / nnmerge;
-  if (nsplitcoef == 0 && splitcoef == 0) {
-    return 0;
-  }
-  return splitcoef / (nsplitcoef + 0.1f * splitcoef);
 }
 
 #pragma region PulldownPatterns
@@ -419,120 +289,25 @@ std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, 
 {
   const PulldownPattern* patterns[] = { &p2323, &p2233, &p30 };
 
-  // 1ピクセル当たりの縞の数
-  float shimaratio = std::accumulate(data->fieldv, data->fieldv + 14, 0.0f) / (14.0f * width * height);
-  float lshimaratio = std::accumulate(data->fieldlv, data->fieldlv + 14, 0.0f) / (14.0f * width * height);
-  float moveratio = std::accumulate(data->move, data->move + 14, 0.0f) / (14.0f * width * height);
-
-  std::vector<float> shima(9 * 3);
-  std::vector<float> shimabase(9 * 3);
-  std::vector<float> lshima(9 * 3);
-  std::vector<float> lshimabase(9 * 3);
-  std::vector<float> split(9 * 3);
-  std::vector<float> merge(9 * 3);
-
-  //std::vector<float> mergecost(9 * 3);
-  std::vector<float> shimacost(9 * 3);
-  //std::vector<float> lshimacost(9 * 3);
-
-	std::vector<float> mshima(9 * 3);
-	std::vector<float> mlshima(9 * 3);
 	std::vector<float> mtshima(9 * 3);
-	std::vector<float> mshimacost(9 * 3);
-	std::vector<float> mlshimacost(9 * 3);
 	std::vector<float> mtshimacost(9 * 3);
 
   // 各スコアを計算
   for (int p = 0; p < 3; ++p) {
     for (int i = 0; i < 9; ++i) {
-
       auto pattern = patterns[p]->GetPattern(i);
-      shima[p * 9 + i] = RSplitScore(pattern, data->fieldrv);
-      shimabase[p * 9 + i] = SplitScore(pattern, data->fieldv, data->fieldbase);
-      lshima[p * 9 + i] = RSplitScore(pattern, data->fieldrlv);
-      lshimabase[p * 9 + i] = SplitScore(pattern, data->fieldlv, data->fieldlbase);
-      split[p * 9 + i] = SplitScore(pattern, data->splitv, 0);
-
-      shimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrv, data->fieldvcost, costth);
-      //lshimacost[p * 9 + i] = RSplitCost(pattern, data->fieldrlv, data->fieldlvcost, costth);
-
-			mshima[p * 9 + i] = RSplitScore(pattern, data->mfr);
-			mlshima[p * 9 + i] = RSplitScore(pattern, data->mflr);
 			mtshima[p * 9 + i] = RSplitScore(pattern, data->mftr);
-			mshimacost[p * 9 + i] = RSplitCost(pattern, data->mfr, data->mfcost, costth);
-			mlshimacost[p * 9 + i] = RSplitCost(pattern, data->mflr, data->mflcost, costth);
 			mtshimacost[p * 9 + i] = RSplitCost(pattern, data->mftr, data->mftcost, costth);
-
-			if (PulldownPatterns::Is30p(p * 9 + i) == false) {
-				merge[p * 9 + i] = MergeScore(pattern, data->mergev);
-				//mergecost[p * 9 + i] = MergeScore(pattern, data->move);
-			}
     }
   }
 
-#if 1
 	auto makeRet = [&](int n) {
-		//float cost = shimacost[n] + lshimacost[n] + mergecost[n];
 		float cost = mtshimacost[n];
 		return std::pair<int, float>(n, cost);
 	};
 
 	auto it = std::max_element(mtshima.begin(), mtshima.end());
 	return makeRet((int)(it - mtshima.begin()));
-#else
-
-	auto makeRet = [&](int n) {
-		//float cost = shimacost[n] + lshimacost[n] + mergecost[n];
-		float cost = shimacost[n];
-		return std::pair<int, float>(n, cost);
-	};
-
-  auto it = std::max_element(shima.begin(), shima.end());
-  if (moveratio >= 0.002f) { // TODO:
-    if (*it >= 2.0f) {
-      // 高い確度で特定
-      return makeRet(int(it - shima.begin()));
-    }
-    it = std::max_element(lshima.begin(), lshima.end());
-    if (*it >= 4.0f) {
-      // 高い確度で特定
-      return makeRet(int(it - lshima.begin()));
-    }
-  }
-
-  // ほぼ止まってる or ノイズ成分or文字による誤爆が多い or テロップなどが邪魔してる //
-
-  // マージで判定できるか
-  int nummerge = (int)std::count_if(data->mergev, data->mergev + 14, [](float f) { return f > 1.0f; });
-  if (nummerge == 3 || nummerge == 4) {
-    // 十分な数のマージがある
-    it = std::max_element(merge.begin(), merge.end());
-    if (*it >= 5.0f) {
-      return makeRet(int(it - merge.begin()));
-    }
-  }
-
-  // テロップ・文字などの固定成分を抜いて比較
-  std::vector<float> scores(9 * 3);
-  for (int i = 0; i < (int)scores.size(); ++i) {
-    scores[i] = split[i];
-
-    if (shimaratio > 0.002f) {
-      // 小さい縞が十分あるときは小さい縞だけで判定する
-      scores[i] += shimabase[i];
-    }
-    else if (moveratio < 0.002f) {
-      // 小さい縞は動きが多いときだけにする（動きが小さいと文字とかで誤爆しやすいので）
-      scores[i] += lshimabase[i];
-    }
-    else {
-      scores[i] += shimabase[i] + lshimabase[i];
-    }
-  }
-  it = std::max_element(scores.begin(), scores.end());
-
-  return makeRet(int(it - scores.begin()));
-#endif
 }
 
 #pragma endregion
@@ -569,55 +344,19 @@ public:
 		// shima, lshima, moveの画素数がマチマチなので大きさの違いによる重みの違いが出る
 		// shima, lshimaをmoveに合わせる（平均が同じになるようにする）
 
-		int split[18] = { 0 };
-		int mf[18] = { 0 };
-		int mfl[18] = { 0 };
 		int mft[18] = { 0 };
 		for (int i = 1; i < 17; ++i) {
-			split[i] = std::min(fmcnt[i - 1].move, fmcnt[i].move);
-			mf[i] = split[i] + fmcnt[i].shima;
-			mfl[i] = split[i] + fmcnt[i].lshima;
-			mft[i] = split[i] + fmcnt[i].shima + fmcnt[i].lshima * lscale;
+			int split = std::min(fmcnt[i - 1].move, fmcnt[i].move);
+			mft[i] = split + fmcnt[i].shima + (int)(fmcnt[i].lshima * lscale);
 		}
 
 		FMData data = { 0 };
-		data.vbase = (int)(srcvi.width * srcvi.height * 0.001f);
-		int fieldbase = INT_MAX;
-		int fieldlbase = INT_MAX;
+		int vbase = (int)(srcvi.width * srcvi.height * 0.001f);
     for (int i = 0; i < 14; ++i) {
-			data.fieldv[i] = (float)fmcnt[i + 2].shima;
-			data.fieldlv[i] = (float)fmcnt[i + 2].lshima;
-			data.move[i] = (float)fmcnt[i + 2].move;
-			data.splitv[i] = (float)split[i + 2];
-			data.mf[i] = (float)mf[i + 2];
-			data.mfl[i] = (float)mfl[i + 2];
 			data.mft[i] = (float)mft[i + 2];
-			fieldbase = std::min(fieldbase, fmcnt[i + 2].shima);
-			fieldlbase = std::min(fieldlbase, fmcnt[i + 2].lshima);
-
-			// relative
-			data.fieldrv[i] = (fmcnt[i + 2].shima + data.vbase) * 2.0f / (fmcnt[i + 1].shima + fmcnt[i + 3].shima + data.vbase * 2.0f) - 1.0f;
-			data.fieldrlv[i] = (fmcnt[i + 2].lshima + data.vbase) * 2.0f / (fmcnt[i + 1].lshima + fmcnt[i + 3].lshima + data.vbase * 2.0f) - 1.0f;
-			data.fieldvcost[i] = (float)(fmcnt[i + 1].shima + fmcnt[i + 3].shima) / data.vbase;
-			data.fieldlvcost[i] = (float)(fmcnt[i + 1].lshima + fmcnt[i + 3].lshima) / data.vbase;
-
-			data.mfr[i] = (mf[i + 2] + data.vbase) * 2.0f / (mf[i + 1] + mf[i + 3] + data.vbase * 2.0f) - 1.0f;
-			data.mflr[i] = (mfl[i + 2] + data.vbase) * 2.0f / (mfl[i + 1] + mfl[i + 3] + data.vbase * 2.0f) - 1.0f;
-			data.mftr[i] = (mft[i + 2] + data.vbase) * 2.0f / (mft[i + 1] + mft[i + 3] + data.vbase * 2.0f) - 1.0f;
-			data.mfcost[i] = (float)(mf[i + 1] + mf[i + 3]) / data.vbase;
-			data.mflcost[i] = (float)(mfl[i + 1] + mfl[i + 3]) / data.vbase;
-			data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / data.vbase;
-
-      if (fmcnt[i + 1].move > fmcnt[i + 2].move && fmcnt[i + 3].move > fmcnt[i + 2].move) {
-        float sum = (float)(fmcnt[i + 1].move + fmcnt[i + 3].move);
-        data.mergev[i] = std::max(1.0f, sum / (fmcnt[i + 2].move * 2.0f + 0.1f * sum)) - 1.0f;
-      }
-      else {
-        data.mergev[i] = 0;
-      }
+			data.mftr[i] = (mft[i + 2] + vbase) * 2.0f / (mft[i + 1] + mft[i + 3] + vbase * 2.0f) - 1.0f;
+			data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / vbase;
 		}
-    CalcBaseline(data.fieldv, data.fieldbase, 14);
-    CalcBaseline(data.fieldlv, data.fieldlbase, 14);
 
 		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth);
 
@@ -638,7 +377,7 @@ public:
     return new KFMCycleAnalyze(
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
-			(float)args[2].AsFloat(1.0f), // lscale
+			(float)args[2].AsFloat(5.0f), // lscale
 			(float)args[3].AsFloat(1.0f), // costth
       env
     );
