@@ -63,6 +63,29 @@ __global__ void kl_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width
 }
 
 template <typename pixel_t>
+void cpu_average(pixel_t* dst, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			auto tmp = (to_int(src0[x + y * pitch]) + to_int(src1[x + y * pitch])) >> 1;
+			dst[x + y * pitch] = VHelper<pixel_t>::cast_to(tmp);
+		}
+	}
+}
+
+template <typename pixel_t>
+__global__ void kl_average(pixel_t* dst, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		auto tmp = (to_int(src0[x + y * pitch]) + to_int(src1[x + y * pitch])) >> 1;
+		dst[x + y * pitch] = VHelper<pixel_t>::cast_to(tmp);
+	}
+}
+
+template <typename pixel_t>
 void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
 {
   for (int y = 0; y < vpad; ++y) {
@@ -1326,9 +1349,9 @@ public:
   {
     return new KFMFrameAnalyze(
       args[0].AsClip(),       // clip
-      args[1].AsInt(15),       // threshMY
+      args[1].AsInt(15),      // threshMY
       args[2].AsInt(7),       // threshSY
-      args[3].AsInt(20),       // threshMC
+      args[3].AsInt(20),      // threshMC
       args[4].AsInt(8),       // threshSC
       env
     );
@@ -1523,56 +1546,82 @@ class KTelecine : public KFMFilterBase
 
   PulldownPatterns patterns;
 
-  template <typename pixel_t>
-  void CreateWeaveFrame2F(const PVideoFrame& srct, const PVideoFrame& srcb, const PVideoFrame& dst, IScriptEnvironment2* env)
-  {
-    typedef typename VectorType<pixel_t>::type vpixel_t;
-    const vpixel_t* srctY = reinterpret_cast<const vpixel_t*>(srct->GetReadPtr(PLANAR_Y));
-    const vpixel_t* srctU = reinterpret_cast<const vpixel_t*>(srct->GetReadPtr(PLANAR_U));
-    const vpixel_t* srctV = reinterpret_cast<const vpixel_t*>(srct->GetReadPtr(PLANAR_V));
-    const vpixel_t* srcbY = reinterpret_cast<const vpixel_t*>(srcb->GetReadPtr(PLANAR_Y));
-    const vpixel_t* srcbU = reinterpret_cast<const vpixel_t*>(srcb->GetReadPtr(PLANAR_U));
-    const vpixel_t* srcbV = reinterpret_cast<const vpixel_t*>(srcb->GetReadPtr(PLANAR_V));
-    vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-    vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+	template <typename pixel_t>
+	void CopyField(bool top, PVideoFrame* const * frames, const PVideoFrame& dst, IScriptEnvironment2* env)
+	{
+		typedef typename VectorType<pixel_t>::type vpixel_t;
+		PVideoFrame& frame0 = *frames[0];
+		const vpixel_t* src0Y = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_Y));
+		const vpixel_t* src0U = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_U));
+		const vpixel_t* src0V = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_V));
+		vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
+		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
 
-    int pitchY = srct->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = srct->GetPitch(PLANAR_U) / sizeof(vpixel_t);
-    int width4 = vi.width >> 2;
-    int width4UV = width4 >> logUVx;
-    int heightUV = vi.height >> logUVy;
+		int pitchY = frame0->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+		int pitchUV = frame0->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int width4 = vi.width >> 2;
+		int width4UV = width4 >> logUVx;
+		int heightUV = vi.height >> logUVy;
+		
+		if (!top) {
+			src0Y += pitchY;
+			src0U += pitchUV;
+			src0V += pitchUV;
+			dstY += pitchY;
+			dstU += pitchUV;
+			dstV += pitchUV;
+		}
 
-    if (IS_CUDA) {
-      dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
-      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
-      // copy top
-      kl_copy << <blocks, threads >> >(dstY, srctY, width4, vi.height / 2, pitchY * 2);
-      DEBUG_SYNC;
-      kl_copy << <blocksUV, threads >> >(dstU, srctU, width4UV, heightUV / 2, pitchUV * 2);
-      DEBUG_SYNC;
-      kl_copy << <blocksUV, threads >> >(dstV, srctV, width4UV, heightUV / 2, pitchUV * 2);
-      DEBUG_SYNC;
-      // copy bottom
-      kl_copy << <blocks, threads >> >(dstY + pitchY, srcbY + pitchY, width4, vi.height / 2, pitchY * 2);
-      DEBUG_SYNC;
-      kl_copy << <blocksUV, threads >> >(dstU + pitchUV, srcbU + pitchUV, width4UV, heightUV / 2, pitchUV * 2);
-      DEBUG_SYNC;
-      kl_copy << <blocksUV, threads >> >(dstV + pitchUV, srcbV + pitchUV, width4UV, heightUV / 2, pitchUV * 2);
-      DEBUG_SYNC;
-    }
-    else {
-      // copy top
-      cpu_copy(dstY, srctY, width4, vi.height / 2, pitchY * 2);
-      cpu_copy(dstU, srctU, width4UV, heightUV / 2, pitchUV * 2);
-      cpu_copy(dstV, srctV, width4UV, heightUV / 2, pitchUV * 2);
-      // copy bottom
-      cpu_copy(dstY + pitchY, srcbY + pitchY, width4, vi.height / 2, pitchY * 2);
-      cpu_copy(dstU + pitchUV, srcbU + pitchUV, width4UV, heightUV / 2, pitchUV * 2);
-      cpu_copy(dstV + pitchUV, srcbV + pitchUV, width4UV, heightUV / 2, pitchUV * 2);
-    }
-  }
+		if (frames[1] == nullptr) {
+			if (IS_CUDA) {
+				dim3 threads(32, 16);
+				dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
+				dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
+				kl_copy << <blocks, threads >> >(dstY, src0Y, width4, vi.height / 2, pitchY * 2);
+				DEBUG_SYNC;
+				kl_copy << <blocksUV, threads >> >(dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
+				DEBUG_SYNC;
+				kl_copy << <blocksUV, threads >> >(dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
+				DEBUG_SYNC;
+			}
+			else {
+				cpu_copy(dstY, src0Y, width4, vi.height / 2, pitchY * 2);
+				cpu_copy(dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
+				cpu_copy(dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
+			}
+		}
+		else {
+			PVideoFrame& frame1 = *frames[1];
+			const vpixel_t* src1Y = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_Y));
+			const vpixel_t* src1U = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_U));
+			const vpixel_t* src1V = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_V));
+
+			if (!top) {
+				src1Y += pitchY;
+				src1U += pitchUV;
+				src1V += pitchUV;
+			}
+
+			if (IS_CUDA) {
+				dim3 threads(32, 16);
+				dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
+				dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
+				kl_average << <blocks, threads >> >(dstY, src0Y, src1Y, width4, vi.height / 2, pitchY * 2);
+				DEBUG_SYNC;
+				kl_average << <blocksUV, threads >> >(dstU, src0U, src1U, width4UV, heightUV / 2, pitchUV * 2);
+				DEBUG_SYNC;
+				kl_average << <blocksUV, threads >> >(dstV, src0V, src1V, width4UV, heightUV / 2, pitchUV * 2);
+				DEBUG_SYNC;
+			}
+			else {
+				cpu_average(dstY, src0Y, src1Y, width4, vi.height / 2, pitchY * 2);
+				cpu_average(dstU, src0U, src1U, width4UV, heightUV / 2, pitchUV * 2);
+				cpu_average(dstV, src0V, src1V, width4UV, heightUV / 2, pitchUV * 2);
+			}
+		}
+
+	}
 
   template <typename pixel_t>
   PVideoFrame CreateWeaveFrame(PClip clip, int n, int fstart, int fnum, int parity, IScriptEnvironment2* env)
@@ -1593,12 +1642,40 @@ class KTelecine : public KFMFilterBase
       PVideoFrame cur = clip->GetFrame(n, env);
       PVideoFrame nxt = clip->GetFrame(n + 1, env);
       PVideoFrame dst = env->NewVideoFrame(vi);
-      if (parity) {
-        CreateWeaveFrame2F<pixel_t>(nxt, cur, dst, env);
-      }
-      else {
-        CreateWeaveFrame2F<pixel_t>(cur, nxt, dst, env);
-      }
+
+			// 3フィールドのときは重複フィールドを平均化する
+
+			PVideoFrame* srct[2] = { 0 };
+			PVideoFrame* srcb[2] = { 0 };
+			
+			if (parity) {
+				srct[0] = &nxt;
+				srcb[0] = &cur;
+				if (fnum >= 3) {
+					if (fstart == 0) {
+						srct[1] = &cur;
+					}
+					else {
+						srcb[1] = &nxt;
+					}
+				}
+			}
+			else {
+				srct[0] = &cur;
+				srcb[0] = &nxt;
+				if (fnum >= 3) {
+					if (fstart == 0) {
+						srcb[1] = &cur;
+					}
+					else {
+						srct[1] = &nxt;
+					}
+				}
+			}
+
+			CopyField<pixel_t>(true, srct, dst, env);
+			CopyField<pixel_t>(false, srcb, dst, env);
+
       return dst;
     }
   }
