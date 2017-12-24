@@ -10,3 +10,8 @@ AviSynthのCUDA実装フィルタプラグインです。
 # 使い方
 
 CUDA対応の専用AviSynth+が必要です。
+
+# ライセンス
+- KTGMC: GPL
+- KNNEDI3: GPL
+- KFM: MIT
