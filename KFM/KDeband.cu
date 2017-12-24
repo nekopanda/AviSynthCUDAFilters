@@ -708,12 +708,12 @@ void cpu_edgelevel(
 
 				float rdiff = hdiffmax / (float)(hmax - hmin);
 
-				// ～0.2: エッジでない可能性が高いのでなし
-				// 0.2～0.3: ボーダー
-				// 0.3～0.4: 甘いエッジなので強化
-				// 0.4～0.5: ボーダー
-				// 0.5～: 十分エッジなのでなし
-				float factor = selective ? (clamp((0.5f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.3f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
+				// ～0.25: エッジでない可能性が高いのでなし
+				// 0.25～0.35: ボーダー
+				// 0.35～0.45: 甘いエッジなので強化
+				// 0.45～0.55: ボーダー
+				// 0.55～: 十分エッジなのでなし
+				float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.3f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
 				if (check) {
 					if (hmax - hmin > thrs && factor > 0.0f) {
@@ -798,12 +798,12 @@ __global__ void kl_edgelevel(
 
 		float rdiff = hdiffmax / (float)(hmax - hmin);
 
-		// ～0.2: エッジでない可能性が高いのでなし
-		// 0.2～0.3: ボーダー
-		// 0.3～0.4: 甘いエッジなので強化
-		// 0.4～0.5: ボーダー
-		// 0.5～: 十分エッジなのでなし
-		float factor = selective ? (clamp((0.5f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
+		// ～0.25: エッジでない可能性が高いのでなし
+		// 0.25～0.35: ボーダー
+		// 0.35～0.45: 甘いエッジなので強化
+		// 0.45～0.55: ボーダー
+		// 0.55～: 十分エッジなのでなし
+		float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
 		if (check) {
 			if (hmax - hmin > thrs && factor > 0.0f) {
@@ -894,7 +894,7 @@ void cpu_edgelevel_repair(
 {
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
-			// eltopはedgelevelの出力であること前提でボーダー処理は入れない
+			// elはedgelevelの出力であること前提でボーダー処理は入れない
 			// 必ずボーダー付近はel==srcであること
 			// そうでないとメモリエラーが発生する
 
@@ -944,7 +944,7 @@ __global__ void kl_edgelevel_repair(
 	int y = blockIdx.y * blockDim.y + threadIdx.y;
 
 	if (x < width && y < height) {
-		// eltopはedgelevelの出力であること前提でボーダー処理は入れない
+		// elはedgelevelの出力であること前提でボーダー処理は入れない
 		// 必ずボーダー付近はel==srcであること
 		// そうでないとメモリエラーが発生する
 
@@ -1000,7 +1000,11 @@ class KEdgeLevel : public KDebandBase
 	int str;
 	int thrs;
 	int repair;
+	bool uv;
 	bool show;
+
+	int logUVx;
+	int logUVy;
 
 	template <typename pixel_t>
 	void CopyUV(PVideoFrame& dst, PVideoFrame& src, IScriptEnvironment2* env)
@@ -1067,26 +1071,49 @@ class KEdgeLevel : public KDebandBase
 		PVideoFrame tmp = (repair > 0) ? env->NewVideoFrame(vi) : PVideoFrame();
 
 		const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
+		const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
+		const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
 		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
 		pixel_t* elY = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_Y)) : nullptr;
+		pixel_t* elU = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_U)) : nullptr;
+		pixel_t* elV = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_V)) : nullptr;
 		pixel_t* tmpY = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_Y)) : nullptr;
+		pixel_t* tmpU = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_U)) : nullptr;
+		pixel_t* tmpV = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_V)) : nullptr;
 		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int widthUV = vi.width >> logUVx;
+		int heightUV = vi.height >> logUVy;
 
-		void(*table[2][4])(
+		void(*table[4][4])(
 			pixel_t* dsttop, const pixel_t* srctop,
 			int width, int height, int pitch, int maxv, int str, int thrs) =
 		{
-			{
+			{ // CPU Y
 				cpu_edgelevel<pixel_t, false, false>,
 				cpu_edgelevel<pixel_t, false, true>,
 				cpu_edgelevel<pixel_t, true, false>,
 				cpu_edgelevel<pixel_t, true, true>,
 			},
-			{
+			{ // CUDA Y
 				launch_edgelevel<pixel_t, false, false>,
 				launch_edgelevel<pixel_t, false, true>,
 				launch_edgelevel<pixel_t, true, false>,
 				launch_edgelevel<pixel_t, true, true>,
+			},
+			{ // CPU UV
+				cpu_edgelevel<pixel_t, false, false>,
+				cpu_edgelevel<pixel_t, false, false>,
+				cpu_edgelevel<pixel_t, true, false>,
+				cpu_edgelevel<pixel_t, true, false>,
+			},
+			{ // CUDA UV
+				launch_edgelevel<pixel_t, false, false>,
+				launch_edgelevel<pixel_t, false, false>,
+				launch_edgelevel<pixel_t, true, false>,
+				launch_edgelevel<pixel_t, true, false>,
 			}
 		};
 
@@ -1096,58 +1123,99 @@ class KEdgeLevel : public KDebandBase
 		for (int i = 0; i < numel; ++i) {
 			int table_idx = ((show && (i + 1 == numel)) ? 2 : 0) + (repair ? 1 : 0);
 			const pixel_t* elsrcY = srcY;
+			const pixel_t* elsrcU = srcU;
+			const pixel_t* elsrcV = srcV;
 			if (i > 0) {
 				std::swap(dst, tmp);
 				std::swap(dstY, tmpY);
+				std::swap(dstU, tmpU);
+				std::swap(dstV, tmpV);
 				elsrcY = tmpY;
+				elsrcU = tmpU;
+				elsrcV = tmpV;
 			}
 			if (IS_CUDA) {
 				table[1][table_idx](dstY, elsrcY, vi.width, vi.height, pitchY, maxv, str, thrs);
 				DEBUG_SYNC;
+				if (uv) {
+					table[3][table_idx](dstU, elsrcU, widthUV, heightUV, pitchUV, maxv, str, thrs);
+					DEBUG_SYNC;
+					table[3][table_idx](dstV, elsrcV, widthUV, heightUV, pitchUV, maxv, str, thrs);
+					DEBUG_SYNC;
+				}
 			}
 			else {
 				table[0][table_idx](dstY, elsrcY, vi.width, vi.height, pitchY, maxv, str, thrs);
+				if (uv) {
+					table[2][table_idx](dstU, elsrcU, widthUV, heightUV, pitchUV, maxv, str, thrs);
+					table[2][table_idx](dstV, elsrcV, widthUV, heightUV, pitchUV, maxv, str, thrs);
+				}
 			}
 		}
 
 		if (show) {
-			ClearUV<pixel_t>(dst, env);
+			if (!uv) {
+				ClearUV<pixel_t>(dst, env);
+			}
 		}
 		else {
 			if (repair > 0) {
 				// リペアする
 				std::swap(dst, el);
 				std::swap(dstY, elY);
+				std::swap(dstU, elU);
+				std::swap(dstV, elV);
 				for (int i = 0; i < repair; ++i) {
 					const pixel_t* repsrcY = srcY;
+					const pixel_t* repsrcU = srcU;
+					const pixel_t* repsrcV = srcV;
 					if (i > 0) {
 						std::swap(dst, tmp);
 						std::swap(dstY, tmpY);
+						std::swap(dstU, tmpU);
+						std::swap(dstV, tmpV);
 						repsrcY = tmpY;
+						repsrcU = tmpU;
+						repsrcV = tmpV;
 					}
 					if (IS_CUDA) {
 						launch_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY);
 						DEBUG_SYNC;
+						if (uv) {
+							launch_edgelevel_repair<pixel_t, 3>(dstU, elU, repsrcU, widthUV, heightUV, pitchUV);
+							DEBUG_SYNC;
+							launch_edgelevel_repair<pixel_t, 3>(dstV, elV, repsrcV, widthUV, heightUV, pitchUV);
+							DEBUG_SYNC;
+						}
 					}
 					else {
 						cpu_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY);
+						if (uv) {
+							cpu_edgelevel_repair<pixel_t, 3>(dstU, elU, repsrcU, widthUV, heightUV, pitchUV);
+							cpu_edgelevel_repair<pixel_t, 3>(dstV, elV, repsrcV, widthUV, heightUV, pitchUV);
+						}
 					}
 				}
 			}
 
-			CopyUV<pixel_t>(dst, src, env);
+			if (!uv) {
+				CopyUV<pixel_t>(dst, src, env);
+			}
 		}
 
 		return dst;
 	}
 
 public:
-	KEdgeLevel(PClip clip, int str, float thrs, int repair, bool show, IScriptEnvironment2* env)
+	KEdgeLevel(PClip clip, int str, float thrs, int repair, bool uv, bool show, IScriptEnvironment2* env)
 		: KDebandBase(clip)
 		, str(str)
 		, thrs(scaleParam(thrs, vi.BitsPerComponent()))
 		, repair(repair)
+		, uv(uv)
 		, show(show)
+		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
 	{
 	}
 
@@ -1175,7 +1243,8 @@ public:
 			args[1].AsInt(10),          // str
 			(float)args[2].AsFloat(25), // thrs
 			args[3].AsInt(0),           // repair
-			args[4].AsBool(false),      // show
+			args[4].AsBool(false),      // uv
+			args[5].AsBool(false),      // show
 			env);
 	}
 };
@@ -1185,6 +1254,6 @@ void AddFuncDebandKernel(IScriptEnvironment* env)
 {
 	env->AddFunction("KTemporalNR", "c[dist]i[thresh]f", KTemporalNR::Create, 0);
 	env->AddFunction("KDeband", "c[range]i[thresh]f[sample]i[blur_first]b", KDeband::Create, 0);
-	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[repair]i[show]b", KEdgeLevel::Create, 0);
+	env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[repair]i[uv]b[show]b", KEdgeLevel::Create, 0);
 }
 
