@@ -713,7 +713,7 @@ void cpu_edgelevel(
 				// 0.35～0.45: 甘いエッジなので強化
 				// 0.45～0.55: ボーダー
 				// 0.55～: 十分エッジなのでなし
-				float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.3f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
+				float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
 				if (check) {
 					if (hmax - hmin > thrs && factor > 0.0f) {
