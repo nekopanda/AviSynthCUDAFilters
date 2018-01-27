@@ -5,6 +5,16 @@
 
 // intägí£ÇÕñæé¶ìIÇ…èëÇ≠ //
 
+// to_int(uchar)
+static __device__ __host__ int to_int(unsigned char a) {
+	return a;
+}
+
+// to_int(ushort)
+static __device__ __host__ int to_int(unsigned short a) {
+	return a;
+}
+
 // to_int(uchar4)
 static __device__ __host__ int4 to_int(uchar4 a) {
   int4 r = { a.x, a.y, a.z, a.w };
@@ -49,16 +59,6 @@ static __device__ __host__ float4 to_float(ushort4 a) {
 // to_float(int4)
 static __device__ __host__ float4 to_float(int4 a) {
   float4 r = { (float)a.x, (float)a.y, (float)a.z, (float)a.w };
-  return r;
-}
-
-static __device__ int4 load_to_int(const unsigned char* p) {
-  int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
-  return r;
-}
-
-static __device__ int4 load_to_int(const unsigned short* p) {
-  int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
   return r;
 }
 
@@ -257,18 +257,28 @@ static __device__ __host__ int4 absdiff(ushort4 a, ushort4 b) {
 template <typename V> struct VHelper { };
 
 template <> struct VHelper<unsigned char> {
+	enum { VLEN = 1 };
   static __device__ __host__ unsigned char make(int a) {
     return (unsigned char)a;
   }
 };
 
 template <> struct VHelper<unsigned short> {
+	enum { VLEN = 1 };
   static __device__ __host__ unsigned short make(int a) {
     return (unsigned short)a;
   }
 };
 
+template <> struct VHelper<int> {
+	enum { VLEN = 1 };
+	static __device__ __host__ unsigned short make(int a) {
+		return a;
+	}
+};
+
 template <> struct VHelper<uchar4> {
+	enum { VLEN = 4 };
   static __device__ __host__ uchar4 make(int a) {
     typedef unsigned char uchar;
     uchar4 r = { (uchar)a, (uchar)a, (uchar)a, (uchar)a };
@@ -287,6 +297,7 @@ template <> struct VHelper<uchar4> {
 };
 
 template <> struct VHelper<ushort4> {
+	enum { VLEN = 4 };
   static __device__ __host__ ushort4 make(int a) {
     typedef unsigned short ushort;
     ushort4 r = { (ushort)a, (ushort)a, (ushort)a, (ushort)a };
@@ -305,6 +316,7 @@ template <> struct VHelper<ushort4> {
 };
 
 template <> struct VHelper<int4> {
+	enum { VLEN = 4 };
   static __device__ __host__ int4 make(int a) {
     int4 r = { a, a, a, a };
     return r;
@@ -312,11 +324,39 @@ template <> struct VHelper<int4> {
 };
 
 template <> struct VHelper<float4> {
+	enum { VLEN = 4 };
   static __device__ __host__ float4 make(float a) {
     float4 r = { a, a, a, a };
     return r;
   }
 };
 
+template <int VLEN> struct VLoad { };
 
+template <> struct VLoad<1> {
+	static __device__ int to_int(const unsigned char* p) {
+		return __ldg(&p[0]);
+	}
+	static __device__ int to_int(const unsigned short* p) {
+		return __ldg(&p[0]);
+	}
+	static __device__ int to_int(const int* p) {
+		return __ldg(&p[0]);
+	}
+};
+
+template <> struct VLoad<4> {
+	static __device__ int4 to_int(const unsigned char* p) {
+		int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
+		return r;
+	}
+	static __device__ int4 to_int(const unsigned short* p) {
+		int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
+		return r;
+	}
+	static __device__ int4 to_int(const int* p) {
+		int4 r = { __ldg(&p[0]), __ldg(&p[1]), __ldg(&p[2]), __ldg(&p[3]) };
+		return r;
+	}
+};
 

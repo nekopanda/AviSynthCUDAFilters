@@ -863,7 +863,10 @@ static unsigned int Sad_C(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRe
 template<typename pixel_t>
 unsigned int(*get_sad_function(int nBlkWidth, int nBlkHeight, IScriptEnvironment2* env))(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch)
 {
-  if (nBlkWidth == 8 && nBlkHeight == 8) {
+	if (nBlkWidth == 4 && nBlkHeight == 4) {
+		return Sad_C<4, 4, pixel_t>;
+	}
+  else if (nBlkWidth == 8 && nBlkHeight == 8) {
     return Sad_C<8, 8, pixel_t>;
   }
   else if (nBlkWidth == 16 && nBlkHeight == 16) {
@@ -2533,8 +2536,8 @@ public:
 		if (blksizex != overlapx * 2) {
 			env->ThrowError("KMAnalyse: blksizex != overlapx * 2");
 		}
-    if (blksizex != 16 && blksizex != 32) {
-      env->ThrowError("KMAnalyse: blksizex must be 16 or 32");
+    if (blksizex != 8 && blksizex != 16 && blksizex != 32) {
+      env->ThrowError("KMAnalyse: blksizex must be 8 or 16 or 32");
     }
 
     params = *KMVParam::GetParam(vi, env);
@@ -2548,7 +2551,7 @@ public:
 		params.nDeltaFrame = df;
 		params.chroma = chroma;
 
-    const std::vector< std::pair< int, int > > allowed_blksizes = { { 32,32 },{ 16,16 } };
+    const std::vector< std::pair< int, int > > allowed_blksizes = { { 32,32 },{ 16,16 },{ 8,8 } };
     bool found = false;
     for (int i = 0; i < allowed_blksizes.size(); i++) {
       if (params.nBlkSizeX == allowed_blksizes[i].first && params.nBlkSizeY == allowed_blksizes[i].second) {
@@ -2847,7 +2850,7 @@ public:
     int pnew;
     int plevel;
     bool global;
-    int overlap = args[2].AsInt(8);
+    int overlap = args[2].AsInt(blksize / 2);
 
     bool truemotion = false; // preset added in v0.9.13
     lambda = args[7].AsInt(400);
@@ -3689,6 +3692,9 @@ template <typename pixel_t>
 void (*GetOverlapFunction(int blockWidth, int blockHeight))(typename std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
   int nDstPitch, const pixel_t *pSrc, int nSrcPitch, const short *pWin, int nWinPitch)
 {
+	if (blockWidth == 4 && blockHeight == 4) {
+		return Overlaps_C<pixel_t, 4, 4>;
+	}
   if (blockWidth == 8 && blockHeight == 8) {
     return Overlaps_C<pixel_t, 8, 8>;
   }
@@ -4069,6 +4075,9 @@ class KMDegrainCore : public KMDegrainCoreBase
   template <int delta>
   static DegrainFunction GetDegrainFunction(int blockWidth, int blockHeight)
   {
+		if (blockWidth == 4 && blockHeight == 4) {
+			return Degrain1to6_C<pixel_t, delta, 4, 4>;
+		}
     if (blockWidth == 8 && blockHeight == 8) {
       return Degrain1to6_C<pixel_t, delta, 8, 8>;
     }
@@ -4824,6 +4833,9 @@ void Copy_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
 template <typename pixel_t>
 void (*GetCopyFunction(int blockWidth, int blockHeight))(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
 {
+	if (blockWidth == 4 && blockHeight == 4) {
+		return Copy_C<pixel_t, 4, 4>;
+	}
   if (blockWidth == 8 && blockHeight == 8) {
     return Copy_C<pixel_t, 8, 8>;
   }

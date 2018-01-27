@@ -104,7 +104,7 @@ protected:
 
 	void TemporalNRTest(TEST_FRAMES tf);
 	void DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first);
-	void EdgeLevelTest(TEST_FRAMES tf);
+	void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
 };
 
 void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
@@ -285,6 +285,26 @@ TEST_F(TestBase, Analyze_Blk16NoCPel1)
 	AnalyzeTest(TF_MID, true, 16, false, 1, 4);
 }
 
+TEST_F(TestBase, Analyze_Blk8WithCPel2)
+{
+	AnalyzeTest(TF_MID, true, 8, true, 2, 4);
+}
+
+TEST_F(TestBase, Analyze_Blk8WithCPel1)
+{
+	AnalyzeTest(TF_MID, true, 8, true, 1, 4);
+}
+
+TEST_F(TestBase, Analyze_Blk8NoCPel2)
+{
+	AnalyzeTest(TF_MID, true, 8, false, 2, 4);
+}
+
+TEST_F(TestBase, Analyze_Blk8NoCPel1)
+{
+	AnalyzeTest(TF_MID, true, 8, false, 1, 4);
+}
+
 TEST_F(TestBase, Analyze_Blk32WithCPel2)
 {
 	AnalyzeTest(TF_MID, true, 32, true, 2, 4);
@@ -416,6 +436,16 @@ void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
   }
 }
 
+TEST_F(TestBase, Degrain_1Blk8Pel2)
+{
+	DegrainTest(TF_MID, 1, 8, 2);
+}
+
+TEST_F(TestBase, Degrain_1Blk8Pel1)
+{
+	DegrainTest(TF_MID, 1, 8, 1);
+}
+
 TEST_F(TestBase, Degrain_1Blk16Pel2)
 {
   DegrainTest(TF_MID, 1, 16, 2);
@@ -434,6 +464,16 @@ TEST_F(TestBase, Degrain_1Blk32Pel2)
 TEST_F(TestBase, Degrain_1Blk32Pel1)
 {
   DegrainTest(TF_MID, 1, 32, 1);
+}
+
+TEST_F(TestBase, Degrain_2Blk8Pel2)
+{
+	DegrainTest(TF_MID, 2, 8, 2);
+}
+
+TEST_F(TestBase, Degrain_2Blk8Pel1)
+{
+	DegrainTest(TF_MID, 2, 8, 1);
 }
 
 TEST_F(TestBase, Degrain_2Blk16Pel2)
@@ -579,6 +619,16 @@ void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
     printf("%s\n", err.msg);
     GTEST_FAIL();
   }
+}
+
+TEST_F(TestBase, Compensate_Blk8Pel2)
+{
+	CompensateTest(TF_MID, 8, 2);
+}
+
+TEST_F(TestBase, Compensate_Blk8Pel1)
+{
+	CompensateTest(TF_MID, 8, 1);
 }
 
 TEST_F(TestBase, Compensate_Blk16Pel2)
@@ -2599,7 +2649,7 @@ TEST_F(TestBase, DebandTest_Mode2T)
 
 #pragma region EdgeLevel
 
-void TestBase::EdgeLevelTest(TEST_FRAMES tf)
+void TestBase::EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma)
 {
 	PEnv env;
 	try {
@@ -2618,8 +2668,8 @@ void TestBase::EdgeLevelTest(TEST_FRAMES tf)
 		out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
 		out << "srcuda = src.OnCPU(0)" << std::endl;
 
-		out << "ref = src.KEdgeLevel(10,25,0,0,false)" << std::endl;
-		out << "cuda = srcuda.KEdgeLevel(10,25,0,0,false).OnCUDA(0)" << std::endl;
+		out << "ref = src.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ")" << std::endl;
+		out << "cuda = srcuda.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
 
 		out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2636,9 +2686,34 @@ void TestBase::EdgeLevelTest(TEST_FRAMES tf)
 	}
 }
 
-TEST_F(TestBase, EdgeLevelTest)
+TEST_F(TestBase, EdgeLevel_Rep0WithC)
 {
-	EdgeLevelTest(TF_MID);
+	EdgeLevelTest(TF_MID, 0, true);
+}
+
+TEST_F(TestBase, EdgeLevel_Rep1WithC)
+{
+	EdgeLevelTest(TF_MID, 1, true);
+}
+
+TEST_F(TestBase, EdgeLevel_Rep2WithC)
+{
+	EdgeLevelTest(TF_MID, 2, true);
+}
+
+TEST_F(TestBase, EdgeLevel_Rep0NoC)
+{
+	EdgeLevelTest(TF_MID, 0, false);
+}
+
+TEST_F(TestBase, EdgeLevel_Rep1NoC)
+{
+	EdgeLevelTest(TF_MID, 1, false);
+}
+
+TEST_F(TestBase, EdgeLevel_Rep2NoC)
+{
+	EdgeLevelTest(TF_MID, 2, false);
 }
 
 #pragma endregion
@@ -2649,7 +2724,7 @@ int main(int argc, char **argv)
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
-	//getchar();
+	getchar();
 
 	return result;
 }

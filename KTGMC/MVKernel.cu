@@ -204,10 +204,6 @@ __global__ void kl_RB2B_bilinear_filtered(
 
 typedef int sad_t; // 後でfloatにする
 
-enum {
-  SRCH_DIMX = 128
-};
-
 struct SearchBlock {
   // [0-3]: nDxMax, nDyMax, nDxMin, nDyMin （MaxはMax-1にしておく）
   // [4-9]: Left predictor, Up predictor, bottom-right predictor(from coarse level)
@@ -284,41 +280,23 @@ __device__ sad_t dev_calc_sad(
 {
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
+		HALF_UV = BLK_SIZE / 4,
   };
   int sad = 0;
-  if (BLK_SIZE == 16) {
-    // ブロックサイズがスレッド数と一致
-    int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
-      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-    }
-    if (CHROMA) {
-      // UVは8x8
-      int uvx = wi % 8;
-      int uvy = wi / 8;
-      for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
-        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-      }
+  int yx = wi;
+  for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
+    sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+  }
+  if (CHROMA) {
+    // UVは8x8
+    int uvx = wi % BLK_SIZE_UV;
+    int uvy = wi / BLK_SIZE_UV;
+    for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4回ループ
+      sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+      sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
     }
   }
-  else if (BLK_SIZE == 32) {
-    // 32x32
-    int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 32回ループ
-      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-      sad = __sad(pSrcY[yx + 16 + yy * BLK_SIZE], pRefY[yx + 16 + yy * nPitchY], sad);
-    }
-    if (CHROMA) {
-      // ブロックサイズがスレッド数と一致
-      int uvx = wi;
-      for (int uvy = 0; uvy < BLK_SIZE_UV; ++uvy) { // 16回ループ
-        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-      }
-    }
-  }
-  dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
+  dev_reduce_warp<int, BLK_SIZE, AddReducer<int>>(wi, sad);
   return sad;
 }
 
@@ -333,47 +311,29 @@ __device__ sad_t dev_calc_sad_debug(
 {
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
+		HALF_UV = BLK_SIZE / 4,
   };
   int sad = 0;
-  if (BLK_SIZE == 16) {
-    // ブロックサイズがスレッド数と一致
-    int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
-      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-    }
-    if (CHROMA) {
-      // UVは8x8
-      int uvx = wi % 8;
-      int uvy = wi / 8;
-      for (int t = 0; t < 4; ++t, uvy += 2) { // 4回ループ
-        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-      }
-    }
-  }
-  else if (BLK_SIZE == 32) {
-    // 32x32
-    int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; ++yy) { // 32回ループ
-      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-      sad = __sad(pSrcY[yx + 16 + yy * BLK_SIZE], pRefY[yx + 16 + yy * nPitchY], sad);
-      if (debug && wi == 0) {
-        printf("i=%d,sum=%d\n", yy, sad);
-      }
-    }
-    if (CHROMA) {
-      // ブロックサイズがスレッド数と一致
-      int uvx = wi;
-      for (int uvy = 0; uvy < BLK_SIZE_UV; ++uvy) { // 16回ループ
-        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-        if (debug && wi == 0) {
-          printf("i=%d,sum=%d\n", uvy, sad);
-        }
-      }
-    }
-  }
-  dev_reduce_warp<int, 16, AddReducer<int>>(wi, sad);
+	int yx = wi;
+	for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
+		sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+		if (debug && wi == 0) {
+			printf("i=%d,sum=%d\n", yy, sad);
+		}
+	}
+	if (CHROMA) {
+		// UVは8x8
+		int uvx = wi % BLK_SIZE_UV;
+		int uvy = wi / BLK_SIZE_UV;
+		for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4回ループ
+			sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+			sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+			if (debug && wi == 0) {
+				printf("i=%d,sum=%d\n", uvy, sad);
+			}
+		}
+	}
+  dev_reduce_warp<int, BLK_SIZE, AddReducer<int>>(wi, sad);
   return sad;
 }
 #endif
@@ -669,27 +629,54 @@ __device__ void dev_hex2_search_1(
   }
 }
 
-// SRCH_DIMX % BLK_SIZE == 0が条件
-template <typename pixel_t, int BLK_SIZE>
-__device__ void dev_read_pixels(int tx, const pixel_t* src, int nPitch, int offx, int offy, pixel_t *dst)
+template <typename pixel_t, int BLK_SIZE, bool CHROMA>
+__device__ void dev_read_pixels(int tx,
+	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+	pixel_t *pDstY, pixel_t *pDstU, pixel_t *pDstV,
+	int nPitchY, int nPitchU, int nPitchV,
+	int offx, int offy)
 {
-  int y = tx / BLK_SIZE;
-  int x = tx % BLK_SIZE;
-  if (BLK_SIZE == 8) {
-    if (y < 8) {
-      dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
-    }
-  }
-  else if (BLK_SIZE == 16) {
-    dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
-    y += 8;
-    dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
-  }
-  else if (BLK_SIZE == 32) {
-    for (; y < BLK_SIZE; y += SRCH_DIMX / BLK_SIZE) {
-      dst[x + y * BLK_SIZE] = src[(x + offx) + (y + offy) * nPitch];
-    }
-  }
+	enum {
+		BLK_SIZE_UV = BLK_SIZE / 2,
+		HALF_UV = BLK_SIZE / 4,
+	};
+	int x = tx % BLK_SIZE;
+	int y = tx / BLK_SIZE;
+	// range(x,y)=(BLK_SIZE,8)
+	for (int t = 0, yy = y; t < BLK_SIZE / 8; ++t, yy += 8) {
+		pDstY[x + yy * BLK_SIZE] = pSrcY[(x + offx) + (yy + offy) * nPitchY];
+	}
+	if (CHROMA) {
+		offx >>= 1;
+		offy >>= 1;
+		if (BLK_SIZE_UV == 4) {
+			if (x < BLK_SIZE_UV) {
+				if (y < BLK_SIZE_UV) { // 0-4
+					pDstU[x + y * BLK_SIZE_UV] = pSrcU[(x + offx) + (y + offy) * nPitchU];
+				}
+				else { // 4-8
+					y -= BLK_SIZE_UV;
+					pDstV[x + y * BLK_SIZE_UV] = pSrcV[(x + offx) + (y + offy) * nPitchV];
+				}
+			}
+		}
+		else if (BLK_SIZE_UV == 8) {
+			if (x < BLK_SIZE_UV) {
+				pDstU[x + y * BLK_SIZE_UV] = pSrcU[(x + offx) + (y + offy) * nPitchU];
+			}
+			else {
+				x -= BLK_SIZE_UV;
+				pDstV[x + y * BLK_SIZE_UV] = pSrcV[(x + offx) + (y + offy) * nPitchV];
+			}
+		}
+		else if (BLK_SIZE_UV == 16) {
+			int uvx = tx % BLK_SIZE_UV;
+			int uvy = tx / BLK_SIZE_UV;
+			// range(uvx,uvy)=(BLK_SIZE_UV,16)
+			pDstU[uvx + uvy * BLK_SIZE_UV] = pSrcU[(uvx + offx) + (uvy + offy) * nPitchU];
+			pDstV[uvx + uvy * BLK_SIZE_UV] = pSrcV[(uvx + offx) + (uvy + offy) * nPitchV];
+		}
+	}
 }
 
 template <typename pixel_t>
@@ -726,7 +713,7 @@ __global__ void kl_search(
   int nImgPitchY, int nImgPitchUV
 )
 {
-  // threads=128
+  // threads=BLK_SIZE*8
 
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
@@ -734,8 +721,8 @@ __global__ void kl_search(
   };
 
   const int tx = threadIdx.x;
-  const int wi = tx % 16;
-  const int bx = tx / 16;
+  const int wi = tx % BLK_SIZE;
+  const int bx = tx / BLK_SIZE;
 
 	__shared__ SearchBatchData<pixel_t> d;
 
@@ -767,11 +754,9 @@ __global__ void kl_search(
       __shared__ pixel_t srcU[BLK_SIZE_UV * BLK_SIZE_UV];
       __shared__ pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
 
-      dev_read_pixels<pixel_t, BLK_SIZE>(tx, d.d.pSrcY, nPitchY, offx, offy, srcY);
-      if (CHROMA) {
-				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, d.d.pSrcU, nPitchUV, offx >> 1, offy >> 1, srcU);
-				dev_read_pixels<pixel_t, BLK_SIZE_UV>(tx, d.d.pSrcV, nPitchUV, offx >> 1, offy >> 1, srcV);
-      }
+      dev_read_pixels<pixel_t, BLK_SIZE, CHROMA>(tx,
+				d.d.pSrcY, d.d.pSrcU, d.d.pSrcV, srcY, srcU, srcV, 
+				nPitchY, nPitchUV, nPitchUV, offx, offy);
 
       __shared__ const pixel_t* pRefBY;
       __shared__ const pixel_t* pRefBU;
@@ -986,7 +971,7 @@ __global__ void kl_search(
   }
 }
 
-// threads=128,
+// threads=BLK_SIZE*8,
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA>
 __global__ void kl_calc_all_sad(
   int nBlkX, int nBlkY,
@@ -1058,65 +1043,54 @@ __global__ void kl_calc_all_sad(
   __syncthreads();
 
   int sad = 0;
-  if (BLK_SIZE == 16) {
-    // 16x16
-    int yx = tid % 16;
-    int yy = tid / 16;
-    for (int t = 0; t < 2; ++t, yy += 8) { // 2回ループ
-      sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
+
+	int x = tid % BLK_SIZE;
+	int y = tid / BLK_SIZE;
+	// range(x,y)=(BLK_SIZE,8)
+	for (int t = 0, yy = y; t < BLK_SIZE / 8; ++t, yy += 8) {
+		sad = __sad(pSrcBY[x + yy * nPitchY], pRefBY[x + yy * nPitchY], sad);
 #if 0
-      if (bx == 2 && by == 0) {
-        printf("Y,%d,%d,%d\n", yx, yy, __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], 0));
-      }
+		if (bx == 2 && by == 0) {
+			printf("Y,%d,%d,%d\n", yx, yy, __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], 0));
+		}
 #endif
-    }
-    if (CHROMA) {
-      // UVは8x8
-      int uvx = tid % 8;
-      int uvy = tid / 8;
-      if (uvy >= 8) {
-        uvy -= 8;
-        sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
-#if 0
-        if (bx == 2 && by == 0) {
-          printf("U,%d,%d,%d\n", uvx, uvy, __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], 0));
-        }
-#endif
-      }
-      else {
-        sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
-#if 0
-        if (bx == 2 && by == 0) {
-          printf("V,%d,%d,%d\n", uvx, uvy, __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], 0));
-        }
-#endif
-      }
-    }
-  }
-  else if (BLK_SIZE == 32) {
-    // 32x32
-    int yx = tid % 32;
-    int yy = tid / 32;
-    for (int t = 0; t < 8; ++t, yy += 4) { // 8回ループ
-      sad = __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], sad);
-    }
-    if (CHROMA) {
-      // ブロックサイズがスレッド数と一致
-      int uvx = tid % 16;
-      int uvy = tid / 16;
-      for (int t = 0; t < 2; ++t, uvy += 8) { // 2回ループ
-        sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
-        sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
-      }
-    }
-  }
+	}
+	if (CHROMA) {
+		if (BLK_SIZE_UV == 4) {
+			if (x < BLK_SIZE_UV) {
+				if (y < BLK_SIZE_UV) { // 0-4
+					sad = __sad(pSrcBU[x + y * nPitchUV], pRefBU[x + y * nPitchUV], sad);
+				}
+				else { // 4-8
+					y -= BLK_SIZE_UV;
+					sad = __sad(pSrcBV[x + y * nPitchUV], pRefBV[x + y * nPitchUV], sad);
+				}
+			}
+		}
+		else if (BLK_SIZE_UV == 8) {
+			if (x < BLK_SIZE_UV) {
+				sad = __sad(pSrcBU[x + y * nPitchUV], pRefBU[x + y * nPitchUV], sad);
+			}
+			else {
+				x -= BLK_SIZE_UV;
+				sad = __sad(pSrcBV[x + y * nPitchUV], pRefBV[x + y * nPitchUV], sad);
+			}
+		}
+		else if (BLK_SIZE_UV == 16) {
+			int uvx = tid % BLK_SIZE_UV;
+			int uvy = tid / BLK_SIZE_UV;
+			// range(uvx,uvy)=(BLK_SIZE_UV,16)
+			sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
+			sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
+		}
+	}
 #if 0
   if (bx == 2 && by == 0) {
     printf("tid=%d,sad=%d\n", tid, sad);
   }
 #endif
-  __shared__ int buf[128];
-  dev_reduce<int, 128, AddReducer<int>>(tid, sad, buf);
+  __shared__ int buf[BLK_SIZE * 8];
+  dev_reduce<int, BLK_SIZE * 8, AddReducer<int>>(tid, sad, buf);
 
   if (tid == 0) {
     dst_sad[bx + by * nBlkX] = sad;
@@ -1584,18 +1558,18 @@ __global__ void kl_scene_change(const VECTOR* mv, int nBlks, int nTh1, int* scen
   }
 }
 
-template <typename pixel_t, typename vpixel_t, int N>
+template <typename pixel_t, int N>
 struct DegrainBlockData {
-  const short4 *winOver;
-  const vpixel_t *pSrc;
+  const short *winOver;
+  const pixel_t *pSrc;
   const pixel_t *pB[N], *pF[N];
   int WSrc, WRefB[N], WRefF[N];
 };
 
-template <typename pixel_t, typename vpixel_t, int N>
+template <typename pixel_t, int N>
 union DegrainBlock {
-  enum { LEN = sizeof(DegrainBlockData<pixel_t, vpixel_t, N>) / 4 };
-  DegrainBlockData<pixel_t, vpixel_t, N> d;
+  enum { LEN = sizeof(DegrainBlockData<pixel_t, N>) / 4 };
+  DegrainBlockData<pixel_t, N> d;
   uint32_t m[LEN];
 };
 
@@ -1706,7 +1680,7 @@ static __global__ void kl_prepare_degrain(
   const int * __restrict__ sceneChangeB,
   const int * __restrict__ sceneChangeF,
   const DegrainArg<pixel_t, N>* parg,
-  DegrainBlock<pixel_t, vpixel_t, N>* blocks,
+  DegrainBlock<pixel_t, N>* blocks,
   int nPitch, int nPitchSuper, int nImgPitch
 )
 {
@@ -1725,12 +1699,12 @@ static __global__ void kl_prepare_degrain(
 
   if (blkx < nBlkX && blky < nBlkY) {
     DegrainArgData<pixel_t, N>& arg = s_arg_buf.d;
-    DegrainBlockData<pixel_t, vpixel_t, N>& b = blocks[idx].d;
+    DegrainBlockData<pixel_t, N>& b = blocks[idx].d;
 
     // winOver
     int wby = ((blky + nBlkY - 3) / (nBlkY - 2)) * 3;
     int wbx = (blkx + nBlkX - 3) / (nBlkX - 2);
-    b.winOver = (const short4*)(ovrwins + (wby + wbx) * nBlkSize * nBlkSize);
+    b.winOver = ovrwins + (wby + wbx) * nBlkSize * nBlkSize;
 
     int blkStep = nBlkSize / 2;
     int offx = blkx * blkStep;
@@ -1743,7 +1717,7 @@ static __global__ void kl_prepare_degrain(
     int WSrc, WRefB[N], WRefF[N];
 
     // pSrc,pDst,pB,pF
-    b.pSrc = (const vpixel_t*)(arg.pSrc + offset);
+    b.pSrc = arg.pSrc + offset;
 
     for (int i = 0; i < N; ++i) {
       bool isUsableB = arg.isUsableB[i] && !(sceneChangeB[i] > nTh2);
@@ -1790,23 +1764,24 @@ static __global__ void kl_prepare_degrain(
 }
 
 // ブロックは2x3前提
-template <typename pixel_t, typename vpixel_t, typename vtmp_t, int N, int BLK_SIZE, int M>
+template <typename pixel_t, typename vpixel_t, typename vtmp_t, typename vint_t, typename vshort_t, int N, int BLK_SIZE, int M>
 static __global__ void kl_degrain_2x3(
   int nPatternX, int nPatternY,
-  int nBlkX, int nBlkY, DegrainBlock<pixel_t, vpixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4
+  int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4
 )
 {
   enum {
+		VLEN = VHelper<vtmp_t>::VLEN,
     SPAN_X = 3,
     SPAN_Y = 2,
     BLK_STEP = BLK_SIZE / 2,
-    BLK_SIZE4 = BLK_SIZE / 4,
-    BLK_STEP4 = BLK_STEP / 4,
+    BLK_SIZE4 = BLK_SIZE / VLEN,
+    BLK_STEP4 = BLK_STEP / VLEN,
     THREADS = BLK_SIZE*BLK_SIZE4,
     TMP_W = BLK_SIZE + BLK_STEP * 2, // == BLK_SIZE * 2
     TMP_H = BLK_SIZE + BLK_STEP * 1,
-    TMP_W4 = TMP_W / 4,
-    N_READ_LOOP = DegrainBlock<pixel_t, vpixel_t, N>::LEN / THREADS
+    TMP_W4 = TMP_W / VLEN,
+    N_READ_LOOP = DegrainBlock<pixel_t, N>::LEN / THREADS
   };
 
   int tx = threadIdx.x;
@@ -1814,12 +1789,12 @@ static __global__ void kl_degrain_2x3(
   int tz = (M == 1) ? 0 : threadIdx.z;
 
   int tid = tx + ty * BLK_SIZE4;
-  int offset = tx + ty * pitch4;
-  int offsetSuper = (tx + ty * pitchsuper4) * 4;
+  int offset = (tx + ty * pitch4) * VLEN;
+  int offsetSuper = (tx + ty * pitchsuper4) * VLEN;
 
   __shared__ vtmp_t tmp[M][TMP_H][TMP_W4];
-  __shared__ DegrainBlock<pixel_t, vpixel_t, N> info_[M];
-  DegrainBlock<pixel_t, vpixel_t, N>& info = info_[tz];
+  __shared__ DegrainBlock<pixel_t, N> info_[M];
+  DegrainBlock<pixel_t, N>& info = info_[tz];
 
   // tmp初期化
   tmp[tz][ty][tx] = VHelper<vtmp_t>::make(0);
@@ -1852,19 +1827,19 @@ static __global__ void kl_degrain_2x3(
       for (int i = 0; i < N_READ_LOOP; ++i) {
         info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
       }
-      if (THREADS * N_READ_LOOP + tid < DegrainBlock<pixel_t, vpixel_t, N>::LEN) {
+      if (THREADS * N_READ_LOOP + tid < DegrainBlock<pixel_t, N>::LEN) {
         info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
       }
       __syncthreads();
 
-      int4 val = { 0 };
+			vint_t val = { 0 };
       if (N == 1)
-        val = to_int(__ldg(&info.d.pSrc[offset])) * info.d.WSrc +
-          load_to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + load_to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
+        val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
+					VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
       else if (N == 2)
-        val = to_int(__ldg(&info.d.pSrc[offset])) * info.d.WSrc +
-          load_to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + load_to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
-          load_to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + load_to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
+        val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
+					VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
+					VLoad<VLEN>::to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + VLoad<VLEN>::to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
 
       int dstx = bbx * BLK_STEP4 + tx;
       int dsty = bby * BLK_STEP + ty;
@@ -1872,19 +1847,19 @@ static __global__ void kl_degrain_2x3(
       val = (val + (no_need_round ? 0 : 128)) >> 8;
 
       if (sizeof(pixel_t) == 1)
-        tmp[tz][dsty][dstx] += (val * __ldg(&info.d.winOver[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+        tmp[tz][dsty][dstx] += (val * __ldg(&((const vshort_t*)info.d.winOver)[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
       else
-        tmp[tz][dsty][dstx] += val * __ldg(&info.d.winOver[tid]); // shift (5+6); in Short2Bytes16
+        tmp[tz][dsty][dstx] += val * __ldg(&((const vshort_t*)info.d.winOver)[tid]); // shift (5+6); in Short2Bytes16
 
       __syncthreads();
 #if 0
       if (basex == 12 && basey == 0 && dsty == 0 && dstx == 2) {
-        auto t = (val * info.d.winOver[tid] + 256) >> 6;
+        auto t = (val * ((const vshort_t*)info.d.winOver)[tid] + 256) >> 6;
         printf("%d,%d*%d+%d*%d+%d*%d=%d*%d=>%d\n",
           tmp[0][0][3].y, info.d.pSrc[offset].y,
           info.d.WSrc, info.d.pF[0][offsetSuper].y,
           info.d.WRefF[0], info.d.pB[0][offsetSuper].y,
-          info.d.WRefB[0], val.y, info.d.winOver[tid].y,
+          info.d.WRefB[0], val.y, ((const vshort_t*)info.d.winOver)[tid].y,
           t.y);
       }
 #endif
@@ -1936,7 +1911,7 @@ __global__ void kl_short_to_byte(
 
 template <typename pixel_t>
 struct CompensateBlockData {
-  const short4 *winOver;
+  const short *winOver;
   const pixel_t *pRef;
 };
 
@@ -1971,7 +1946,7 @@ static __global__ void kl_prepare_compensate(
     // winOver
     int wby = ((blky + nBlkY - 3) / (nBlkY - 2)) * 3;
     int wbx = (blkx + nBlkX - 3) / (nBlkX - 2);
-    b.winOver = (const short4*)(ovrwins + (wby + wbx) * nBlkSize * nBlkSize);
+    b.winOver = ovrwins + (wby + wbx) * nBlkSize * nBlkSize;
 
     int blkStep = nBlkSize / 2;
     int offxS = nPad + blkx * blkStep;
@@ -1998,7 +1973,7 @@ static __global__ void kl_prepare_compensate(
 }
 
 // ブロックは2x3前提
-template <typename pixel_t, typename vtmp_t, int BLK_SIZE, int M>
+template <typename pixel_t, typename vtmp_t, typename vint_t, typename vshort_t, int BLK_SIZE, int M>
 static __global__ void kl_compensate_2x3(
   int nPatternX, int nPatternY, int nBlkX, int nBlkY,
   CompensateBlock<pixel_t>* __restrict__ data,
@@ -2006,15 +1981,16 @@ static __global__ void kl_compensate_2x3(
 )
 {
   enum {
+		VLEN = VHelper<vtmp_t>::VLEN,
     SPAN_X = 3,
     SPAN_Y = 2,
     BLK_STEP = BLK_SIZE / 2,
-    BLK_SIZE4 = BLK_SIZE / 4,
-    BLK_STEP4 = BLK_STEP / 4,
+    BLK_SIZE4 = BLK_SIZE / VLEN,
+    BLK_STEP4 = BLK_STEP / VLEN,
     THREADS = BLK_SIZE*BLK_SIZE4,
     TMP_W = BLK_SIZE + BLK_STEP * 2, // == BLK_SIZE * 2
     TMP_H = BLK_SIZE + BLK_STEP * 1,
-    TMP_W4 = TMP_W / 4,
+    TMP_W4 = TMP_W / VLEN,
     N_READ_LOOP = CompensateBlock<pixel_t>::LEN / THREADS
   };
 
@@ -2023,7 +1999,7 @@ static __global__ void kl_compensate_2x3(
   int tz = (M == 1) ? 0 : threadIdx.z;
 
   int tid = tx + ty * BLK_SIZE4;
-  int offsetSuper = (tx + ty * pitchsuper4) * 4;
+  int offsetSuper = (tx + ty * pitchsuper4) * VLEN;
 
   __shared__ vtmp_t tmp[M][TMP_H][TMP_W4];
   __shared__ CompensateBlock<pixel_t> info_[M];
@@ -2074,22 +2050,22 @@ static __global__ void kl_compensate_2x3(
       }
       __syncthreads();
 
-      int4 val = load_to_int(&info.d.pRef[offsetSuper]);
+			vint_t val = VLoad<VLEN>::to_int(&info.d.pRef[offsetSuper]);
 
       int dstx = bbx * BLK_STEP4 + tx;
       int dsty = bby * BLK_STEP + ty;
 
       if (sizeof(pixel_t) == 1)
-        tmp[tz][dsty][dstx] += (val * __ldg(&info.d.winOver[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+        tmp[tz][dsty][dstx] += (val * __ldg(&((const vshort_t*)info.d.winOver)[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
       else
-        tmp[tz][dsty][dstx] += val * __ldg(&info.d.winOver[tid]); // shift (5+6); in Short2Bytes16
+        tmp[tz][dsty][dstx] += val * __ldg(&((const vshort_t*)info.d.winOver)[tid]); // shift (5+6); in Short2Bytes16
 
       __syncthreads();
 #if 0
       if (basex == 0 && basey == 0 && dsty == 1 && dstx == 0) {
-        auto t = (val * info.d.winOver[tid] + 256) >> 6;
+        auto t = (val * ((const vshort_t*)info.d.winOver)[tid] + 256) >> 6;
         printf("%d,%d*%d=>%d\n",
-          tmp[0][1][0].x, val.x, info.d.winOver[tid].x, t.x);
+          tmp[0][1][0].x, val.x, ((const vshort_t*)info.d.winOver)[tid].x, t.x);
       }
 #endif
     }
@@ -2256,7 +2232,7 @@ public:
     int nPitchY, int nPitchUV,
     int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
   {
-    dim3 threads(128);
+    dim3 threads(BLK_SIZE * 8);
     // 余分なブロックは仕事せずに終了するので問題ない
     dim3 blocks(batch, std::min(nBlkX, nBlkY));
     kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> >(
@@ -2282,7 +2258,7 @@ public:
     int nPitchY, int nPitchUV,
     int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
   {
-    dim3 threads(128);
+    dim3 threads(BLK_SIZE * 8);
     dim3 blocks(nBlkX, nBlkY);
     kl_calc_all_sad <pixel_t, BLK_SIZE, NPEL, CHROMA> << <blocks, threads, 0, stream >> >(
       nBlkX, nBlkY, vectors, dst_sad, nPad,
@@ -2349,14 +2325,18 @@ public:
       //d.Show();
     }
 
-    int fidx = ((nBlkSize == 16) ? 0 : 4) + ((nPel == 1) ? 0 : 2) + (chroma ? 0 : 1);
+    int fidx = ((nBlkSize == 8) ? 0 : (nBlkSize == 16) ? 4 : 8) + ((nPel == 1) ? 0 : 2) + (chroma ? 0 : 1);
 
     { // search
       // デバッグ用
 #define CPU_EMU true
-      LAUNCH_SEARCH table[2][8] =
+      LAUNCH_SEARCH table[2][12] =
       {
         { // exhaustive
+					&Me::launch_search<8, 1, 1, true, CPU_EMU>,
+					&Me::launch_search<8, 1, 1, false, CPU_EMU>,
+					NULL,
+					NULL,
           &Me::launch_search<16, 1, 1, true, CPU_EMU>,
           &Me::launch_search<16, 1, 1, false, CPU_EMU>,
           NULL,
@@ -2367,6 +2347,10 @@ public:
           NULL,
         },
         { // hex
+					&Me::launch_search<8, 2, 1, true, CPU_EMU>,
+					&Me::launch_search<8, 2, 1, false, CPU_EMU>,
+					&Me::launch_search<8, 2, 2, true, CPU_EMU>,
+					&Me::launch_search<8, 2, 2, false, CPU_EMU>,
           &Me::launch_search<16, 2, 1, true, CPU_EMU>,
           &Me::launch_search<16, 2, 1, false, CPU_EMU>,
           &Me::launch_search<16, 2, 2, true, CPU_EMU>,
@@ -2414,6 +2398,10 @@ public:
     { // calc sad
       LAUNCH_CALC_ALL_SAD table[] =
       {
+				&Me::launch_calc_all_sad<8, 1, true>,
+				&Me::launch_calc_all_sad<8, 1, false>,
+				&Me::launch_calc_all_sad<8, 2, true>,
+				&Me::launch_calc_all_sad<8, 2, false>,
         &Me::launch_calc_all_sad<16, 1, true>,
         &Me::launch_calc_all_sad<16, 1, false>,
         &Me::launch_calc_all_sad<16, 2, true>,
@@ -2494,11 +2482,11 @@ public:
   {
     switch (N) {
     case 1:
-      degrainBlock = sizeof(DegrainBlock<pixel_t, uchar4, 1>);
+      degrainBlock = sizeof(DegrainBlock<pixel_t, 1>);
       degrainArg = sizeof(DegrainArg<pixel_t, 1>);
       break;
     case 2:
-      degrainBlock = sizeof(DegrainBlock<pixel_t, uchar4, 2>);
+      degrainBlock = sizeof(DegrainBlock<pixel_t, 2>);
       degrainArg = sizeof(DegrainArg<pixel_t, 2>);
       break;
     default:
@@ -2513,7 +2501,7 @@ public:
     const int * sceneChangeB,
     const int * sceneChangeF,
     const DegrainArg<pixel_t, N>* parg,
-    DegrainBlock<pixel_t, vpixel_t, N>* pblocks,
+    DegrainBlock<pixel_t, N>* pblocks,
     int nPitch, int nPitchSuper, int nImgPitch)
   {
     dim3 threads(32, 8);
@@ -2523,15 +2511,27 @@ public:
     DebugSync();
   }
 
+	template <int N, int BLK_SIZE, int M>
+	void launch_degrain_2x3_small(
+		int nPatternX, int nPatternY,
+		int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch, int pitchsuper)
+	{
+		dim3 threads(BLK_SIZE, BLK_SIZE, M);
+		dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
+		kl_degrain_2x3<pixel_t, pixel_t, tmp_t, int, short, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+			nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
+		DebugSync();
+	}
+
   template <int N, int BLK_SIZE, int M>
   void launch_degrain_2x3(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, DegrainBlock<pixel_t, vpixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4)
+    int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch4, int pitchsuper4)
   {
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
-      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4, pitchsuper4);
+    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, int4, short4, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+      nPatternX, nPatternY, nBlkX, nBlkY, data, (vtmp_t*)pDst, pitch4, pitchsuper4);
     DebugSync();
   }
 
@@ -2613,7 +2613,7 @@ public:
       const int * sceneChangeB,
       const int * sceneChangeF,
       const DegrainArg<pixel_t, N>* parg,
-      DegrainBlock<pixel_t, vpixel_t, N>* blocks,
+      DegrainBlock<pixel_t, N>* blocks,
       int nPitch, int nPitchSuper, int nImgPitch);
 
     PREPARE prepare_func, prepareuv_func;
@@ -2643,7 +2643,7 @@ public:
       env->ThrowError("[Degrain] 未対応Pel");
     }
 
-    DegrainBlock<pixel_t, vpixel_t, N>* degrainblocks = (DegrainBlock<pixel_t, vpixel_t, N>*)_degrainblocks;
+    DegrainBlock<pixel_t, N>* degrainblocks = (DegrainBlock<pixel_t, N>*)_degrainblocks;
     const int max_pixel_value = (1 << nBitsPerPixel) - 1;
 
     // YUVループ
@@ -2681,9 +2681,22 @@ public:
 
         void(Me::*degrain_func)(
           int nPatternX, int nPatternY,
-          int nBlkX, int nBlkY, DegrainBlock<pixel_t, vpixel_t, N>* data, vtmp_t* pDst, int pitch4, int pitchsuper4);
+          int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitchX, int pitchsuperX);
+
+				int pitchX, pitchsuperX;
+				if (blksize < 8) {
+					pitchX = pitch;
+					pitchsuperX = pitchsuper;
+				}
+				else {
+					pitchX = pitch4;
+					pitchsuperX = pitchsuper4;
+				}
 
         switch (blksize) {
+				case 4:
+					degrain_func = &Me::launch_degrain_2x3_small<N, 4, 8>;  // 4x4x16  = 128threads
+					break;
         case 8:
           degrain_func = &Me::launch_degrain_2x3<N, 8, 8>;  // 8x2x8  = 128threads
           break;
@@ -2698,10 +2711,10 @@ public:
         }
 
         // 4回カーネル呼び出し
-        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
-        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
-        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
-        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
+        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
+        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
+        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
 
         // tmp_t -> pixel_t 変換
         launch_short_to_byte<vpixel_t, vtmp_t>(
@@ -2815,15 +2828,27 @@ public:
     DebugSync();
   }
 
+	template <int BLK_SIZE, int M>
+	void launch_compensate_2x3_small(
+		int nPatternX, int nPatternY,
+		int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch, int pitchsuper)
+	{
+		dim3 threads(BLK_SIZE, BLK_SIZE, M);
+		dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
+		kl_compensate_2x3<pixel_t, tmp_t, int, short, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+			nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
+		DebugSync();
+	}
+
   template <int BLK_SIZE, int M>
   void launch_compensate_2x3(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, vtmp_t* pDst, int pitch4, int pitchsuper4)
+    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch4, int pitchsuper4)
   {
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_compensate_2x3<pixel_t, vtmp_t, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
-      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch4, pitchsuper4);
+    kl_compensate_2x3<pixel_t, vtmp_t, int4, short4, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+      nPatternX, nPatternY, nBlkX, nBlkY, data, (vtmp_t*)pDst, pitch4, pitchsuper4);
     DebugSync();
   }
 
@@ -2924,9 +2949,22 @@ public:
 
       void(Me::*compensate_func)(
         int nPatternX, int nPatternY,
-        int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, vtmp_t* pDst, int pitch4, int pitchsuper4);
+        int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitchX, int pitchsuperX);
+
+			int pitchX, pitchsuperX;
+			if (blksize < 8) {
+				pitchX = pitch;
+				pitchsuperX = pitchsuper;
+			}
+			else {
+				pitchX = pitch4;
+				pitchsuperX = pitchsuper4;
+			}
 
       switch (blksize) {
+			case 4:
+				compensate_func = &Me::launch_compensate_2x3_small<4, 8>;  // 4x4x8  = 128threads
+				break;
       case 8:
         compensate_func = &Me::launch_compensate_2x3<8, 8>;  // 8x2x8  = 128threads
         break;
@@ -2941,10 +2979,10 @@ public:
       }
 
       // 4回カーネル呼び出し
-      (this->*compensate_func)(0, 0, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
-      (this->*compensate_func)(1, 0, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
-      (this->*compensate_func)(0, 1, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
-      (this->*compensate_func)(1, 1, nBlkX, nBlkY, compensateblocks, (vtmp_t*)pTmp[p], pitch4, pitchsuper4);
+      (this->*compensate_func)(0, 0, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
+      (this->*compensate_func)(1, 0, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
+      (this->*compensate_func)(0, 1, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
+      (this->*compensate_func)(1, 1, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
 
       // tmp_t -> pixel_t 変換
       launch_short_to_byte_or_copy_src(
