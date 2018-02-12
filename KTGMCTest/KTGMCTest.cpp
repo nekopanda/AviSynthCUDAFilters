@@ -14,6 +14,8 @@
 #include <iostream>
 #include <memory>
 
+#define O_C(n) ".OnCUDA(" #n ", 1)"
+
 std::string GetDirectoryName(const std::string& filename)
 {
 	std::string directory;
@@ -157,7 +159,7 @@ void TestBase::MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level)
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "ref = src.MSuper(chroma = " << chromastr << ", pel = " << pel << ", levels = " << level << ")" << std::endl;
-    out << "cuda = src.OnCPU(0).KMSuper(chroma = " << chromastr << ", pel = " << pel << ", levels = " << level << ").OnCUDA(0)" << std::endl;
+    out << "cuda = src.OnCPU(0).KMSuper(chroma = " << chromastr << ", pel = " << pel << ", levels = " << level << ")" O_C(0) << std::endl;
     out << "KMSuperCheck(cuda, ref, src)" << std::endl;
 
     out.close();
@@ -229,7 +231,7 @@ void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, 
 		out << "kacuda = s." << (cuda ? "OnCPU(0)." : "") << "KMAnalyse(isb = true, delta = 1, chroma = " <<
 			(chroma ? "true" : "false") << ", blksize = " << blksize <<
 			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, batch = " << batch << ", partial = kap" <<
-      (cuda ? ".OnCPU(0)" : "") << ")" << (cuda ? ".OnCUDA(0)" : "") << std::endl;
+      (cuda ? ".OnCPU(0)" : "") << ")" << (cuda ? O_C(0) : "") << std::endl;
 		out << "KMAnalyzeCheck2(karef, kacuda, last)" << std::endl;
 
 		out.close();
@@ -393,12 +395,12 @@ void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
           ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1.OnCPU(0))" << std::endl;
       }
       if (N == 1) {
-        out << "degref = src.KMDegrain1(s, mvb.OnCUDA(0), mvf.OnCUDA(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+				out << "degref = src.KMDegrain1(s, mvb"<< O_C(0) <<", mvf"<< O_C(0)<<", thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)"<< O_C(0) << std::endl;
       }
       else if (N == 2) {
-        out << "degref = src.KMDegrain2(s, mvb.OnCUDA(0), mvf.OnCUDA(0), mvb1.OnCUDA(0), mvf1.OnCUDA(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+        out << "degref = src.KMDegrain2(s, mvb"<< O_C(0)<<", mvf"<< O_C(0)<<", mvb1"<< O_C(0) <<", mvf1"<< O_C(0) <<", thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)"<< O_C(0) << std::endl;
       }
     }
     else {
@@ -414,11 +416,11 @@ void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
       }
       if (N == 1) {
         out << "degref = src.KMDegrain1(s, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb.OnCPU(0), mvf.OnCPU(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << O_C(0) << std::endl;
       }
       else if (N == 2) {
         out << "degref = src.KMDegrain2(s, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain2(scuda, mvb.OnCPU(0), mvf.OnCPU(0), mvb1.OnCPU(0), mvf1.OnCPU(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb.OnCPU(0), mvf.OnCPU(0), mvb1.OnCPU(0), mvf1.OnCPU(0), thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << O_C(0) << std::endl;
       }
     }
     out << "ImageCompare(degref, degcuda)" << std::endl;
@@ -543,9 +545,9 @@ void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
     out << "mvf1 = scuda.KMAnalyse(isb = false, delta = 2, chroma = false, blksize = " << blksize <<
       ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1.OnCPU(0))" << std::endl;
 
-    out << "bindeg = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980, binomial = true).OnCUDA(0)" << std::endl;
-    out << "deg1 = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
-    out << "deg2 = srcuda.KMDegrain1(scuda, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980).OnCUDA(0)" << std::endl;
+    out << "bindeg = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980, binomial = true)" O_C(0) << std::endl;
+    out << "deg1 = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" O_C(0) << std::endl;
+    out << "deg2 = srcuda.KMDegrain1(scuda, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" O_C(0) << std::endl;
     out << "binref = deg1.Merge(deg2, 0.2).Merge(src, 0.0625)" << std::endl;
 
     out << "ImageCompare(binref, bindeg, 6)" << std::endl;
@@ -597,14 +599,14 @@ void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
     if (true) { // MV CUDA”Å
       out << "mvb = scuda.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
         ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb.OnCPU(0))" << std::endl;
-      out << "comref = src.KMCompensate(s, mvb.OnCUDA(0),thSCD1=1800,thSCD2=980)" << std::endl;
-      out << "comcuda = srcuda.KMCompensate(scuda,mvb,thSCD1=1800,thSCD2=980).OnCUDA(0)" << std::endl;
+      out << "comref = src.KMCompensate(s, mvb" O_C(0) ",thSCD1=1800,thSCD2=980)" << std::endl;
+      out << "comcuda = srcuda.KMCompensate(scuda,mvb,thSCD1=1800,thSCD2=980)" O_C(0) "" << std::endl;
     }
     else {
       out << "mvb = s.KMAnalyse(isb = true, delta = 1, chroma = false, blksize = " << blksize <<
         ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvb)" << std::endl;
       out << "comref = src.KMCompensate(s, mvb, thSCD1=180,thSCD2=98)" << std::endl;
-      out << "comcuda = srcuda.KMCompensate(scuda, mvb.OnCPU(0), thSCD1=180,thSCD2=98).OnCUDA(0)" << std::endl;
+      out << "comcuda = srcuda.KMCompensate(scuda, mvb.OnCPU(0), thSCD1=180,thSCD2=98)" O_C(0) "" << std::endl;
     }
     out << "ImageCompare(comref, comcuda)" << std::endl;
 
@@ -748,7 +750,7 @@ void TestBase::BobTest(TEST_FRAMES tf, bool parity)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.QTGMC_Bob( 0,0.5 )" << std::endl;
-    out << "cuda = srcuda.KTGMC_Bob( 0,0.5 ).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_Bob( 0,0.5 )" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -801,7 +803,7 @@ void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.QTGMC_BinomialSoften" << radius << "(" << (chroma ? "true" : "false") << ")" << std::endl;
-    out << "cuda = srcuda.KBinomialTemporalSoften(" << radius << ", 28, " << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KBinomialTemporalSoften(" << radius << ", 28, " << (chroma ? "true" : "false") << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -862,7 +864,7 @@ void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.RemoveGrain(" << mode << (chroma ? "" : ", -1") << ")" << std::endl;
-    out << "cuda = srcuda.KRemoveGrain(" << mode << (chroma ? "" : ", -1") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KRemoveGrain(" << mode << (chroma ? "" : ", -1") << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -965,7 +967,7 @@ void TestBase::RepairTest(TEST_FRAMES tf, int mode, bool chroma)
     out << "srefcuda = sref.OnCPU(0)" << std::endl;
 
     out << "ref = src.Repair(sref, " << mode << (chroma ? "" : ", -1") << ")" << std::endl;
-    out << "cuda = srcuda.KRepair(srefcuda, " << mode << (chroma ? "" : ", -1") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KRepair(srefcuda, " << mode << (chroma ? "" : ", -1") << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1046,7 +1048,7 @@ void TestBase::VerticalCleanerTest(TEST_FRAMES tf, int mode, bool chroma)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.VerticalCleaner(" << mode << (chroma ? "" : ", 0") << ")" << std::endl;
-    out << "cuda = srcuda.KVerticalCleaner(" << mode << (chroma ? "" : ", 0") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KVerticalCleaner(" << mode << (chroma ? "" : ", 0") << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -1097,7 +1099,7 @@ void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.GaussResize(1920,1080,0,0,1920.0001,1080.0001,p=2)" << std::endl;
-    out << "cuda = srcuda.KGaussResize(p=2" << (chroma ? "" : ", chroma=false") << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KGaussResize(p=2" << (chroma ? "" : ", chroma=false") << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1153,7 +1155,7 @@ void TestBase::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 
     out << "ref = src.mt_inpand(mode=\"vertical\", U=" << rc << ",V=" << rc << 
       ").mt_inpand(mode=\"vertical\", U=" << rc << ",V=" << rc << ")" << std::endl;
-    out << "cuda = srcuda.KInpandVerticalX2(U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KInpandVerticalX2(U = " << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1209,7 +1211,7 @@ void TestBase::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 
     out << "ref = src.mt_expand(mode=\"vertical\", U=" << rc << ",V=" << rc <<
       ").mt_expand(mode=\"vertical\", U=" << rc << ",V=" << rc << ")" << std::endl;
-    out << "cuda = srcuda.KExpandVerticalX2(U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KExpandVerticalX2(U = " << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1268,11 +1270,11 @@ void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma, bool makediff)
 
     if (makediff) {
       out << "ref = src.mt_makediff(src2, U=" << rc << ",V=" << rc << ")" << std::endl;
-      out << "cuda = srcuda.KMakeDiff(sr2cuda, U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.KMakeDiff(sr2cuda, U = " << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
     }
     else {
       out << "ref = src.mt_adddiff(src2, U=" << rc << ",V=" << rc << ")" << std::endl;
-      out << "cuda = srcuda.KAddDiff(sr2cuda, U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.KAddDiff(sr2cuda, U = " << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
     }
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
@@ -1341,7 +1343,7 @@ void TestBase::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
     out << "sr2cuda = src2.OnCPU(0)" << std::endl;
 
     out << "ref = src.mt_logic(src2, mode=\"" << mode << "\", U=" << rc << ",V=" << rc << ")" << std::endl;
-    out << "cuda = srcuda.KLogic(sr2cuda, mode=\"" << mode << "\", U = " << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KLogic(sr2cuda, mode=\"" << mode << "\", U = " << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1410,7 +1412,7 @@ void TestBase::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
     out << "sr2cuda = src2.OnCPU(0)" << std::endl;
 
     out << "ref = src.QTGMC_KeepOnlyBobShimmerFixes(src2, " << rep << ", " << chromastr << ")" << std::endl;
-    out << "cuda = srcuda.KTGMC_KeepOnlyBobShimmerFixes(sr2cuda, " << rep << ", " << chromastr << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_KeepOnlyBobShimmerFixes(sr2cuda, " << rep << ", " << chromastr << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1471,7 +1473,7 @@ void TestBase::VResharpenTest(TEST_FRAMES tf)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = Merge(mt_inpand(src,mode=\"vertical\",U=3,V=3), mt_expand(src,mode=\"vertical\",U=3,V=3))" << std::endl;
-    out << "cuda = srcuda.KTGMC_VResharpen(U=3, V=3).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_VResharpen(U=3, V=3)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -1519,7 +1521,7 @@ void TestBase::ResharpenTest(TEST_FRAMES tf)
     out << "sr1cuda = src1.OnCPU(0)" << std::endl;
 
     out << "ref = src.mt_lutxy(src1,\"clamp_f x x y - 0.700000 * +\",U=3,V=3)" << std::endl;
-    out << "cuda = srcuda.KTGMC_Resharpen(sr1cuda, 0.70000, U=3, V=3).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_Resharpen(sr1cuda, 0.70000, U=3, V=3)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -1574,7 +1576,7 @@ void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
     out << "tMin = src1.mt_logic(src2, \"min\", U = 3, V = 3).mt_logic(src3, \"min\", U = 3, V = 3)" << std::endl;
     out << "ref = src.mt_clamp( tMax,tMin, 0,0, U=3,V=3 )" << std::endl;
 
-    out << "cuda = srcuda.KTGMC_LimitOverSharpen(sr1cuda, sr2cuda, sr3cuda, 0, U=3, V=3).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_LimitOverSharpen(sr1cuda, sr2cuda, sr3cuda, 0, U=3, V=3)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -1625,7 +1627,7 @@ void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
       "ref = src.mt_lut(yexpr=\"0.000000 1.062500 0.066406 x 16 - 219 / 0 1 clip 0.062500 + / - * x 16 - 219 / 0 1 clip 1 0.000000 - * + 255 * \"," << 
       "expr=\"x 128 - 128 * 112 / 128 + \",y=3,u=" << rc << ",v=" << rc << ")" << std::endl;
 
-    out << "cuda = srcuda.KTGMC_ToFullRange(u=" << rc << ",v=" << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_ToFullRange(u=" << rc << ",v=" << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1684,7 +1686,7 @@ void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
     out << "tweaked = mt_lutxy( repair0, bobbed, \"x 3 scalef + y < x 3 scalef + x 3 scalef - y > x 3 scalef - y ? ?\", u=" << rc << ",v=" << rc << ")" << std::endl;
     out << "ref = spatialBlur.mt_lutxy( tweaked, \"x 7 scalef + y < x 2 scalef + x 7 scalef - y > x 2 scalef - x 51 * y 49 * + 100 / ? ?\", u=" << rc << ",v=" << rc << ")" << std::endl;
 
-    out << "cuda = repair0cuda.KTGMC_TweakSearchClip(bobbedcuda, spatialBlurcuda, u=" << rc << ",v=" << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = repair0cuda.KTGMC_TweakSearchClip(bobbedcuda, spatialBlurcuda, u=" << rc << ",v=" << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1739,7 +1741,7 @@ void TestBase::LosslessProcTest(TEST_FRAMES tf, bool chroma)
     out << "ycuda = y.OnCPU(0)" << std::endl;
 
     out << "ref = mt_lutxy(x, y,\"x range_half - y range_half - * 0 < range_half x range_half - abs y range_half - abs < x y ? ?\",u=" << rc << ",v=" << rc << ")" << std::endl;
-    out << "cuda = KTGMC_LosslessProc(xcuda, ycuda, u=" << rc << ",v=" << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = KTGMC_LosslessProc(xcuda, ycuda, u=" << rc << ",v=" << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -1793,11 +1795,11 @@ void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
 
     if (chroma) {
       out << "ref = src.Merge(src1, 0.844)" << std::endl;
-      out << "cuda = srcuda.KMerge(sr1cuda, 0.844).OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.KMerge(sr1cuda, 0.844)" O_C(0) "" << std::endl;
     }
     else {
       out << "ref = src.MergeLuma(src1, 0.844)" << std::endl;
-      out << "cuda = srcuda.KMergeLuma(sr1cuda, 0.844).OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.KMergeLuma(sr1cuda, 0.844)" O_C(0) "" << std::endl;
     }
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
@@ -1856,11 +1858,11 @@ void TestBase::WeaveTest(TEST_FRAMES tf, bool parity, bool dbl)
 
     if (dbl) {
       out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 ).DoubleWeave()" << std::endl;
-      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KDoubleWeave().OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KDoubleWeave()" O_C(0) "" << std::endl;
     }
     else {
       out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 ).Weave()" << std::endl;
-      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KWeave().OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KWeave()" O_C(0) "" << std::endl;
     }
 
     out << "ImageCompare(ref, cuda, 0)" << std::endl;
@@ -1923,7 +1925,7 @@ void TestBase::CopyTest(TEST_FRAMES tf, bool cuda)
     if (cuda) {
       out << "srcuda = src.OnCPU(0)" << std::endl;
       out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 )" << std::endl;
-      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KCopy().OnCUDA(0)" << std::endl;
+      out << "cuda = srcuda.SeparateFields().SelectEvery( 4, 0,3 ).KCopy()" O_C(0) "" << std::endl;
     }
     else {
       out << "ref = src.SeparateFields().SelectEvery( 4, 0,3 )" << std::endl;
@@ -1985,7 +1987,7 @@ void TestBase::ErrorAdjustTest(TEST_FRAMES tf, bool chroma)
     out << "sr2cuda = src2.OnCPU(0)" << std::endl;
 
     out << "ref = src.mt_lutxy(src2, \"clamp_f x " << (errorAdj + 1) << " * y " << errorAdj << " * -\", U=" << rc << ", V = " << rc << " )" << std::endl;
-    out << "cuda = srcuda.KTGMC_ErrorAdjust(sr2cuda, " << errorAdj << ", U=" << rc << ", V = " << rc << ").OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTGMC_ErrorAdjust(sr2cuda, " << errorAdj << ", U=" << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2038,7 +2040,7 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int q
       "pscrn=" << pscrn << ",opt=1,U=" << UV << ",V=" << UV << ")" << std::endl;
     out <<
       "cuda = srcuda.KNNEDI3(field=-2,nsize=" << nsize << ",nns=" << nns << ",qual=" << qual << "," <<
-      "pscrn=" << pscrn << ",U=" << UV << ",V=" << UV << ").OnCUDA(0)" << std::endl;
+      "pscrn=" << pscrn << ",U=" << UV << ",V=" << UV << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1" << (chroma ? "" : ", false") << ")" << std::endl;
 
@@ -2151,7 +2153,7 @@ TEST_F(TestBase, NNEDI3Test_Perf)
     out << "return src.OnCPU(1)" << std::endl;
 #else
     out << "srcuda = src.OnCPU(2)" << std::endl;
-    out << "return srcuda.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,pscrn=2,opt=1,threads=1,U=" << UV << ",V=" << UV << ").OnCUDA(2)" << std::endl;
+    out << "return srcuda.KNNEDI3(field=-2,nsize=1,nns=1,qual=1,pscrn=2,opt=1,threads=1,U=" << UV << ",V=" << UV << ")" O_C(2) << std::endl;
 #endif
 
     out.close();
@@ -2183,7 +2185,7 @@ TEST_F(TestBase, DeviceCheck)
     std::string scriptpath = workDirPath + "\\script.avs";
 
     std::ofstream out(scriptpath);
-    out << "LWLibavVideoSource(\"test.ts\").OnCUDA(0)" << std::endl;
+    out << "LWLibavVideoSource(\"test.ts\")" O_C(0) "" << std::endl;
     out.close();
 
     EXPECT_THROW(env->Invoke("Import", scriptpath.c_str()).AsClip(), AvisynthError);
@@ -2255,7 +2257,7 @@ TEST_F(TestBase, KTGMC_Perf)
     out << "SetMemoryMax(2048, type=DEV_TYPE_CUDA)" << std::endl;
     out << "Import(\"KTGMC.avsi\")" << std::endl;
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "src.OnCPU(2).KTGMC().OnCUDA(2)" << std::endl;
+    out << "src.OnCPU(2).KTGMC()" O_C(2) << std::endl;
 
     out.close();
 
@@ -2285,7 +2287,7 @@ TEST_F(TestBase, MemoryLeak)
 
     out << "SetLogParams(\"avsrun.log\", LOG_WARNING)" << std::endl;
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "return src.OnCPU(1).OnCUDA(0)" << std::endl;
+    out << "return src.OnCPU(1)" O_C(0) "" << std::endl;
     out.close();
 
     {
@@ -2312,7 +2314,7 @@ TEST_F(TestBase, DeviceMatchingBug)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "src.OnCPU(0).OnCUDA(0).AudioDub(LWLibavAudioSource(\"test.ts\"))" << std::endl;
+    out << "src.OnCPU(0)" O_C(0) ".AudioDub(LWLibavAudioSource(\"test.ts\"))" << std::endl;
     out.close();
 
     {
@@ -2350,7 +2352,7 @@ TEST_F(TestBase, AnalyzeStaticTest)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.KAnalyzeStatic(30, 15)" << std::endl;
-    out << "cuda = srcuda.KAnalyzeStatic(30, 15).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KAnalyzeStatic(30, 15)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2390,7 +2392,7 @@ TEST_F(TestBase, MergeStaticTest)
 
     out << "stt = src.KAnalyzeStatic(30, 15)" << std::endl;
     out << "ref = bb.KMergeStatic(src, stt)" << std::endl;
-    out << "cuda = bbcuda.KMergeStatic(srcuda, stt.OnCPU(0)).OnCUDA(0)" << std::endl;
+    out << "cuda = bbcuda.KMergeStatic(srcuda, stt.OnCPU(0))" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2431,7 +2433,7 @@ TEST_F(TestBase, AnalyzeFrameTest)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.KFMFrameAnalyze()" << std::endl;
-    out << "cuda = srcuda.KFMFrameAnalyze().OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KFMFrameAnalyze()" O_C(0) "" << std::endl;
 
     out << "KFMFrameAnalyzeCheck(ref, cuda)" << std::endl;
 
@@ -2469,7 +2471,7 @@ TEST_F(TestBase, TelecineTest)
 
     out << "fm = src.KFMFrameAnalyze(15, 7, 20, 8).KFMCycleAnalyze(src)" << std::endl;
     out << "ref = src.KTelecine(fm)" << std::endl;
-    out << "cuda = srcuda.KTelecine(fm.OnCPU(0)).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KTelecine(fm.OnCPU(0))" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2506,7 +2508,7 @@ TEST_F(TestBase, RemoveCombeTest)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out << "ref = src.KRemoveCombe(30, 50, 150, 0, 5)" << std::endl;
-    out << "cuda = srcuda.KRemoveCombe(30, 50, 150, 0, 5).OnCUDA(0)" << std::endl;
+    out << "cuda = srcuda.KRemoveCombe(30, 50, 150, 0, 5)" O_C(0) "" << std::endl;
 
     out << "check = KRemoveCombeCheck(ref, cuda)" << std::endl;
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
@@ -2550,7 +2552,7 @@ void TestBase::TemporalNRTest(TEST_FRAMES tf)
 		out << "srcuda = src.OnCPU(0)" << std::endl;
 
 		out << "ref = src.KTemporalNR(3, 4)" << std::endl;
-		out << "cuda = srcuda.KTemporalNR(3, 4).OnCUDA(0)" << std::endl;
+		out << "cuda = srcuda.KTemporalNR(3, 4)" O_C(0) "" << std::endl;
 
 		out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2598,7 +2600,7 @@ void TestBase::DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first)
 		out << "srcuda = src.OnCPU(0)" << std::endl;
 
 		out << "ref = src.KDeband(25, 4, " << sample_mode << ", " << blur_str << ")" << std::endl;
-		out << "cuda = srcuda.KDeband(25, 4, " << sample_mode << ", " << blur_str << ").OnCUDA(0)" << std::endl;
+		out << "cuda = srcuda.KDeband(25, 4, " << sample_mode << ", " << blur_str << ")" O_C(0) "" << std::endl;
 
 		out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -2669,7 +2671,7 @@ void TestBase::EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma)
 		out << "srcuda = src.OnCPU(0)" << std::endl;
 
 		out << "ref = src.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ")" << std::endl;
-		out << "cuda = srcuda.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ").OnCUDA(0)" << std::endl;
+		out << "cuda = srcuda.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ")" O_C(0) "" << std::endl;
 
 		out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
