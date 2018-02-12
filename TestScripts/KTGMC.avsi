@@ -1,6 +1,6 @@
 #-------------------------------------------------------------------#
 #                                                                   #
-#                  KTGMC 0.1, by Nekopanda, 2017                    #
+#                  KTGMC 0.2, by Nekopanda, 2017                    #
 #                                                                   #
 #        base on QTGMC 3.357, by Vit, 2012, 2017 mod by A.SONY      #
 #                                                                   #
@@ -14,6 +14,12 @@
 # Full documentation is in the 'QTGMC' html file that comes with this script
 #
 # --- LATEST CHANGES ---
+#
+# KTGMC v0.2
+# - add parameter "GPU" and "analyzeBatch"
+#
+# KTGMC v0.1
+# - initial release of KTGMC
 #
 # v3.357s
 # - high bit depth now basically work in avs+
@@ -153,7 +159,8 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
                     float "NoiseRestore", string "NoiseDeint", bool "StabilizeNoise", int "InputType", float "ProgSADMask", int "FPSDivisor", \
                     int "ShutterBlur", float "ShutterAngleSrc", float "ShutterAngleOut", int "SBlurLimit", bool "Border", bool "Precise", string "Tuning", \
                     bool "ShowSettings", string "GlobalNames", string "PrevGlobals", int "ForceTR", \
-                    val "BT", val "DetailRestore", val "MotionBlur", val "MBlurLimit", val "NoiseBypass", float "Str", float "Amp", bool "TV_range", bool "useEdiExt", int "DftDither", bool "lsbd", bool "lsb" )
+                    val "BT", val "DetailRestore", val "MotionBlur", val "MBlurLimit", val "NoiseBypass", float "Str", float "Amp", bool "TV_range", bool "useEdiExt", int "DftDither", bool "lsbd", bool "lsb", \
+					int "GPU", int "analyzeBatch" )
 {
 	# EdiMode="RepcYadif"/"cYadif" require the Yadif plugin, which doesn't autoload. Typically the calling script would load it.
 
@@ -399,7 +406,8 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	ReuseGlobals   = (PrevGlobals == "Reuse")
 	ProgSADMask    = (InputType != 2 && InputType != 3) ? 0.0 : ProgSADMask
 	rgBlur         = (Precise) ? 11 : 12
-	analyzeBatch   = 4
+	GPU = default(GPU, 0)
+	analyzeBatch   = default(analyzeBatch, 4)
 
 	# Get maximum temporal radius needed
 	maxTR = (temporalSL)       ? SLRad : 0
@@ -488,7 +496,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	srchSuper = IsClip(srchSuper) ? srchSuper : \
 	            (maxTR > 0)       ? srchClip.KMSuper( pel=SubPel, sharp=SubPelInterp, hpad=hpad, vpad=vpad, chroma=ChromaMotion ) : NOP()
 	# partial super for CPU calculation
-	srchSuperP = (maxTR > 0)      ? srchSuper.KMPartialSuper().OnCUDA(2) : NOP()
+	srchSuperP = (maxTR > 0)      ? srchSuper.KMPartialSuper().OnCUDA(2, GPU) : NOP()
 	bVec5 = IsClip(bVec5) ? bVec5 : \
 	        (maxTR > 4)   ? srchSuper.KTGMC_MAnalyze( srchSuperP, true, 5, BlockSize, Overlap, Search, SearchParam, \
 	                                            PelSearch, TrueMotion, Lambda, LSAD, PNew, PLevel, \
@@ -546,12 +554,12 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 
 	# replace with the reference vectors for debug
 	refvector = false
-	bVec1 = refvector ? KMVReplaceWithMV(bVec1.OnCUDA(0), QTGMC_bVec1).OnCPU(0) : bVec1
-	fVec1 = refvector ? KMVReplaceWithMV(fVec1.OnCUDA(0), QTGMC_fVec1).OnCPU(0) : fVec1
-	#bVec2 = refvector ? KMVReplaceWithMV(bVec2.OnCUDA(0), QTGMC_bVec2).OnCPU(0) : bVec2
-	#fVec2 = refvector ? KMVReplaceWithMV(fVec2.OnCUDA(0), QTGMC_fVec2).OnCPU(0) : fVec2
-	#bVec3 = refvector ? KMVReplaceWithMV(bVec3.OnCUDA(0), QTGMC_bVec3).OnCPU(0) : bVec3
-	#fVec3 = refvector ? KMVReplaceWithMV(fVec3.OnCUDA(0), QTGMC_fVec3).OnCPU(0) : fVec3
+	bVec1 = refvector ? KMVReplaceWithMV(bVec1.OnCUDA(0, GPU), QTGMC_bVec1).OnCPU(0) : bVec1
+	fVec1 = refvector ? KMVReplaceWithMV(fVec1.OnCUDA(0, GPU), QTGMC_fVec1).OnCPU(0) : fVec1
+	#bVec2 = refvector ? KMVReplaceWithMV(bVec2.OnCUDA(0, GPU), QTGMC_bVec2).OnCPU(0) : bVec2
+	#fVec2 = refvector ? KMVReplaceWithMV(fVec2.OnCUDA(0, GPU), QTGMC_fVec2).OnCPU(0) : fVec2
+	#bVec3 = refvector ? KMVReplaceWithMV(bVec3.OnCUDA(0, GPU), QTGMC_bVec3).OnCPU(0) : bVec3
+	#fVec3 = refvector ? KMVReplaceWithMV(fVec3.OnCUDA(0, GPU), QTGMC_fVec3).OnCPU(0) : fVec3
 
 	#---------------------------------------
 	# Noise Processing
