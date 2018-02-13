@@ -2528,6 +2528,46 @@ TEST_F(TestBase, RemoveCombeTest)
   }
 }
 
+TEST_F(TestBase, RemoveCombe2Test)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		AVSValue result;
+		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+		std::string ktgmcPath = modulePath + "\\KFM.dll";
+		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+
+		out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+		out << "srcuda = src.OnCPU(0)" << std::endl;
+
+		out << "ref = src.KRemoveCombe2(30, 50, 150, 0, 5)" << std::endl;
+		out << "cuda = srcuda.KRemoveCombe2(30, 50, 150, 0, 5)" O_C(0) "" << std::endl;
+
+		out << "check = KRemoveCombeCheck(ref, cuda)" << std::endl;
+		out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+		out.close();
+
+		{
+			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+			GetFrames(clip, TF_MID, env.get());
+			PClip check = env->GetVar("check").AsClip();
+			GetFrames(check, TF_MID, env.get());
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
+
 #pragma endregion
 
 #pragma region TemporalNR
@@ -2722,7 +2762,7 @@ TEST_F(TestBase, EdgeLevel_Rep2NoC)
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.*";
+	::testing::GTEST_FLAG(filter) = "TestBase.RemoveCombe2Test*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
