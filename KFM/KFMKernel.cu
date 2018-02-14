@@ -3203,6 +3203,34 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
+	void VisualizeFlag(PVideoFrame& dst, PVideoFrame& mf, IScriptEnvironment2* env)
+	{
+		// 判定結果を表示
+		int blue[] = { 73, 230, 111 };
+
+		const uint8_t* mfp = reinterpret_cast<const uint8_t*>(mf->GetReadPtr());
+		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
+		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
+		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+		int mfpitch = mf->GetPitch(PLANAR_Y) / sizeof(uint8_t);
+		int dstPitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+		int dstPitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
+
+		// 色を付ける
+		for (int y = 0; y < vi.height; ++y) {
+			for (int x = 0; x < vi.width; ++x) {
+				int score = mfp[x + y * mfpitch];
+				int offY = x + y * dstPitchY;
+				int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
+				dstY[offY] = (blue[0] * score + dstY[offY] * (128 - score)) >> 7;
+				dstU[offUV] = (blue[1] * score + dstU[offUV] * (128 - score)) >> 7;
+				dstV[offUV] = (blue[2] * score + dstV[offUV] * (128 - score)) >> 7;
+			}
+		}
+	}
+
+	template <typename pixel_t>
 	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, IScriptEnvironment2* env)
 	{
 		int cycleIndex = n60 / 10;
@@ -3265,8 +3293,10 @@ class KFMSwitch : public KFMFilterBase
 			MakeMergeFlag(mflag, flag, mflagtmp, flagtmp, (int)thpatch, env);
 		}
 
-		if (showflag) {
-			return mflag;
+		if (!IS_CUDA && vi.ComponentSize() == 1 && showflag) {
+			env->MakeWritable(&frame24);
+			VisualizeFlag<pixel_t>(frame24, mflag, env);
+			return frame24;
 		}
 
 		// ダメなブロックは60pフレームからコピー
