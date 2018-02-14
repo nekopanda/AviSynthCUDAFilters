@@ -1,0 +1,36 @@
+VideoInfo
+
+IsRGB() : packed,planar,ビット数問わず全てのRGBとRGBA
+IsRGB24() : 8bit packed RGB
+IsRGB32() : 8bit packed RGBA
+IsRGB48() : 16bit packed RGB
+IsRGB64() : 16bit packed RGBA
+IsPlanarRGB() : Planar RGB
+IsPlanarRGBA() : Planar RGBA
+
+IsYUV() : ビット数不問 YUV or YUY2 or Y only (YUVAは除く)
+IsYUY2() : YUY2 (YUY2 is 8bit only)
+IsYV24() : 8bitYUV444
+IsYV16() : 8bitYUV422
+IsYV12() : 8bitYUV420
+IsY8() : 8bit Y only
+IsYV411() : 8bitYUV411
+Is444() : ビット数不問 YUV444 or YUVA444
+Is422() : ビット数不問 YUV422 or YUVA422
+Is420() : ビット数不問 YUV420 or YUVA420
+IsY() : Y only
+
+IsYUVA() : ビット数不問クロマサブサンプリング不問YUVA
+IsPlanar() : (packed RGB(RGBA) or YUY2)でない
+
+BytesFromPixels(1) : planar: 1コンポーネントのバイト数, RGBXX: XX/8, YUY2: 2
+RowSize() : BytesFromPixels(1) * width
+
+BitsPerPixel() : 全コンポーネント合わせた1ピクセルあたりのビット数（情報量の参考値でしか使わない気がする）
+NumComponents() : 色コンポーネントの数（モノクロ=1,カラー=3,透過ありカラー=4）
+ComponentSize() : 1コンポーネント1要素のバイト数(1 or 2 or 4)
+BitsPerComponent() : 1コンポーネント1要素のビット数(8,10,12,14,16,32のいずれか)
+
+PVideoFrame
+GetPitch() : バイト数ピッチ
+GetRowSize() : VideoInfo.RowSize()と同じ

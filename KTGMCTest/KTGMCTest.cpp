@@ -2760,9 +2760,193 @@ TEST_F(TestBase, EdgeLevel_Rep2NoC)
 
 #pragma endregion
 
+TEST_F(TestBase, DISABLED_DumpAVSProperty)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		int types[] = {
+			VideoInfo::CS_BGR24,
+			VideoInfo::CS_BGR32,
+			VideoInfo::CS_YUY2,
+			VideoInfo::CS_YV24,
+			VideoInfo::CS_YV16,
+			VideoInfo::CS_YV12,
+			VideoInfo::CS_I420,
+			VideoInfo::CS_IYUV,
+			VideoInfo::CS_YV411,
+			VideoInfo::CS_Y8,
+			VideoInfo::CS_YUV444P10,
+			VideoInfo::CS_YUV422P10,
+			VideoInfo::CS_YUV420P10,
+			VideoInfo::CS_Y10,
+			VideoInfo::CS_YUV444P12,
+			VideoInfo::CS_YUV422P12,
+			VideoInfo::CS_YUV420P12,
+			VideoInfo::CS_Y12,
+			VideoInfo::CS_YUV444P14,
+			VideoInfo::CS_YUV422P14,
+			VideoInfo::CS_YUV420P14,
+			VideoInfo::CS_Y14,
+			VideoInfo::CS_YUV444P16,
+			VideoInfo::CS_YUV422P16,
+			VideoInfo::CS_YUV420P16,
+			VideoInfo::CS_Y16,
+			VideoInfo::CS_YUV444PS,
+			VideoInfo::CS_YUV422PS,
+			VideoInfo::CS_YUV420PS,
+			VideoInfo::CS_Y32,
+			VideoInfo::CS_BGR48,
+			VideoInfo::CS_BGR64,
+			VideoInfo::CS_RGBP,
+			VideoInfo::CS_RGBP10,
+			VideoInfo::CS_RGBP12,
+			VideoInfo::CS_RGBP14,
+			VideoInfo::CS_RGBP16,
+			VideoInfo::CS_RGBPS,
+			VideoInfo::CS_RGBAP,
+			VideoInfo::CS_RGBAP10,
+			VideoInfo::CS_RGBAP12,
+			VideoInfo::CS_RGBAP14,
+			VideoInfo::CS_RGBAP16,
+			VideoInfo::CS_RGBAPS,
+			VideoInfo::CS_YUVA444,
+			VideoInfo::CS_YUVA422,
+			VideoInfo::CS_YUVA420,
+			VideoInfo::CS_YUVA444P10,
+			VideoInfo::CS_YUVA422P10,
+			VideoInfo::CS_YUVA420P10,
+			VideoInfo::CS_YUVA444P12,
+			VideoInfo::CS_YUVA422P12,
+			VideoInfo::CS_YUVA420P12,
+			VideoInfo::CS_YUVA444P14,
+			VideoInfo::CS_YUVA422P14,
+			VideoInfo::CS_YUVA420P14,
+			VideoInfo::CS_YUVA444P16,
+			VideoInfo::CS_YUVA422P16,
+			VideoInfo::CS_YUVA420P16,
+			VideoInfo::CS_YUVA444PS,
+			VideoInfo::CS_YUVA422PS,
+			VideoInfo::CS_YUVA420PS
+		};
+		const char* typenames[] = {
+			"CS_BGR24",
+			"CS_BGR32",
+			"CS_YUY2",
+			"CS_YV24",
+			"CS_YV16",
+			"CS_YV12",
+			"CS_I420",
+			"CS_IYUV",
+			"CS_YV411",
+			"CS_Y8",
+			"CS_YUV444P10",
+			"CS_YUV422P10",
+			"CS_YUV420P10",
+			"CS_Y10",
+			"CS_YUV444P12",
+			"CS_YUV422P12",
+			"CS_YUV420P12",
+			"CS_Y12",
+			"CS_YUV444P14",
+			"CS_YUV422P14",
+			"CS_YUV420P14",
+			"CS_Y14",
+			"CS_YUV444P16",
+			"CS_YUV422P16",
+			"CS_YUV420P16",
+			"CS_Y16",
+			"CS_YUV444PS",
+			"CS_YUV422PS",
+			"CS_YUV420PS",
+			"CS_Y32",
+			"CS_BGR48",
+			"CS_BGR64",
+			"CS_RGBP",
+			"CS_RGBP10",
+			"CS_RGBP12",
+			"CS_RGBP14",
+			"CS_RGBP16",
+			"CS_RGBPS",
+			"CS_RGBAP",
+			"CS_RGBAP10",
+			"CS_RGBAP12",
+			"CS_RGBAP14",
+			"CS_RGBAP16",
+			"CS_RGBAPS",
+			"CS_YUVA444",
+			"CS_YUVA422",
+			"CS_YUVA420",
+			"CS_YUVA444P10",
+			"CS_YUVA422P10",
+			"CS_YUVA420P10",
+			"CS_YUVA444P12",
+			"CS_YUVA422P12",
+			"CS_YUVA420P12",
+			"CS_YUVA444P14",
+			"CS_YUVA422P14",
+			"CS_YUVA420P14",
+			"CS_YUVA444P16",
+			"CS_YUVA422P16",
+			"CS_YUVA420P16",
+			"CS_YUVA444PS",
+			"CS_YUVA422PS",
+			"CS_YUVA420PS"
+		};
+
+		for (int i = 0; i < sizeof(types) / sizeof(types[0]); ++i) {
+			VideoInfo vi = VideoInfo();
+			vi.width = 100;
+			vi.height = 32;
+			vi.pixel_type = types[i];
+
+			printf("Pixel Format: %s\n", typenames[i]);
+			printf("VideoInfo Properties\n");
+			printf("IsRGB() = %d\n", vi.IsRGB());
+			printf("IsRGB24() = %d\n", vi.IsRGB24());
+			printf("IsRGB32() = %d\n", vi.IsRGB32());
+			printf("IsYUV() = %d\n", vi.IsYUV());
+			printf("IsYUY2() = %d\n", vi.IsYUY2());
+			printf("IsYV24() = %d\n", vi.IsYV24());
+			printf("IsYV16() = %d\n", vi.IsYV16());
+			printf("IsYV12() = %d\n", vi.IsYV12());
+			printf("IsYV411() = %d\n", vi.IsYV411());
+			printf("IsY8() = %d\n", vi.IsY8());
+			printf("IsPlanar() = %d\n", vi.IsPlanar());
+			printf("BytesFromPixels(1) = %d\n", vi.BytesFromPixels(1));
+			printf("RowSize() = %d\n", vi.RowSize());
+			printf("BitsPerPixel() = %d\n", vi.BitsPerPixel());
+			printf("NumComponents() = %d\n", vi.NumComponents());
+			printf("ComponentSize() = %d\n", vi.ComponentSize());
+			printf("BitsPerComponent() = %d\n", vi.BitsPerComponent());
+			printf("Is444() = %d\n", vi.Is444());
+			printf("Is422() = %d\n", vi.Is422());
+			printf("Is420() = %d\n", vi.Is420());
+			printf("IsY() = %d\n", vi.IsY());
+			printf("IsRGB48() = %d\n", vi.IsRGB48());
+			printf("IsRGB64() = %d\n", vi.IsRGB64());
+			printf("IsYUVA() = %d\n", vi.IsYUVA());
+			printf("IsPlanarRGB() = %d\n", vi.IsPlanarRGB());
+			printf("IsPlanarRGBA() = %d\n", vi.IsPlanarRGBA());
+
+			PVideoFrame frame = env->NewVideoFrame(vi);
+			printf("VideoFrame Properties\n");
+			printf("GetPitch() = %d\n", frame->GetPitch());
+			printf("GetRowSize() = %d\n", frame->GetRowSize());
+			printf("GetHeight() = %d\n", frame->GetHeight());
+			printf("\n");
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
+
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "TestBase.RemoveCombe2Test*";
+	::testing::GTEST_FLAG(filter) = "TestBase.DumpAVSProperty*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 

@@ -41,6 +41,27 @@ int Get8BitType(VideoInfo& vi) {
   return VideoInfo::CS_BGR24;
 }
 
+template <typename pixel_t, int fill_v>
+void cpu_fill(pixel_t* dst, int width, int height, int pitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			dst[x + y * pitch] = VHelper<pixel_t>::make(fill_v);
+		}
+	}
+}
+
+template <typename pixel_t, int fill_v>
+__global__ void kl_fill(pixel_t* dst, int width, int height, int pitch)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		dst[x + y * pitch] = VHelper<pixel_t>::make(fill_v);
+	}
+}
+
 template <typename pixel_t>
 void cpu_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width, int height, int pitch)
 {
@@ -106,6 +127,29 @@ __global__ void kl_padv(pixel_t* dst, int width, int height, int pitch, int vpad
     dst[x + (-y - 1) * pitch] = dst[x + (y)* pitch];
     dst[x + (height + y) * pitch] = dst[x + (height - y - 1)* pitch];
   }
+}
+
+template <typename pixel_t>
+void cpu_padh(pixel_t* dst, int width, int height, int pitch, int hpad)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < hpad; ++x) {
+			dst[(-x - 1) + y * pitch] = dst[(x) + y * pitch];
+			dst[(width + x) + y * pitch] = dst[(width - x - 1) + y * pitch];
+		}
+	}
+}
+
+template <typename pixel_t>
+__global__ void kl_padh(pixel_t* dst, int width, int height, int pitch, int hpad)
+{
+	int x = threadIdx.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (y < height) {
+		dst[(-x - 1) + y * pitch] = dst[(x)+y * pitch];
+		dst[(width + x) + y * pitch] = dst[(width - x - 1) + y * pitch];
+	}
 }
 
 template <typename pixel_t>
@@ -1764,7 +1808,7 @@ enum {
 
 template <typename pixel_t, typename vpixel_t>
 void cpu_detect_combe(pixel_t* flagp, int fpitch,
-	const vpixel_t* srcp, int pitch, int nBlkX, int nBlkY, int maxv)
+	const vpixel_t* srcp, int pitch, int nBlkX, int nBlkY, int shift)
 {
 	for (int by = 0; by < nBlkY - 1; ++by) {
 		for (int bx = 0; bx < nBlkX - 1; ++bx) {
@@ -1787,14 +1831,14 @@ void cpu_detect_combe(pixel_t* flagp, int fpitch,
 				int4 score = diffT - diffE - diffO;
 				sum += score.x + score.y + score.z + score.w;
 			}
-			flagp[(bx + 1) + (by + 1) * fpitch] = max(0, min(maxv, sum >> 4));
+			flagp[(bx + 1) + (by + 1) * fpitch] = clamp(sum >> shift, 0, 255);
 		}
 	}
 }
 
 template <typename pixel_t, typename vpixel_t>
 __global__ void kl_detect_combe(pixel_t* flagp, int fpitch,
-	const vpixel_t* srcp, int pitch, int nBlkX, int nBlkY, int maxv)
+	const vpixel_t* srcp, int pitch, int nBlkX, int nBlkY, int shift)
 {
 	int tx = threadIdx.x;
 	int bx = blockIdx.x * DC_BLOCK_TH_W + threadIdx.y;
@@ -1817,9 +1861,9 @@ __global__ void kl_detect_combe(pixel_t* flagp, int fpitch,
 		int4 diffO = absdiff(L0, L1) + absdiff(L1, L3) + absdiff(L3, L5) + absdiff(L5, L7) - diff8;
 		int4 score = diffT - diffE - diffO;
 		int sum = score.x + score.y + score.z + score.w;
-		sum += __shfl_up(sum, 1);
+		sum += __shfl_up_sync(0xffffffff, sum, 1);
 		if (tx == 0) {
-			flagp[(bx + 1) + (by + 1) * fpitch] = max(0, min(maxv, sum >> 4));
+			flagp[(bx + 1) + (by + 1) * fpitch] = clamp(sum >> shift, 0, 255);
 		}
 	}
 }
@@ -2183,6 +2227,62 @@ __global__ void kl_max_extend_blocks_v(uint8_t* dstp, const uint8_t* srcp, int p
 	}
 }
 
+template <typename pixel_t>
+void cpu_combe_to_flag(pixel_t* flag, int nBlkX, int nBlkY, int fpitch, const pixel_t* combe, int cpitch)
+{
+	for (int y = 0; y < nBlkY; ++y) {
+		for (int x = 0; x < nBlkX; ++x) {
+			flag[x + y * fpitch] =
+				(combe[(2 * x + 0) + (2 * y + 0) * cpitch] +
+				 combe[(2 * x + 1) + (2 * y + 0) * cpitch] +
+				 combe[(2 * x + 0) + (2 * y + 1) * cpitch] +
+				 combe[(2 * x + 1) + (2 * y + 1) * cpitch] + 2) >> 2;
+		}
+	}
+}
+
+template <typename pixel_t>
+__global__ void kl_combe_to_flag(pixel_t* flag, int nBlkX, int nBlkY, int fpitch, const pixel_t* combe, int cpitch)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < nBlkX && y < nBlkY) {
+		flag[x + y * fpitch] =
+			(combe[(2 * x + 0) + (2 * y + 0) * cpitch] +
+				combe[(2 * x + 1) + (2 * y + 0) * cpitch] +
+				combe[(2 * x + 0) + (2 * y + 1) * cpitch] +
+				combe[(2 * x + 1) + (2 * y + 1) * cpitch] + 2) >> 2;
+	}
+}
+
+template <typename pixel_t>
+void cpu_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height, int pitch, int maxv)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			 auto sumv = (src[(x - 1) + (y - 1)*pitch] + src[(x + 0) + (y - 1)*pitch] + src[(x + 1) + (y - 1)*pitch] +
+										src[(x - 1) + (y + 0)*pitch] + src[(x + 0) + (y + 0)*pitch] + src[(x + 1) + (y + 0)*pitch] +
+										src[(x - 1) + (y + 1)*pitch] + src[(x + 0) + (y + 1)*pitch] + src[(x + 1) + (y + 1)*pitch]);
+			 dst[x + y * pitch] = min(sumv, maxv);
+		}
+	}
+}
+
+template <typename pixel_t>
+__global__ void kl_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height, int pitch, int maxv)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		auto sumv = (src[(x - 1) + (y - 1)*pitch] + src[(x + 0) + (y - 1)*pitch] + src[(x + 1) + (y - 1)*pitch] +
+			src[(x - 1) + (y + 0)*pitch] + src[(x + 0) + (y + 0)*pitch] + src[(x + 1) + (y + 0)*pitch] +
+			src[(x - 1) + (y + 1)*pitch] + src[(x + 0) + (y + 1)*pitch] + src[(x + 1) + (y + 1)*pitch]);
+		dst[x + y * pitch] = min(sumv, maxv);
+	}
+}
+
 class KRemoveCombe : public KFMFilterBase
 {
   VideoInfo padvi;
@@ -2416,6 +2516,36 @@ public:
   }
 };
 
+PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, IScriptEnvironment2* env)
+{
+	typedef typename VectorType<uint8_t>::type vpixel_t;
+
+	VideoInfo blockpadvi = vi;
+	blockpadvi.width = nblocks(vi.width, OVERLAP) + hpad * 2;
+	blockpadvi.height = nblocks(vi.height, OVERLAP) + vpad * 2;
+	blockpadvi.pixel_type = VideoInfo::CS_Y8;
+	PVideoFrame frame = env->NewVideoFrame(blockpadvi);
+
+	// ゼロ初期化
+	vpixel_t* flagp = reinterpret_cast<vpixel_t*>(frame->GetWritePtr());
+	int pitch = frame->GetPitch() / sizeof(vpixel_t);
+	if (IS_CUDA) {
+		dim3 threads(32, 8);
+		dim3 blocks(nblocks(blockpadvi.width, threads.x), nblocks(blockpadvi.height, threads.y));
+		kl_fill<vpixel_t, 0><<<blocks, threads>>>(flagp, blockpadvi.width, blockpadvi.height, pitch);
+	}
+	else {
+		cpu_fill<vpixel_t, 0>(flagp, blockpadvi.width, blockpadvi.height, pitch);
+	}
+
+	return env->SubframePlanar(frame,
+		hpad * sizeof(uint8_t) + frame->GetPitch(PLANAR_Y) * vpad,
+		frame->GetPitch(PLANAR_Y),
+		frame->GetRowSize(PLANAR_Y) - hpad * 2 * sizeof(uint8_t),
+		frame->GetHeight(PLANAR_Y) - vpad * 2,
+		0, 0, 0);
+}
+
 class KRemoveCombeCheck : public GenericVideoFilter
 {
   PClip clipB;
@@ -2480,54 +2610,52 @@ class KRemoveCombe2 : public KFMFilterBase
 		const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
 		const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
 		const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_V));
-		pixel_t* combeY = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_Y));
-		pixel_t* combeU = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_U));
-		pixel_t* combeV = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_V));
+		uint8_t* combeY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
+		uint8_t* combeU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
+		uint8_t* combeV = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_V));
 
 		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
 		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(vpixel_t);
-		int fpitchY = combe->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int fpitchUV = combe->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int fpitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
+		int fpitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
 		int widthUV = combvi.width >> logUVx;
 		int heightUV = combvi.height >> logUVy;
 
-		int bits = vi.BitsPerComponent();
-		int maxv = (1 << bits) - 1;
+		int shift = vi.BitsPerComponent() - 8 + 4;
 
 		if (IS_CUDA) {
 			dim3 threads(2, DC_BLOCK_TH_W, DC_BLOCK_TH_H);
 			dim3 blocks(nblocks(combvi.width, DC_BLOCK_TH_W), nblocks(combvi.height, DC_BLOCK_TH_H));
 			dim3 blocksUV(nblocks(widthUV, DC_BLOCK_TH_W), nblocks(heightUV, DC_BLOCK_TH_H));
-			kl_detect_combe << <blocks, threads >> >(combeY, fpitchY, srcY, pitchY, combvi.width, combvi.height, maxv);
+			kl_detect_combe << <blocks, threads >> >(combeY, fpitchY, srcY, pitchY, combvi.width, combvi.height, shift);
 			DEBUG_SYNC;
 			if (detect_uv) {
-				kl_detect_combe << <blocksUV, threads >> >(combeU, fpitchUV, srcU, pitchUV, widthUV, heightUV, maxv);
+				kl_detect_combe << <blocksUV, threads >> >(combeU, fpitchUV, srcU, pitchUV, widthUV, heightUV, shift);
 				DEBUG_SYNC;
-				kl_detect_combe << <blocksUV, threads >> >(combeV, fpitchUV, srcV, pitchUV, widthUV, heightUV, maxv);
+				kl_detect_combe << <blocksUV, threads >> >(combeV, fpitchUV, srcV, pitchUV, widthUV, heightUV, shift);
 				DEBUG_SYNC;
 			}
 		}
 		else {
-			cpu_detect_combe(combeY, fpitchY, srcY, pitchY, combvi.width, combvi.height, maxv);
+			cpu_detect_combe(combeY, fpitchY, srcY, pitchY, combvi.width, combvi.height, shift);
 			if (detect_uv) {
-				cpu_detect_combe(combeU, fpitchUV, srcU, pitchUV, widthUV, heightUV, maxv);
-				cpu_detect_combe(combeV, fpitchUV, srcV, pitchUV, widthUV, heightUV, maxv);
+				cpu_detect_combe(combeU, fpitchUV, srcU, pitchUV, widthUV, heightUV, shift);
+				cpu_detect_combe(combeV, fpitchUV, srcV, pitchUV, widthUV, heightUV, shift);
 			}
 		}
 	}
 
-	template <typename pixel_t>
 	void ExtendBlocks(PVideoFrame& dst, PVideoFrame& tmp, IScriptEnvironment2* env)
 	{
-		pixel_t* tmpY = reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_Y));
-		pixel_t* tmpU = reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_U));
-		pixel_t* tmpV = reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_V));
-		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+		uint8_t* tmpY = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_Y));
+		uint8_t* tmpU = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_U));
+		uint8_t* tmpV = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_V));
+		uint8_t* dstY = reinterpret_cast<uint8_t*>(dst->GetWritePtr(PLANAR_Y));
+		uint8_t* dstU = reinterpret_cast<uint8_t*>(dst->GetWritePtr(PLANAR_U));
+		uint8_t* dstV = reinterpret_cast<uint8_t*>(dst->GetWritePtr(PLANAR_V));
 
-		int pitchY = tmp->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int pitchUV = tmp->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int pitchY = tmp->GetPitch(PLANAR_Y) / sizeof(uint8_t);
+		int pitchUV = tmp->GetPitch(PLANAR_U) / sizeof(uint8_t);
 		int widthUV = combvi.width >> logUVx;
 		int heightUV = combvi.height >> logUVy;
 
@@ -2556,14 +2684,13 @@ class KRemoveCombe2 : public KFMFilterBase
 		}
 	}
 
-	template <typename pixel_t>
 	void MergeUVCoefs(PVideoFrame& combe, IScriptEnvironment2* env)
 	{
-		pixel_t* fY = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_Y));
-		pixel_t* fU = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_U));
-		pixel_t* fV = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_V));
-		int pitchY = combe->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int pitchUV = combe->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		uint8_t* fY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
+		uint8_t* fU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
+		uint8_t* fV = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_V));
+		int pitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
+		int pitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
 
 		if (IS_CUDA) {
 			dim3 threads(32, 16);
@@ -2578,14 +2705,13 @@ class KRemoveCombe2 : public KFMFilterBase
 		}
 	}
 
-	template <typename pixel_t>
 	void ApplyUVCoefs(PVideoFrame& combe, IScriptEnvironment2* env)
 	{
-		pixel_t* fY = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_Y));
-		pixel_t* fU = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_U));
-		pixel_t* fV = reinterpret_cast<pixel_t*>(combe->GetWritePtr(PLANAR_V));
-		int pitchY = combe->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int pitchUV = combe->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		uint8_t* fY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
+		uint8_t* fU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
+		uint8_t* fV = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_V));
+		int pitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
+		int pitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
 		int widthUV = combvi.width >> logUVx;
 		int heightUV = combvi.height >> logUVy;
 
@@ -2604,9 +2730,9 @@ class KRemoveCombe2 : public KFMFilterBase
 	template <typename pixel_t>
 	void RemoveCombe(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& combe, int thcombe, int thdiff, IScriptEnvironment2* env)
 	{
-		const pixel_t* combeY = reinterpret_cast<const pixel_t*>(combe->GetReadPtr(PLANAR_Y));
-		const pixel_t* combeU = reinterpret_cast<const pixel_t*>(combe->GetReadPtr(PLANAR_U));
-		const pixel_t* combeV = reinterpret_cast<const pixel_t*>(combe->GetReadPtr(PLANAR_V));
+		const uint8_t* combeY = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
+		const uint8_t* combeU = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_U));
+		const uint8_t* combeV = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_V));
 		const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
 		const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
 		const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
@@ -2616,8 +2742,8 @@ class KRemoveCombe2 : public KFMFilterBase
 
 		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
 		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
-		int fpitchY = combe->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int fpitchUV = combe->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int fpitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
+		int fpitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
 		int widthUV = vi.width >> logUVx;
 		int heightUV = vi.height >> logUVy;
 
@@ -2645,12 +2771,12 @@ class KRemoveCombe2 : public KFMFilterBase
 		// 判定結果を表示
 		int blue[] = { 73, 230, 111 };
 
-		const pixel_t* combep = reinterpret_cast<const pixel_t*>(combe->GetReadPtr(PLANAR_Y));
+		const uint8_t* combep = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
 		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
 		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
 		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
 
-		int combePitch = combe->GetPitch(PLANAR_Y) / sizeof(pixel_t);
+		int combePitch = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
 		int dstPitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
 		int dstPitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
 
@@ -2675,49 +2801,34 @@ class KRemoveCombe2 : public KFMFilterBase
 		}
 	}
 
-	template <typename pixel_t>
-	void CountFlags(PVideoFrame& block, PVideoFrame& flag, int thcombe, int ratio1, int ratio2, IScriptEnvironment2* env)
+	void MakeSwitchFlag(PVideoFrame& flag, PVideoFrame& flagtmp, PVideoFrame& combe, IScriptEnvironment2* env)
 	{
-		typedef typename VectorType<pixel_t>::type vpixel_t;
-		const vpixel_t* srcp = reinterpret_cast<const vpixel_t*>(flag->GetReadPtr(PLANAR_Y));
-		uint8_t* flagp = reinterpret_cast<uint8_t*>(block->GetWritePtr());
-		int pitch = flag->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-
-		if (IS_CUDA) {
-			dim3 threads(RC_COUNT_TH_W, RC_COUNT_TH_H);
-			dim3 blocks(combvi.width - 1, combvi.height - 1);
-			kl_count_cmflags << <blocks, threads >> >(
-				flagp, srcp, pitch, combvi.width, combvi.height, thcombe, ratio1, ratio2);
-			DEBUG_SYNC;
-		}
-		else {
-			cpu_count_cmflags(flagp, srcp, pitch, combvi.width, combvi.height, thcombe, ratio1, ratio2);
-		}
-	}
-
-	void MakeSwitchFlag(PVideoFrame& flag, PVideoFrame& combe, IScriptEnvironment2* env)
-	{
-		typedef uint8_t pixel_t;
-		const pixel_t* srcp = reinterpret_cast<const pixel_t*>(combe->GetReadPtr(PLANAR_Y));
+		const uint8_t* srcp = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
 		uint8_t* flagp = reinterpret_cast<uint8_t*>(flag->GetWritePtr());
+		uint8_t* flagtmpp = reinterpret_cast<uint8_t*>(flagtmp->GetWritePtr());
+		
+		int height = flag->GetHeight();
+		int width = flag->GetRowSize();
+		int fpitch = flag->GetPitch();
+		int cpitch = combe->GetPitch();
 
 		if (IS_CUDA) {
-			dim3 threads(RC_COUNT_TH_W, RC_COUNT_TH_H);
-			dim3 blocks(combvi.width - 1, combvi.height - 1);
-			kl_count_cmflags << <blocks, threads >> >(
-				flagp, srcp, pitch, combvi.width, combvi.height, thcombe, ratio1, ratio2);
+			dim3 threads(16, 8);
+			dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+			kl_combe_to_flag << <blocks, threads >> >(
+				flagp, width, height, fpitch, srcp, cpitch);
+			DEBUG_SYNC;
+			kl_sum_box3x3 << <blocks, threads >> >(
+				flagtmpp, flagp, width, height, fpitch, 255);
+			DEBUG_SYNC;
+			kl_sum_box3x3 << <blocks, threads >> >(
+				flagp, flagtmpp, width, height, fpitch, 255);
 			DEBUG_SYNC;
 		}
 		else {
-			// TODO:
-			// flagを特殊なバッファではなくPLANAR_Yだけのフレームとする
-			// nBlkXをpitchとしているコードを全て修正
-			// flagを幅1or2でpadする
-			// pad領域はゼロにする
-			// combe(4x4) -> flag(8x8) に変換
-			// 1～2回box3x3で広げる
-
-			cpu_count_cmflags(flagp, srcp, pitch, combvi.width, combvi.height, thcombe, ratio1, ratio2);
+			cpu_combe_to_flag(flagp, width, height, fpitch, srcp, cpitch);
+			cpu_sum_box3x3(flagtmpp, flagp, width, height, fpitch, 255);
+			cpu_sum_box3x3(flagp, flagtmpp, width, height, fpitch, 255);
 		}
 	}
 
@@ -2730,24 +2841,26 @@ class KRemoveCombe2 : public KFMFilterBase
 		PVideoFrame dst = OffsetPadFrame(env->NewVideoFrame(padvi), env);
 		PVideoFrame combe = env->NewVideoFrame(combvi);
 		PVideoFrame combetmp = env->NewVideoFrame(combvi);
-		PVideoFrame flag = env->NewVideoFrame(blockvi);
+		PVideoFrame flag = NewSwitchFlagFrame(vi, 2, 2, env);
+		PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 2, 2, env);
 
 		CopyFrame<pixel_t>(src, padded, env);
 		PadFrame<pixel_t>(padded, env);
 		DetectCombe<pixel_t>(padded, combe, env);
-		ExtendBlocks<pixel_t>(combe, combetmp, env);
+		ExtendBlocks(combe, combetmp, env);
 		if (detect_uv) {
-			MergeUVCoefs<pixel_t>(combe, env);
+			MergeUVCoefs(combe, env);
 		}
-		ApplyUVCoefs<pixel_t>(combe, env);
+		ApplyUVCoefs(combe, env);
 		RemoveCombe<pixel_t>(dst, padded, combe, (int)thsmooth, (int)smooth, env);
 		PadFrame<pixel_t>(dst, env);
 		DetectCombe<pixel_t>(dst, combe, env);
-		ExtendBlocks<pixel_t>(combe, combetmp, env);
+		ExtendBlocks(combe, combetmp, env);
 		if (detect_uv) {
-			MergeUVCoefs<pixel_t>(combe, env);
+			MergeUVCoefs(combe, env);
 		}
-		MakeSwitchFlag(flag, combe, env);
+		MakeSwitchFlag(flag, flagtmp, combe, env);
+		dst->SetProps(COMBE_FLAG_STR, flag);
 
 		if (!IS_CUDA && show) {
 			VisualizeCombe<pixel_t>(dst, combe, (int)thcombe, env);
@@ -2761,6 +2874,7 @@ public:
 	KRemoveCombe2(PClip clip, float thsmooth, float smooth, float thcombe, bool uv, bool show, IScriptEnvironment* env)
 		: KFMFilterBase(clip)
 		, padvi(vi)
+		, blockvi(vi)
 		, thsmooth(thsmooth)
 		, smooth(smooth)
 		, thcombe(thcombe)
@@ -2772,17 +2886,13 @@ public:
 
 		padvi.height += VPAD * 2;
 
-		combvi.pixel_type = Get8BitType(srcvi);
 		combvi.width = vi.width / DC_OVERLAP;
 		combvi.height = vi.height / DC_OVERLAP;
+		combvi.pixel_type = Get8BitType(vi);
 
-		int nBlkX = nblocks(vi.width, OVERLAP);
-		int nBlkY = nblocks(vi.height, OVERLAP);
-
-		int flag_bytes = sizeof(uint8_t) * nBlkX * nBlkY;
-		blockvi.pixel_type = VideoInfo::CS_BGR32;
-		blockvi.width = 2048;
-		blockvi.height = nblocks(flag_bytes, blockvi.width * 4);
+		blockvi.width = nblocks(vi.width, OVERLAP);
+		blockvi.height = nblocks(vi.height, OVERLAP);
+		blockvi.pixel_type = VideoInfo::CS_Y8;
 	}
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -2816,11 +2926,11 @@ public:
 	}
 };
 
-bool cpu_contains_durty_block(const uint8_t* flagp, int nBlkX, int nBlkY, int* work)
+bool cpu_contains_durty_block(const uint8_t* flagp, int fpitch, int nBlkX, int nBlkY, int* work, int thresh)
 {
 	for (int by = 0; by < nBlkY; ++by) {
 		for (int bx = 0; bx < nBlkX; ++bx) {
-			if (flagp[bx + by * nBlkX]) return true;
+			if (flagp[bx + by * fpitch] >= thresh) return true;
 		}
 	}
 	return false;
@@ -2831,42 +2941,131 @@ __global__ void kl_init_contains_durty_block(int* work)
 	*work = 0;
 }
 
-__global__ void kl_contains_durty_block(const uint8_t* flagp, int nBlkX, int nBlkY, int* work)
+__global__ void kl_contains_durty_block(const uint8_t* flagp, int fpitch, int nBlkX, int nBlkY, int* work, int thresh)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
 	if (x < nBlkX && y < nBlkY) {
-		if (flagp[x + y * nBlkX]) {
+		if (flagp[x + y * fpitch] >= thresh) {
 			*work = 1;
 		}
 	}
 }
 
-template <typename vpixel_t>
-void cpu_merge(vpixel_t* dst,
-	const vpixel_t* src24, const vpixel_t* src60, const uint8_t* flagp,
-	int width, int height, int pitch, int bshiftX, int bshiftY, int nBlkX, int nBlkY)
+void cpu_binary_flag(
+	uint8_t* dst, int dpitch, const uint8_t* src, int spitch, 
+	int nBlkX, int nBlkY, int thresh)
 {
-	for (int y = 0; y < height; ++y) {
-		for (int x = 0; x < width; ++x) {
-			bool isCombe = flagp[(x >> bshiftX) + (y >> bshiftY) * nBlkX] != 0;
-			dst[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
+	for (int y = 0; y < nBlkY; ++y) {
+		for (int x = 0; x < nBlkX; ++x) {
+			dst[x + y * dpitch] = ((src[x + y * spitch] >= thresh) ? 128 : 0);
 		}
 	}
 }
 
-template <typename vpixel_t>
-__global__ void kl_merge(vpixel_t* dst,
-	const vpixel_t* src24, const vpixel_t* src60, const uint8_t* flagp,
-	int width, int height, int pitch, int bshiftX, int bshiftY, int nBlkX, int nBlkY)
+__global__ void kl_binary_flag(
+	uint8_t* dst, int dpitch, const uint8_t* src, int spitch, 
+	int nBlkX, int nBlkY, int thresh)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < nBlkX && y < nBlkY) {
+		dst[x + y * dpitch] = ((src[x + y * spitch] >= thresh) ? 128 : 0);
+	}
+}
+
+void cpu_bilinear_x8_v(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int y0 = ((y - 4) >> 3);
+			int c0 = ((y0 + 1) << 3) - (y - 4);
+			int c1 = 8 - c0;
+			auto s0 = src[x + (y0 + 0) * spitch];
+			auto s1 = src[x + (y0 + 1) * spitch];
+			dst[x + y * dpitch] = (s0 * c0 + s1 * c1 + 4) >> 3;
+		}
+	}
+}
+
+__global__ void kl_bilinear_x8_v(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
 	if (x < width && y < height) {
-		bool isCombe = flagp[(x >> bshiftX) + (y >> bshiftY) * nBlkX] != 0;
-		dst[x + y * pitch] = (isCombe ? src60 : src24)[x + y * pitch];
+		int y0 = ((y - 4) >> 3);
+		int c0 = ((y0 + 1) << 3) - (y - 4);
+		int c1 = 8 - c0;
+		auto s0 = src[x + (y0 + 0) * spitch];
+		auto s1 = src[x + (y0 + 1) * spitch];
+		dst[x + y * dpitch] = (s0 * c0 + s1 * c1 + 4) >> 3;
+	}
+}
+
+void cpu_bilinear_x8_h(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int x0 = ((x - 4) >> 3);
+			int c0 = ((x0 + 1) << 3) - (x - 4);
+			int c1 = 8 - c0;
+			auto s0 = src[(x0 + 0) + y * spitch];
+			auto s1 = src[(x0 + 1) + y * spitch];
+			dst[x + y * dpitch] = (s0 * c0 + s1 * c1 + 4) >> 3;
+		}
+	}
+}
+
+__global__ void kl_bilinear_x8_h(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		int x0 = ((x - 4) >> 3);
+		int c0 = ((x0 + 1) << 3) - (x - 4);
+		int c1 = 8 - c0;
+		auto s0 = src[(x0 + 0) + y * spitch];
+		auto s1 = src[(x0 + 1) + y * spitch];
+		dst[x + y * dpitch] = (s0 * c0 + s1 * c1 + 4) >> 3;
+	}
+}
+
+template <typename vpixel_t, typename fpixel_t>
+void cpu_merge(vpixel_t* dst,
+	const vpixel_t* src24, const vpixel_t* src60, 
+	int width, int height, int pitch, 
+	const fpixel_t* flagp, int fpitch,
+	int logx, int logy, int nBlkX, int nBlkY)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int4 combe = to_int(flagp[(x << logx) + (y << logy) * fpitch]);
+			int4 invcombe = VHelper<int4>::make(128) - combe;
+			int4 tmp = (combe * to_int(src60[x + y * pitch]) + invcombe * to_int(src24[x + y * pitch]) + 64) >> 7;
+			dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(tmp);
+		}
+	}
+}
+
+template <typename vpixel_t, typename fpixel_t>
+__global__ void kl_merge(vpixel_t* dst,
+	const vpixel_t* src24, const vpixel_t* src60, 
+	int width, int height, int pitch,
+	const fpixel_t* flagp, int fpitch,
+	int logx, int logy, int nBlkX, int nBlkY)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+	if (x < width && y < height) {
+		int4 combe = to_int(flagp[(x << logx) + (y << logy) * fpitch]);
+		int4 invcombe = VHelper<int4>::make(128) - combe;
+		int4 tmp = (combe * to_int(src60[x + y * pitch]) + invcombe * to_int(src24[x + y * pitch]) + 64) >> 7;
+		dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(tmp);
 	}
 }
 
@@ -2882,8 +3081,10 @@ class KFMSwitch : public KFMFilterBase
 	PClip clip24;
 	PClip fmclip;
 	PClip combeclip;
-	float thresh;
+	float thswitch;
+	float thpatch;
 	bool show;
+	bool showflag;
 
 	int logUVx;
 	int logUVy;
@@ -2893,22 +3094,68 @@ class KFMSwitch : public KFMFilterBase
 
 	PulldownPatterns patterns;
 
-	bool ContainsDurtyBlock(PVideoFrame& flag, PVideoFrame& work, IScriptEnvironment2* env)
+	bool ContainsDurtyBlock(PVideoFrame& flag, PVideoFrame& work, int thpatch, IScriptEnvironment2* env)
 	{
 		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
 		int* pwork = reinterpret_cast<int*>(work->GetWritePtr());
+		int pitch = flag->GetPitch();
 
 		if (IS_CUDA) {
 			dim3 threads(32, 16);
 			dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
 			kl_init_contains_durty_block << <1, 1 >> > (pwork);
-			kl_contains_durty_block << <blocks, threads >> > (flagp, nBlkX, nBlkY, pwork);
+			kl_contains_durty_block << <blocks, threads >> > (flagp, pitch, nBlkX, nBlkY, pwork, thpatch);
 			int result;
 			CUDA_CHECK(cudaMemcpy(&result, pwork, sizeof(int), cudaMemcpyDeviceToHost));
 			return result != 0;
 		}
 		else {
-			return cpu_contains_durty_block(flagp, nBlkX, nBlkY, pwork);
+			return cpu_contains_durty_block(flagp, pitch, nBlkX, nBlkY, pwork, thpatch);
+		}
+	}
+
+	void MakeMergeFlag(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& dsttmp, PVideoFrame& srctmp, int thpatch, IScriptEnvironment2* env)
+	{
+		const uint8_t* srcp = reinterpret_cast<const uint8_t*>(src->GetReadPtr());
+		uint8_t* dstp = reinterpret_cast<uint8_t*>(dst->GetWritePtr());
+		uint8_t* dsttmpp = reinterpret_cast<uint8_t*>(dsttmp->GetWritePtr());
+		uint8_t* srctmpp = reinterpret_cast<uint8_t*>(srctmp->GetWritePtr());
+
+		// 0と128の2値にした後、線形補間で画像サイズまで拡大 //
+
+		if (IS_CUDA) {
+			dim3 threads(32, 8);
+			dim3 binary_blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
+			kl_binary_flag << <binary_blocks, threads >> >(
+				srctmpp, srctmp->GetPitch(), srcp, src->GetPitch(), nBlkX, nBlkY, thpatch);
+			DEBUG_SYNC;
+			{
+				dim3 threads(32, 1);
+				dim3 blocks(nblocks(nBlkX, threads.x));
+				kl_padv << <blocks, threads >> > (srctmpp, nBlkX, nBlkY, srctmp->GetPitch(), 1);
+				DEBUG_SYNC;
+			}
+			{
+				dim3 threads(1, 32);
+				dim3 blocks(1, nblocks(nBlkY, threads.y));
+				kl_padh << <blocks, threads >> > (srctmpp, nBlkX, nBlkY + 1 * 2, srctmp->GetPitch(), 1);
+				DEBUG_SYNC;
+			}
+			dim3 h_blocks(nblocks(vi.width, threads.x), nblocks(nBlkY, threads.y));
+			kl_bilinear_x8_h << <h_blocks, threads >> >(
+				dsttmpp, vi.width, nBlkY, dsttmp->GetPitch(), srctmpp, srctmp->GetPitch());
+			DEBUG_SYNC;
+			dim3 v_blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
+			kl_bilinear_x8_v << <v_blocks, threads >> >(
+				dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp, dsttmp->GetPitch());
+			DEBUG_SYNC;
+		}
+		else {
+			cpu_binary_flag(srctmpp, srctmp->GetPitch(), srcp, src->GetPitch(), nBlkX, nBlkY, thpatch);
+			cpu_padv(srctmpp, nBlkX, nBlkY, srctmp->GetPitch(), 1);
+			cpu_padh(srctmpp, nBlkX, nBlkY + 1 * 2, srctmp->GetPitch(), 1);
+			cpu_bilinear_x8_h(dsttmpp, vi.width, nBlkY, dsttmp->GetPitch(), srctmpp, srctmp->GetPitch());
+			cpu_bilinear_x8_v(dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp, dsttmp->GetPitch());
 		}
 	}
 
@@ -2925,34 +3172,33 @@ class KFMSwitch : public KFMFilterBase
 		vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
 		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
 		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
-		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+		const uchar4* flagp = reinterpret_cast<const uchar4*>(flag->GetReadPtr());
 
 		int pitchY = src24->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
 		int pitchUV = src24->GetPitch(PLANAR_U) / sizeof(vpixel_t);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
-		int bshiftUVx = 1 - logUVx;
-		int bshiftUVy = 3 - logUVy;
+		int fpitch4 = flag->GetPitch() / sizeof(uchar4);
 
 		if (IS_CUDA) {
 			dim3 threads(32, 16);
 			dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
 			dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
 			kl_merge << <blocks, threads >> >(
-				dstY, src24Y, src60Y, flagp, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
+				dstY, src24Y, src60Y, width4, vi.height, pitchY, flagp, fpitch4, 0, 0, nBlkX, nBlkY);
 			DEBUG_SYNC;
 			kl_merge << <blocksUV, threads >> >(
-				dstU, src24U, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+				dstU, src24U, src60U, width4UV, heightUV, pitchUV, flagp, fpitch4, logUVx, logUVy, nBlkX, nBlkY);
 			DEBUG_SYNC;
 			kl_merge << <blocksUV, threads >> >(
-				dstV, src24V, src60V, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+				dstV, src24V, src60V, width4UV, heightUV, pitchUV, flagp, fpitch4, logUVx, logUVy, nBlkX, nBlkY);
 			DEBUG_SYNC;
 		}
 		else {
-			cpu_merge(dstY, src24Y, src60Y, flagp, width4, vi.height, pitchY, 1, 3, nBlkX, nBlkY);
-			cpu_merge(dstU, src24U, src60U, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
-			cpu_merge(dstV, src24V, src60V, flagp, width4UV, heightUV, pitchUV, bshiftUVx, bshiftUVy, nBlkX, nBlkY);
+			cpu_merge(dstY, src24Y, src60Y, width4, vi.height, pitchY, flagp, fpitch4, 0, 0, nBlkX, nBlkY);
+			cpu_merge(dstU, src24U, src60U, width4UV, heightUV, pitchUV, flagp, fpitch4, logUVx, logUVy, nBlkX, nBlkY);
+			cpu_merge(dstV, src24V, src60V, width4UV, heightUV, pitchUV, flagp, fpitch4, logUVx, logUVy, nBlkX, nBlkY);
 		}
 	}
 
@@ -2963,7 +3209,7 @@ class KFMSwitch : public KFMFilterBase
 		int kfmPattern = (int)fmframe->GetProps("KFM_Pattern")->GetInt();
 		float kfmCost = (float)fmframe->GetProps("KFM_Cost")->GetFloat();
 
-		if (kfmCost > thresh || PulldownPatterns::Is30p(kfmPattern)) {
+		if (kfmCost > thswitch || PulldownPatterns::Is30p(kfmPattern)) {
 			// コストが高いので60pと判断 or 30pの場合
 			PVideoFrame frame60 = child->GetFrame(n60, env);
 			type = FRAME_60;
@@ -2998,17 +3244,34 @@ class KFMSwitch : public KFMFilterBase
 		PVideoFrame frame24 = clip24->GetFrame(n24, env);
 		PVideoFrame flag = combeclip->GetFrame(n24, env)->GetProps(COMBE_FLAG_STR)->GetFrame();
 
-		PVideoFrame work = env->NewVideoFrame(workvi);
-		if (ContainsDurtyBlock(flag, work, env) == false) {
-			// ダメなブロックはないのでそのまま返す
-			return frame24;
+		{
+			PVideoFrame work = env->NewVideoFrame(workvi);
+			if (ContainsDurtyBlock(flag, work, (int)thpatch, env) == false) {
+				// ダメなブロックはないのでそのまま返す
+				return frame24;
+			}
+		}
+
+		PVideoFrame frame60 = child->GetFrame(n60, env);
+
+		VideoInfo mfvi = vi;
+		mfvi.pixel_type = VideoInfo::CS_Y8;
+		PVideoFrame mflag = env->NewVideoFrame(mfvi);
+
+		{
+			// マージ用フラグ作成
+			PVideoFrame mflagtmp = env->NewVideoFrame(mfvi);
+			PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 2, 2, env);
+			MakeMergeFlag(mflag, flag, mflagtmp, flagtmp, (int)thpatch, env);
+		}
+
+		if (showflag) {
+			return mflag;
 		}
 
 		// ダメなブロックは60pフレームからコピー
-		PVideoFrame frame60 = child->GetFrame(n60, env);
 		PVideoFrame dst = env->NewVideoFrame(vi);
-
-		MergeBlock<pixel_t>(frame24, frame60, flag, dst, env);
+		MergeBlock<pixel_t>(frame24, frame60, mflag, dst, env);
 
 		return dst;
 	}
@@ -3021,13 +3284,16 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 public:
-	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip, float thresh, bool show, IScriptEnvironment* env)
+	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip,
+		float thswitch, float thpatch, bool show, bool showflag, IScriptEnvironment* env)
 		: KFMFilterBase(clip60)
 		, clip24(clip24)
 		, fmclip(fmclip)
 		, combeclip(combeclip)
-		, thresh(thresh)
+		, thswitch(thswitch)
+		, thpatch(thpatch)
 		, show(show)
+		, showflag(showflag)
 		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
 		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
 	{
@@ -3081,8 +3347,10 @@ public:
 			args[1].AsClip(),           // clip24
 			args[2].AsClip(),           // fmclip
 			args[3].AsClip(),           // combeclip
-			(float)args[4].AsFloat(0.8f),// thresh
-			args[5].AsBool(false),      // show
+			(float)args[4].AsFloat(0.8f),// thswitch
+			(float)args[5].AsFloat(40.0f),// thpatch
+			args[6].AsBool(false),      // show
+			args[7].AsBool(false),      // showflag
 			env
 			);
 	}
@@ -3122,7 +3390,7 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 	env->AddFunction("KRemoveCombe2", "c[thsmooth]f[smooth]f[thcombe]f[uv]b[show]b", KRemoveCombe2::Create, 0);
 	env->AddFunction("KRemoveCombeCheck", "cc", KRemoveCombeCheck::Create, 0);
 
-	env->AddFunction("KFMSwitch", "cccc[thresh]f[show]b", KFMSwitch::Create, 0);
+	env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
 
 	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }
