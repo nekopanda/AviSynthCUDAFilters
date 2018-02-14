@@ -2264,7 +2264,7 @@ void cpu_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height, int pitch
 			 auto sumv = (src[(x - 1) + (y - 1)*pitch] + src[(x + 0) + (y - 1)*pitch] + src[(x + 1) + (y - 1)*pitch] +
 										src[(x - 1) + (y + 0)*pitch] + src[(x + 0) + (y + 0)*pitch] + src[(x + 1) + (y + 0)*pitch] +
 										src[(x - 1) + (y + 1)*pitch] + src[(x + 0) + (y + 1)*pitch] + src[(x + 1) + (y + 1)*pitch]);
-			 dst[x + y * pitch] = min(sumv, maxv);
+			 dst[x + y * pitch] = min(sumv >> 2, maxv); // 適当に1/4する
 		}
 	}
 }
@@ -2279,7 +2279,7 @@ __global__ void kl_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height,
 		auto sumv = (src[(x - 1) + (y - 1)*pitch] + src[(x + 0) + (y - 1)*pitch] + src[(x + 1) + (y - 1)*pitch] +
 			src[(x - 1) + (y + 0)*pitch] + src[(x + 0) + (y + 0)*pitch] + src[(x + 1) + (y + 0)*pitch] +
 			src[(x - 1) + (y + 1)*pitch] + src[(x + 0) + (y + 1)*pitch] + src[(x + 1) + (y + 1)*pitch]);
-		dst[x + y * pitch] = min(sumv, maxv);
+		dst[x + y * pitch] = min(sumv >> 2, maxv); // 適当に1/4する
 	}
 }
 
@@ -2838,11 +2838,11 @@ class KRemoveCombe2 : public KFMFilterBase
 
 		PVideoFrame src = child->GetFrame(n, env);
 		PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-		PVideoFrame dst = OffsetPadFrame(env->NewVideoFrame(padvi), env);
+		PVideoFrame dst = env->NewVideoFrame(vi);
 		PVideoFrame combe = env->NewVideoFrame(combvi);
 		PVideoFrame combetmp = env->NewVideoFrame(combvi);
-		PVideoFrame flag = NewSwitchFlagFrame(vi, 2, 2, env);
-		PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 2, 2, env);
+		PVideoFrame flag = NewSwitchFlagFrame(vi, 32, 2, env);
+		PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 32, 2, env);
 
 		CopyFrame<pixel_t>(src, padded, env);
 		PadFrame<pixel_t>(padded, env);
@@ -2853,7 +2853,6 @@ class KRemoveCombe2 : public KFMFilterBase
 		}
 		ApplyUVCoefs(combe, env);
 		RemoveCombe<pixel_t>(dst, padded, combe, (int)thsmooth, (int)smooth, env);
-		PadFrame<pixel_t>(dst, env);
 		DetectCombe<pixel_t>(dst, combe, env);
 		ExtendBlocks(combe, combetmp, env);
 		if (detect_uv) {
@@ -3118,7 +3117,7 @@ class KFMSwitch : public KFMFilterBase
 	{
 		const uint8_t* srcp = reinterpret_cast<const uint8_t*>(src->GetReadPtr());
 		uint8_t* dstp = reinterpret_cast<uint8_t*>(dst->GetWritePtr());
-		uint8_t* dsttmpp = reinterpret_cast<uint8_t*>(dsttmp->GetWritePtr());
+		uint8_t* dsttmpp = reinterpret_cast<uint8_t*>(dsttmp->GetWritePtr()) + dsttmp->GetPitch();
 		uint8_t* srctmpp = reinterpret_cast<uint8_t*>(srctmp->GetWritePtr());
 
 		// 0と128の2値にした後、線形補間で画像サイズまで拡大 //
@@ -3143,19 +3142,21 @@ class KFMSwitch : public KFMFilterBase
 			}
 			dim3 h_blocks(nblocks(vi.width, threads.x), nblocks(nBlkY, threads.y));
 			kl_bilinear_x8_h << <h_blocks, threads >> >(
-				dsttmpp, vi.width, nBlkY, dsttmp->GetPitch(), srctmpp, srctmp->GetPitch());
+				dsttmpp, vi.width, nBlkY + 2, dsttmp->GetPitch(), srctmpp - srctmp->GetPitch(), srctmp->GetPitch());
 			DEBUG_SYNC;
 			dim3 v_blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
 			kl_bilinear_x8_v << <v_blocks, threads >> >(
-				dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp, dsttmp->GetPitch());
+				dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp + dsttmp->GetPitch(), dsttmp->GetPitch());
 			DEBUG_SYNC;
 		}
 		else {
 			cpu_binary_flag(srctmpp, srctmp->GetPitch(), srcp, src->GetPitch(), nBlkX, nBlkY, thpatch);
 			cpu_padv(srctmpp, nBlkX, nBlkY, srctmp->GetPitch(), 1);
 			cpu_padh(srctmpp, nBlkX, nBlkY + 1 * 2, srctmp->GetPitch(), 1);
-			cpu_bilinear_x8_h(dsttmpp, vi.width, nBlkY, dsttmp->GetPitch(), srctmpp, srctmp->GetPitch());
-			cpu_bilinear_x8_v(dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp, dsttmp->GetPitch());
+			// 上下パディング1行分も含めて処理
+			cpu_bilinear_x8_h(dsttmpp, vi.width, nBlkY + 2, dsttmp->GetPitch(), srctmpp - srctmp->GetPitch(), srctmp->GetPitch());
+			// ソースはパディング1行分をスキップして渡す
+			cpu_bilinear_x8_v(dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp + dsttmp->GetPitch(), dsttmp->GetPitch());
 		}
 	}
 
@@ -3289,7 +3290,7 @@ class KFMSwitch : public KFMFilterBase
 		{
 			// マージ用フラグ作成
 			PVideoFrame mflagtmp = env->NewVideoFrame(mfvi);
-			PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 2, 2, env);
+			PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 32, 2, env);
 			MakeMergeFlag(mflag, flag, mflagtmp, flagtmp, (int)thpatch, env);
 		}
 
