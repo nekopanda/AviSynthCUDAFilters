@@ -1864,7 +1864,7 @@ __global__ void kl_detect_combe(pixel_t* flagp, int fpitch,
 #if CUDART_VERSION >= 9000
 		sum += __shfl_down_sync(0xffffffff, sum, 1);
 #else
-		sum += __shfl_up(sum, 1);
+		sum += __shfl_down(sum, 1);
 #endif
 		if (tx == 0) {
 			flagp[(bx + 1) + (by + 1) * fpitch] = clamp(sum >> shift, 0, 255);
