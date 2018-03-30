@@ -1156,7 +1156,7 @@ public:
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) { child->GetAudio(buf, start, count, env); }
   const VideoInfo& __stdcall GetVideoInfo() { return vi; }
   bool __stdcall GetParity(int n) { return child->GetParity(n); }
-  int __stdcall SetCacheHints(int cachehints,int frame_range) { return 0; } ;  // We do not pass cache requests upwards, only to the next filter.
+  int __stdcall SetCacheHints(int cachehints, int frame_range) { (void)cachehints; (void)frame_range; return 0; };  // We do not pass cache requests upwards, only to the next filter.
 };
 
 class AVSMapValue
@@ -1169,7 +1169,9 @@ public:
   AVSMapValue(double d) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR3)(d))
   AVSMapValue(const AVSMapValue& other) AVS_BakedCode(AVS_LinkCall(AVSMapValue_CONSTRUCTOR4)(other))
   ~AVSMapValue() AVS_BakedCode(AVS_LinkCall(AVSMapValue_DESTRUCTOR)())
-  AVSMapValue& operator=(const AVSMapValue& other) AVS_BakedCode(return AVS_LinkCall(AVSMapValue_OPERATOR_ASSIGN)(other))
+	AVSMapValue& operator=(const AVSMapValue& other) {
+		return !AVS_linkage || offsetof(AVS_Linkage, AVSMapValue_OPERATOR_ASSIGN) >= AVS_linkage->Size ? *this : (this->*(AVS_linkage->AVSMapValue_OPERATOR_ASSIGN))(other);
+	}
 
     bool IsFrame() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsFrame)())
     bool IsInt() const AVS_BakedCode(return AVS_LinkCall(AVSMapValue_IsInt)())

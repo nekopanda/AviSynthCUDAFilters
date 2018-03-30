@@ -170,10 +170,10 @@ static __device__ __host__ void operator+=(float4& a, float4 b) {
 
 // ushort4 += int4
 static __device__ __host__ void operator+=(ushort4& a, int4 b) {
-  a.x += b.x;
-  a.y += b.y;
-  a.z += b.z;
-  a.w += b.w;
+  a.x += (unsigned short)b.x;
+  a.y += (unsigned short)b.y;
+  a.z += (unsigned short)b.z;
+  a.w += (unsigned short)b.w;
 }
 
 // ushort4 += ushort4
@@ -273,7 +273,7 @@ template <> struct VHelper<unsigned short> {
 template <> struct VHelper<int> {
 	enum { VLEN = 1 };
 	static __device__ __host__ unsigned short make(int a) {
-		return a;
+		return (unsigned short)a;
 	}
 };
 

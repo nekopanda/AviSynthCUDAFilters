@@ -4,3 +4,6 @@
 [submodule "nnedi3"]
 	path = nnedi3
 	url = git@bitbucket.org:Nekopanda/nnedi3.git
+[submodule "masktools"]
+	path = masktools
+	url = git@bitbucket.org:Nekopanda/masktools.git
