@@ -1,3 +1,6 @@
 [submodule "googletest"]
 	path = googletest
 	url = https://github.com/nekopanda/googletest.git
+[submodule "nnedi3"]
+	path = nnedi3
+	url = git@bitbucket.org:Nekopanda/nnedi3.git

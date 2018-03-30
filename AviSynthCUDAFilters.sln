@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio 15
+VisualStudioVersion = 15.0.27130.2027
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KTGMC", "KTGMC\KTGMC.vcxproj", "{9EC2BA4B-EA05-4242-84DA-7A6239DD2691}"
 EndProject
@@ -11,15 +11,14 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KTGMCTest", "KTGMCTest\KTGM
 	ProjectSection(ProjectDependencies) = postProject
 		{9EC2BA4B-EA05-4242-84DA-7A6239DD2691} = {9EC2BA4B-EA05-4242-84DA-7A6239DD2691}
 		{24CEA66A-DCE2-46FE-9E62-882CFEC40157} = {24CEA66A-DCE2-46FE-9E62-882CFEC40157}
-		{03456684-151D-49B2-BA66-037255A57811} = {03456684-151D-49B2-BA66-037255A57811}
 		{284B1696-BB8E-4BA8-8A86-F906AE939003} = {284B1696-BB8E-4BA8-8A86-F906AE939003}
 	EndProjectSection
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KNNEDI3", "KNNEDI3\nnedi3.vcxproj", "{03456684-151D-49B2-BA66-037255A57811}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KDebugTool", "KDebugTool\KDebugTool.vcxproj", "{284B1696-BB8E-4BA8-8A86-F906AE939003}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KUtil", "KUtil\KUtil.vcxproj", "{0BF2DD24-5AB4-4483-9D10-DF9BCCEE2392}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KNNEDI3", "nnedi3\nnedi3\nnedi3.vcxproj", "{03456684-151D-49B2-BA66-037255A57811}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -109,30 +108,6 @@ Global
 		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|Win32.Build.0 = Release|Win32
 		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|x64.ActiveCfg = Release|x64
 		{2C860B36-4C57-4FFB-896E-DA151F124F2B}.Release|x64.Build.0 = Release|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Debug|Mixed Platforms.Build.0 = Debug|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Debug|Win32.ActiveCfg = Debug|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Debug|Win32.Build.0 = Debug|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Debug|x64.ActiveCfg = Debug|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Debug|x64.Build.0 = Debug|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Mixed Platforms.ActiveCfg = Release_Intel_SSE4.2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Mixed Platforms.Build.0 = Release_Intel_SSE4.2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Win32.ActiveCfg = Release_Intel_SSE4.2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Win32.Build.0 = Release_Intel_SSE4.2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|x64.ActiveCfg = Release_Intel_SSE4.2|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|x64.Build.0 = Release_Intel_SSE4.2|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Mixed Platforms.ActiveCfg = Release_Intel_XP_Core2_AVX2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Mixed Platforms.Build.0 = Release_Intel_XP_Core2_AVX2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Win32.ActiveCfg = Release_Intel_XP_Core2_AVX2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Win32.Build.0 = Release_Intel_XP_Core2_AVX2|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|x64.ActiveCfg = Release_Intel_XP_Core2_AVX2|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|x64.Build.0 = Release_Intel_XP_Core2_AVX2|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Release|Mixed Platforms.ActiveCfg = Release|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release|Mixed Platforms.Build.0 = Release|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release|Win32.ActiveCfg = Release|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release|Win32.Build.0 = Release|Win32
-		{03456684-151D-49B2-BA66-037255A57811}.Release|x64.ActiveCfg = Release|x64
-		{03456684-151D-49B2-BA66-037255A57811}.Release|x64.Build.0 = Release|x64
 		{284B1696-BB8E-4BA8-8A86-F906AE939003}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
 		{284B1696-BB8E-4BA8-8A86-F906AE939003}.Debug|Mixed Platforms.Build.0 = Debug|Win32
 		{284B1696-BB8E-4BA8-8A86-F906AE939003}.Debug|Win32.ActiveCfg = Debug|Win32
@@ -181,8 +156,35 @@ Global
 		{0BF2DD24-5AB4-4483-9D10-DF9BCCEE2392}.Release|Win32.Build.0 = Release|Win32
 		{0BF2DD24-5AB4-4483-9D10-DF9BCCEE2392}.Release|x64.ActiveCfg = Release|x64
 		{0BF2DD24-5AB4-4483-9D10-DF9BCCEE2392}.Release|x64.Build.0 = Release|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Debug|Mixed Platforms.Build.0 = Debug|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Debug|Win32.ActiveCfg = Debug|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Debug|Win32.Build.0 = Debug|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Debug|x64.ActiveCfg = Debug|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Debug|x64.Build.0 = Debug|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Mixed Platforms.ActiveCfg = Release_Intel_SSE4.2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Mixed Platforms.Build.0 = Release_Intel_SSE4.2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Win32.ActiveCfg = Release_Intel_SSE4.2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|Win32.Build.0 = Release_Intel_SSE4.2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|x64.ActiveCfg = Release_Intel_SSE4.2|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_SSE4.2|x64.Build.0 = Release_Intel_SSE4.2|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Mixed Platforms.ActiveCfg = Release_Intel_XP_Core2_AVX2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Mixed Platforms.Build.0 = Release_Intel_XP_Core2_AVX2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Win32.ActiveCfg = Release_Intel_XP_Core2_AVX2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|Win32.Build.0 = Release_Intel_XP_Core2_AVX2|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|x64.ActiveCfg = Release_Intel_XP_Core2_AVX2|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Release_Intel_XP_Core2_AVX2|x64.Build.0 = Release_Intel_XP_Core2_AVX2|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Release|Mixed Platforms.ActiveCfg = Release|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release|Mixed Platforms.Build.0 = Release|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release|Win32.ActiveCfg = Release|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release|Win32.Build.0 = Release|Win32
+		{03456684-151D-49B2-BA66-037255A57811}.Release|x64.ActiveCfg = Release|x64
+		{03456684-151D-49B2-BA66-037255A57811}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {510B3A12-49DA-4413-A327-F6975E082B5A}
 	EndGlobalSection
 EndGlobal
