@@ -477,6 +477,7 @@ void AddFuncFM(IScriptEnvironment* env)
   env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
 }
 
+#define NOMINMAX
 #include <Windows.h>
 
 void AddFuncFMKernel(IScriptEnvironment* env);

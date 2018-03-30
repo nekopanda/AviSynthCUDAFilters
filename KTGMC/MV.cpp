@@ -1,4 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
+#define NOMINMAX
 #include <windows.h>
 #include <cstdint>
 #include <memory>
@@ -6,9 +7,6 @@
 #include <algorithm>
 #include <cassert>
 #include "avisynth.h"
-
-#undef min
-#undef max
 
 #include "CommonFunctions.h"
 #include "MVKernel.h"

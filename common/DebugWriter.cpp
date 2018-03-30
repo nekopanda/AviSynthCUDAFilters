@@ -1,4 +1,5 @@
 
+#define NOMINMAX
 #include <Windows.h>
 #include "DebugWriter.h"
 

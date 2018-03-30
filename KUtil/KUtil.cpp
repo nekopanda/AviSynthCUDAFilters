@@ -1,3 +1,4 @@
+#define NOMINMAX
 #include <windows.h>
 #include <Psapi.h>
 #include <iostream>

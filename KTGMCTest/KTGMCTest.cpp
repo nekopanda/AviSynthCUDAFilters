@@ -1,13 +1,12 @@
 
 #define _CRT_SECURE_NO_WARNINGS
-
+#define NOMINMAX
 #include <Windows.h>
+
+#include "gtest/gtest.h"
 
 #define AVS_LINKAGE_DLLIMPORT
 #include "avisynth.h"
-#pragma comment(lib, "avisynth.lib")
-
-#include "gtest/gtest.h"
 
 #include <fstream>
 #include <string>
@@ -36,11 +35,11 @@ struct ScriptEnvironmentDeleter {
 typedef std::unique_ptr<IScriptEnvironment2, ScriptEnvironmentDeleter> PEnv;
 
 // テスト対象となるクラス Foo のためのフィクスチャ
-class TestBase : public ::testing::Test {
+class KTGMCTest : public ::testing::Test {
 protected:
-	TestBase() { }
+	KTGMCTest() { }
 
-	virtual ~TestBase() {
+	virtual ~KTGMCTest() {
 		// テスト毎に実行される，例外を投げない clean-up をここに書きます．
 	}
 
@@ -109,7 +108,7 @@ protected:
 	void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
 };
 
-void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
+void KTGMCTest::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
 {
   int nframes = clip->GetVideoInfo().num_frames;
   switch (tf) {
@@ -139,7 +138,7 @@ void TestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
 
 #pragma region MSuper
 
-void TestBase::MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level)
+void KTGMCTest::MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level)
 {
   PEnv env;
   try {
@@ -175,27 +174,27 @@ void TestBase::MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level)
   }
 }
 
-TEST_F(TestBase, MSuper_WithCPel1Level0)
+TEST_F(KTGMCTest, MSuper_WithCPel1Level0)
 {
   MSuperTest(TF_MID, true, 1, 0);
 }
 
-TEST_F(TestBase, MSuper_WithCPel2Level0)
+TEST_F(KTGMCTest, MSuper_WithCPel2Level0)
 {
   MSuperTest(TF_MID, true, 2, 0);
 }
 
-TEST_F(TestBase, MSuper_WithCPel1Level1)
+TEST_F(KTGMCTest, MSuper_WithCPel1Level1)
 {
   MSuperTest(TF_MID, true, 1, 1);
 }
 
-TEST_F(TestBase, MSuper_WithCPel2Level1)
+TEST_F(KTGMCTest, MSuper_WithCPel2Level1)
 {
   MSuperTest(TF_MID, true, 2, 1);
 }
 
-TEST_F(TestBase, MSuper_NoCPel1Level0)
+TEST_F(KTGMCTest, MSuper_NoCPel1Level0)
 {
   MSuperTest(TF_MID, false, 1, 0);
 }
@@ -204,7 +203,7 @@ TEST_F(TestBase, MSuper_NoCPel1Level0)
 
 #pragma region Analyze
 
-void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
+void KTGMCTest::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
 {
   PEnv env;
 	try {
@@ -247,102 +246,102 @@ void TestBase::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, 
 	}
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1Batch1)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch1)
 {
   AnalyzeTest(TF_MID, true, 32, false, 1, 1);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1Batch2)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch2)
 {
   AnalyzeTest(TF_MID, true, 32, false, 1, 2);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1Batch3)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch3)
 {
   AnalyzeTest(TF_MID, true, 32, false, 1, 3);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1Batch8)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch8)
 {
   AnalyzeTest(TF_MID, true, 32, false, 1, 8);
 }
 
-TEST_F(TestBase, Analyze_Blk16WithCPel2)
+TEST_F(KTGMCTest, Analyze_Blk16WithCPel2)
 {
 	AnalyzeTest(TF_MID, true, 16, true, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk16WithCPel1)
+TEST_F(KTGMCTest, Analyze_Blk16WithCPel1)
 {
 	AnalyzeTest(TF_MID, true, 16, true, 1, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk16NoCPel2)
+TEST_F(KTGMCTest, Analyze_Blk16NoCPel2)
 {
 	AnalyzeTest(TF_MID, true, 16, false, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk16NoCPel1)
+TEST_F(KTGMCTest, Analyze_Blk16NoCPel1)
 {
 	AnalyzeTest(TF_MID, true, 16, false, 1, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk8WithCPel2)
+TEST_F(KTGMCTest, Analyze_Blk8WithCPel2)
 {
 	AnalyzeTest(TF_MID, true, 8, true, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk8WithCPel1)
+TEST_F(KTGMCTest, Analyze_Blk8WithCPel1)
 {
 	AnalyzeTest(TF_MID, true, 8, true, 1, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk8NoCPel2)
+TEST_F(KTGMCTest, Analyze_Blk8NoCPel2)
 {
 	AnalyzeTest(TF_MID, true, 8, false, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk8NoCPel1)
+TEST_F(KTGMCTest, Analyze_Blk8NoCPel1)
 {
 	AnalyzeTest(TF_MID, true, 8, false, 1, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk32WithCPel2)
+TEST_F(KTGMCTest, Analyze_Blk32WithCPel2)
 {
 	AnalyzeTest(TF_MID, true, 32, true, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk32WithCPel1)
+TEST_F(KTGMCTest, Analyze_Blk32WithCPel1)
 {
 	AnalyzeTest(TF_MID, true, 32, true, 1, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel2)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel2)
 {
 	AnalyzeTest(TF_MID, true, 32, false, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1)
 {
 	AnalyzeTest(TF_MID, true, 32, false, 1, 4);
 }
 
-TEST_F(TestBase, AnalyzeCPU_Blk16WithCPel2)
+TEST_F(KTGMCTest, AnalyzeCPU_Blk16WithCPel2)
 {
   AnalyzeTest(TF_MID, false, 16, true, 2, 4);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1Begin)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Begin)
 {
   AnalyzeTest(TF_BEGIN, true, 32, false, 1, 1);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1End)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1End)
 {
   AnalyzeTest(TF_END, true, 32, false, 1, 1);
 }
 
-TEST_F(TestBase, Analyze_Blk32NoCPel1Batch8End)
+TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch8End)
 {
   AnalyzeTest(TF_END, true, 32, false, 1, 8);
 }
@@ -351,7 +350,7 @@ TEST_F(TestBase, Analyze_Blk32NoCPel1Batch8End)
 
 #pragma region Degrain
 
-void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
+void KTGMCTest::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
   PEnv env;
   try {
@@ -438,77 +437,77 @@ void TestBase::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
   }
 }
 
-TEST_F(TestBase, Degrain_1Blk8Pel2)
+TEST_F(KTGMCTest, Degrain_1Blk8Pel2)
 {
 	DegrainTest(TF_MID, 1, 8, 2);
 }
 
-TEST_F(TestBase, Degrain_1Blk8Pel1)
+TEST_F(KTGMCTest, Degrain_1Blk8Pel1)
 {
 	DegrainTest(TF_MID, 1, 8, 1);
 }
 
-TEST_F(TestBase, Degrain_1Blk16Pel2)
+TEST_F(KTGMCTest, Degrain_1Blk16Pel2)
 {
   DegrainTest(TF_MID, 1, 16, 2);
 }
 
-TEST_F(TestBase, Degrain_1Blk16Pel1)
+TEST_F(KTGMCTest, Degrain_1Blk16Pel1)
 {
   DegrainTest(TF_MID, 1, 16, 1);
 }
 
-TEST_F(TestBase, Degrain_1Blk32Pel2)
+TEST_F(KTGMCTest, Degrain_1Blk32Pel2)
 {
   DegrainTest(TF_MID, 1, 32, 2);
 }
 
-TEST_F(TestBase, Degrain_1Blk32Pel1)
+TEST_F(KTGMCTest, Degrain_1Blk32Pel1)
 {
   DegrainTest(TF_MID, 1, 32, 1);
 }
 
-TEST_F(TestBase, Degrain_2Blk8Pel2)
+TEST_F(KTGMCTest, Degrain_2Blk8Pel2)
 {
 	DegrainTest(TF_MID, 2, 8, 2);
 }
 
-TEST_F(TestBase, Degrain_2Blk8Pel1)
+TEST_F(KTGMCTest, Degrain_2Blk8Pel1)
 {
 	DegrainTest(TF_MID, 2, 8, 1);
 }
 
-TEST_F(TestBase, Degrain_2Blk16Pel2)
+TEST_F(KTGMCTest, Degrain_2Blk16Pel2)
 {
   DegrainTest(TF_MID, 2, 16, 2);
 }
 
-TEST_F(TestBase, Degrain_2Blk16Pel1)
+TEST_F(KTGMCTest, Degrain_2Blk16Pel1)
 {
   DegrainTest(TF_MID, 2, 16, 1);
 }
 
-TEST_F(TestBase, Degrain_2Blk32Pel2)
+TEST_F(KTGMCTest, Degrain_2Blk32Pel2)
 {
   DegrainTest(TF_MID, 2, 32, 2);
 }
 
-TEST_F(TestBase, Degrain_2Blk32Pel1)
+TEST_F(KTGMCTest, Degrain_2Blk32Pel1)
 {
   DegrainTest(TF_MID, 2, 32, 1);
 }
 
-TEST_F(TestBase, Degrain_2Blk16Pel2Begin)
+TEST_F(KTGMCTest, Degrain_2Blk16Pel2Begin)
 {
   DegrainTest(TF_BEGIN, 2, 16, 2);
 }
 
-TEST_F(TestBase, Degrain_2Blk16Pel1End)
+TEST_F(KTGMCTest, Degrain_2Blk16Pel1End)
 {
   DegrainTest(TF_END, 2, 16, 2);
 }
 
-void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
+void KTGMCTest::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
 {
   PEnv env;
   try {
@@ -565,7 +564,7 @@ void TestBase::DegrainBinomialTest(TEST_FRAMES tf, int N, int blksize, int pel)
   }
 }
 
-TEST_F(TestBase, DegrainBinomial_2Blk32Pel1)
+TEST_F(KTGMCTest, DegrainBinomial_2Blk32Pel1)
 {
   DegrainBinomialTest(TF_MID, 2, 32, 1);
 }
@@ -574,7 +573,7 @@ TEST_F(TestBase, DegrainBinomial_2Blk32Pel1)
 
 #pragma region Compensate
 
-void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
+void KTGMCTest::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
 {
   PEnv env;
   try {
@@ -623,42 +622,42 @@ void TestBase::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
   }
 }
 
-TEST_F(TestBase, Compensate_Blk8Pel2)
+TEST_F(KTGMCTest, Compensate_Blk8Pel2)
 {
 	CompensateTest(TF_MID, 8, 2);
 }
 
-TEST_F(TestBase, Compensate_Blk8Pel1)
+TEST_F(KTGMCTest, Compensate_Blk8Pel1)
 {
 	CompensateTest(TF_MID, 8, 1);
 }
 
-TEST_F(TestBase, Compensate_Blk16Pel2)
+TEST_F(KTGMCTest, Compensate_Blk16Pel2)
 {
   CompensateTest(TF_MID, 16, 2);
 }
 
-TEST_F(TestBase, Compensate_Blk16Pel1)
+TEST_F(KTGMCTest, Compensate_Blk16Pel1)
 {
   CompensateTest(TF_MID, 16, 1);
 }
 
-TEST_F(TestBase, Compensate_Blk32Pel2)
+TEST_F(KTGMCTest, Compensate_Blk32Pel2)
 {
   CompensateTest(TF_MID, 32, 2);
 }
 
-TEST_F(TestBase, Compensate_Blk32Pel1)
+TEST_F(KTGMCTest, Compensate_Blk32Pel1)
 {
   CompensateTest(TF_MID, 32, 1);
 }
 
-TEST_F(TestBase, Compensate_Blk16Pel2Begin)
+TEST_F(KTGMCTest, Compensate_Blk16Pel2Begin)
 {
   CompensateTest(TF_BEGIN, 16, 2);
 }
 
-TEST_F(TestBase, Compensate_Blk16Pel2End)
+TEST_F(KTGMCTest, Compensate_Blk16Pel2End)
 {
   CompensateTest(TF_END, 16, 2);
 }
@@ -667,7 +666,7 @@ TEST_F(TestBase, Compensate_Blk16Pel2End)
 
 #pragma region MVReplace
 
-void TestBase::MVReplaceTest(TEST_FRAMES tf, bool kvm)
+void KTGMCTest::MVReplaceTest(TEST_FRAMES tf, bool kvm)
 {
   PEnv env;
   try {
@@ -714,12 +713,12 @@ void TestBase::MVReplaceTest(TEST_FRAMES tf, bool kvm)
   }
 }
 
-TEST_F(TestBase, MVReplace_KMV)
+TEST_F(KTGMCTest, MVReplace_KMV)
 {
   MVReplaceTest(TF_MID, true);
 }
 
-TEST_F(TestBase, MVReplace_MV)
+TEST_F(KTGMCTest, MVReplace_MV)
 {
   MVReplaceTest(TF_MID, false);
 }
@@ -728,7 +727,7 @@ TEST_F(TestBase, MVReplace_MV)
 
 #pragma region Bob
 
-void TestBase::BobTest(TEST_FRAMES tf, bool parity)
+void KTGMCTest::BobTest(TEST_FRAMES tf, bool parity)
 {
   PEnv env;
   try {
@@ -767,12 +766,12 @@ void TestBase::BobTest(TEST_FRAMES tf, bool parity)
   }
 }
 
-TEST_F(TestBase, BobTest_TFF)
+TEST_F(KTGMCTest, BobTest_TFF)
 {
   BobTest(TF_MID, true);
 }
 
-TEST_F(TestBase, BobTest_BFF)
+TEST_F(KTGMCTest, BobTest_BFF)
 {
   BobTest(TF_MID, false);
 }
@@ -781,7 +780,7 @@ TEST_F(TestBase, BobTest_BFF)
 
 #pragma region BinomialSoften
 
-void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
+void KTGMCTest::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
 {
   PEnv env;
   try {
@@ -820,22 +819,22 @@ void TestBase::BinomialSoftenTest(TEST_FRAMES tf, int radius, bool chroma)
   }
 }
 
-TEST_F(TestBase, BinomialSoften_Rad1WithC)
+TEST_F(KTGMCTest, BinomialSoften_Rad1WithC)
 {
   BinomialSoftenTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, BinomialSoften_Rad2WithC)
+TEST_F(KTGMCTest, BinomialSoften_Rad2WithC)
 {
   BinomialSoftenTest(TF_MID, 2, true);
 }
 
-TEST_F(TestBase, BinomialSoften_Rad1NoC)
+TEST_F(KTGMCTest, BinomialSoften_Rad1NoC)
 {
   BinomialSoftenTest(TF_MID, 1, false);
 }
 
-TEST_F(TestBase, BinomialSoften_Rad2NoC)
+TEST_F(KTGMCTest, BinomialSoften_Rad2NoC)
 {
   BinomialSoftenTest(TF_MID, 2, false);
 }
@@ -844,7 +843,7 @@ TEST_F(TestBase, BinomialSoften_Rad2NoC)
 
 #pragma region RemoveGrain
 
-void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
+void KTGMCTest::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
 {
   PEnv env;
   try {
@@ -881,62 +880,62 @@ void TestBase::RemoveGrainTest(TEST_FRAMES tf, int mode, bool chroma)
   }
 }
 
-TEST_F(TestBase, RemoveGrain_Mode1WithC)
+TEST_F(KTGMCTest, RemoveGrain_Mode1WithC)
 {
   RemoveGrainTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode1NoC)
+TEST_F(KTGMCTest, RemoveGrain_Mode1NoC)
 {
   RemoveGrainTest(TF_MID, 1, false);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode2WithC)
+TEST_F(KTGMCTest, RemoveGrain_Mode2WithC)
 {
   RemoveGrainTest(TF_MID, 2, true);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode2NoC)
+TEST_F(KTGMCTest, RemoveGrain_Mode2NoC)
 {
   RemoveGrainTest(TF_MID, 2, false);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode3WithC)
+TEST_F(KTGMCTest, RemoveGrain_Mode3WithC)
 {
   RemoveGrainTest(TF_MID, 3, true);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode3NoC)
+TEST_F(KTGMCTest, RemoveGrain_Mode3NoC)
 {
   RemoveGrainTest(TF_MID, 3, false);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode4WithC)
+TEST_F(KTGMCTest, RemoveGrain_Mode4WithC)
 {
   RemoveGrainTest(TF_MID, 4, true);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode4NoC)
+TEST_F(KTGMCTest, RemoveGrain_Mode4NoC)
 {
   RemoveGrainTest(TF_MID, 4, false);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode12WithC)
+TEST_F(KTGMCTest, RemoveGrain_Mode12WithC)
 {
   RemoveGrainTest(TF_MID, 12, true);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode12NoC)
+TEST_F(KTGMCTest, RemoveGrain_Mode12NoC)
 {
   RemoveGrainTest(TF_MID, 12, false);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode20WithC)
+TEST_F(KTGMCTest, RemoveGrain_Mode20WithC)
 {
   RemoveGrainTest(TF_MID, 20, true);
 }
 
-TEST_F(TestBase, RemoveGrain_Mode20NoC)
+TEST_F(KTGMCTest, RemoveGrain_Mode20NoC)
 {
   RemoveGrainTest(TF_MID, 20, false);
 }
@@ -945,7 +944,7 @@ TEST_F(TestBase, RemoveGrain_Mode20NoC)
 
 #pragma region Repair
 
-void TestBase::RepairTest(TEST_FRAMES tf, int mode, bool chroma)
+void KTGMCTest::RepairTest(TEST_FRAMES tf, int mode, bool chroma)
 {
   PEnv env;
   try {
@@ -984,42 +983,42 @@ void TestBase::RepairTest(TEST_FRAMES tf, int mode, bool chroma)
   }
 }
 
-TEST_F(TestBase, Repair_Mode1WithC)
+TEST_F(KTGMCTest, Repair_Mode1WithC)
 {
   RepairTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, Repair_Mode1NoC)
+TEST_F(KTGMCTest, Repair_Mode1NoC)
 {
   RepairTest(TF_MID, 1, false);
 }
 
-TEST_F(TestBase, Repair_Mode2WithC)
+TEST_F(KTGMCTest, Repair_Mode2WithC)
 {
   RepairTest(TF_MID, 2, true);
 }
 
-TEST_F(TestBase, Repair_Mode2NoC)
+TEST_F(KTGMCTest, Repair_Mode2NoC)
 {
   RepairTest(TF_MID, 2, false);
 }
 
-TEST_F(TestBase, Repair_Mode3WithC)
+TEST_F(KTGMCTest, Repair_Mode3WithC)
 {
   RepairTest(TF_MID, 3, true);
 }
 
-TEST_F(TestBase, Repair_Mode3NoC)
+TEST_F(KTGMCTest, Repair_Mode3NoC)
 {
   RepairTest(TF_MID, 3, false);
 }
 
-TEST_F(TestBase, Repair_Mode4WithC)
+TEST_F(KTGMCTest, Repair_Mode4WithC)
 {
   RepairTest(TF_MID, 4, true);
 }
 
-TEST_F(TestBase, Repair_Mode4NoC)
+TEST_F(KTGMCTest, Repair_Mode4NoC)
 {
   RepairTest(TF_MID, 4, false);
 }
@@ -1028,7 +1027,7 @@ TEST_F(TestBase, Repair_Mode4NoC)
 
 #pragma region VerticalCleaner
 
-void TestBase::VerticalCleanerTest(TEST_FRAMES tf, int mode, bool chroma)
+void KTGMCTest::VerticalCleanerTest(TEST_FRAMES tf, int mode, bool chroma)
 {
   PEnv env;
   try {
@@ -1065,12 +1064,12 @@ void TestBase::VerticalCleanerTest(TEST_FRAMES tf, int mode, bool chroma)
   }
 }
 
-TEST_F(TestBase, VerticalCleaner_WithC)
+TEST_F(KTGMCTest, VerticalCleaner_WithC)
 {
   VerticalCleanerTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, VerticalCleaner_NoC)
+TEST_F(KTGMCTest, VerticalCleaner_NoC)
 {
   VerticalCleanerTest(TF_MID, 1, false);
 }
@@ -1079,7 +1078,7 @@ TEST_F(TestBase, VerticalCleaner_NoC)
 
 #pragma region GaussResize
 
-void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::GaussResizeTest(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1116,12 +1115,12 @@ void TestBase::GaussResizeTest(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, GaussResizeTest_WithC)
+TEST_F(KTGMCTest, GaussResizeTest_WithC)
 {
   GaussResizeTest(TF_MID, true);
 }
 
-TEST_F(TestBase, GaussResizeTest_NoC)
+TEST_F(KTGMCTest, GaussResizeTest_NoC)
 {
   GaussResizeTest(TF_MID, false);
 }
@@ -1130,7 +1129,7 @@ TEST_F(TestBase, GaussResizeTest_NoC)
 
 #pragma region InpandVerticalX2
 
-void TestBase::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1172,12 +1171,12 @@ void TestBase::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, InpandVerticalX2Test_WithC)
+TEST_F(KTGMCTest, InpandVerticalX2Test_WithC)
 {
   InpandVerticalX2Test(TF_MID, true);
 }
 
-TEST_F(TestBase, InpandVerticalX2Test_NoC)
+TEST_F(KTGMCTest, InpandVerticalX2Test_NoC)
 {
   InpandVerticalX2Test(TF_MID, false);
 }
@@ -1186,7 +1185,7 @@ TEST_F(TestBase, InpandVerticalX2Test_NoC)
 
 #pragma region ExpandVerticalX2
 
-void TestBase::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1228,12 +1227,12 @@ void TestBase::ExpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, ExpandVerticalX2Test_WithC)
+TEST_F(KTGMCTest, ExpandVerticalX2Test_WithC)
 {
   ExpandVerticalX2Test(TF_MID, true);
 }
 
-TEST_F(TestBase, ExpandVerticalX2Test_NoC)
+TEST_F(KTGMCTest, ExpandVerticalX2Test_NoC)
 {
   ExpandVerticalX2Test(TF_MID, false);
 }
@@ -1242,7 +1241,7 @@ TEST_F(TestBase, ExpandVerticalX2Test_NoC)
 
 #pragma region MakeDiff
 
-void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma, bool makediff)
+void KTGMCTest::MakeDiffTest(TEST_FRAMES tf, bool chroma, bool makediff)
 {
   PEnv env;
   try {
@@ -1292,22 +1291,22 @@ void TestBase::MakeDiffTest(TEST_FRAMES tf, bool chroma, bool makediff)
   }
 }
 
-TEST_F(TestBase, MakeDiffTest_WithC)
+TEST_F(KTGMCTest, MakeDiffTest_WithC)
 {
   MakeDiffTest(TF_MID, true, true);
 }
 
-TEST_F(TestBase, MakeDiffTest_NoC)
+TEST_F(KTGMCTest, MakeDiffTest_NoC)
 {
   MakeDiffTest(TF_MID, false, true);
 }
 
-TEST_F(TestBase, AddDiffTest_WithC)
+TEST_F(KTGMCTest, AddDiffTest_WithC)
 {
   MakeDiffTest(TF_MID, true, false);
 }
 
-TEST_F(TestBase, AddDiffTest_NoC)
+TEST_F(KTGMCTest, AddDiffTest_NoC)
 {
   MakeDiffTest(TF_MID, false, false);
 }
@@ -1316,7 +1315,7 @@ TEST_F(TestBase, AddDiffTest_NoC)
 
 #pragma region Logic
 
-void TestBase::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
+void KTGMCTest::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
 {
   PEnv env;
   try {
@@ -1360,22 +1359,22 @@ void TestBase::LogicTest(TEST_FRAMES tf, const char* mode, bool chroma)
   }
 }
 
-TEST_F(TestBase, LogicTest_MinWithC)
+TEST_F(KTGMCTest, LogicTest_MinWithC)
 {
   LogicTest(TF_MID, "min", true);
 }
 
-TEST_F(TestBase, LogicTest_MinNoC)
+TEST_F(KTGMCTest, LogicTest_MinNoC)
 {
   LogicTest(TF_MID, "min", false);
 }
 
-TEST_F(TestBase, LogicTest_MaxWithC)
+TEST_F(KTGMCTest, LogicTest_MaxWithC)
 {
   LogicTest(TF_MID, "max", true);
 }
 
-TEST_F(TestBase, LogicTest_MaxNoC)
+TEST_F(KTGMCTest, LogicTest_MaxNoC)
 {
   LogicTest(TF_MID, "max", false);
 }
@@ -1384,7 +1383,7 @@ TEST_F(TestBase, LogicTest_MaxNoC)
 
 #pragma region BobShimmerFixesMerge
 
-void TestBase::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
+void KTGMCTest::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
 {
   PEnv env;
   try {
@@ -1429,22 +1428,22 @@ void TestBase::BobShimmerFixesMergeTest(TEST_FRAMES tf, int rep, bool chroma)
   }
 }
 
-TEST_F(TestBase, BobShimmerFixesMergeTest_Rep3WithC)
+TEST_F(KTGMCTest, BobShimmerFixesMergeTest_Rep3WithC)
 {
   BobShimmerFixesMergeTest(TF_MID, 3, true);
 }
 
-TEST_F(TestBase, BobShimmerFixesMergeTest_Rep3NoC)
+TEST_F(KTGMCTest, BobShimmerFixesMergeTest_Rep3NoC)
 {
   BobShimmerFixesMergeTest(TF_MID, 3, false);
 }
 
-TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4WithC)
+TEST_F(KTGMCTest, BobShimmerFixesMergeTest_Rep4WithC)
 {
   BobShimmerFixesMergeTest(TF_MID, 4, true);
 }
 
-TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
+TEST_F(KTGMCTest, BobShimmerFixesMergeTest_Rep4NoC)
 {
   BobShimmerFixesMergeTest(TF_MID, 4, false);
 }
@@ -1453,7 +1452,7 @@ TEST_F(TestBase, BobShimmerFixesMergeTest_Rep4NoC)
 
 #pragma region VResharpen
 
-void TestBase::VResharpenTest(TEST_FRAMES tf)
+void KTGMCTest::VResharpenTest(TEST_FRAMES tf)
 {
   PEnv env;
   try {
@@ -1490,7 +1489,7 @@ void TestBase::VResharpenTest(TEST_FRAMES tf)
   }
 }
 
-TEST_F(TestBase, VResharpenTest_WithC)
+TEST_F(KTGMCTest, VResharpenTest_WithC)
 {
   VResharpenTest(TF_MID);
 }
@@ -1499,7 +1498,7 @@ TEST_F(TestBase, VResharpenTest_WithC)
 
 #pragma region Resharpen
 
-void TestBase::ResharpenTest(TEST_FRAMES tf)
+void KTGMCTest::ResharpenTest(TEST_FRAMES tf)
 {
   PEnv env;
   try {
@@ -1538,7 +1537,7 @@ void TestBase::ResharpenTest(TEST_FRAMES tf)
   }
 }
 
-TEST_F(TestBase, ResharpenTest_WithC)
+TEST_F(KTGMCTest, ResharpenTest_WithC)
 {
   ResharpenTest(TF_MID);
 }
@@ -1547,7 +1546,7 @@ TEST_F(TestBase, ResharpenTest_WithC)
 
 #pragma region LimitOverSharpen
 
-void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
+void KTGMCTest::LimitOverSharpenTest(TEST_FRAMES tf)
 {
   PEnv env;
   try {
@@ -1593,7 +1592,7 @@ void TestBase::LimitOverSharpenTest(TEST_FRAMES tf)
   }
 }
 
-TEST_F(TestBase, LimitOverSharpenTest_WithC)
+TEST_F(KTGMCTest, LimitOverSharpenTest_WithC)
 {
   LimitOverSharpenTest(TF_MID);
 }
@@ -1602,7 +1601,7 @@ TEST_F(TestBase, LimitOverSharpenTest_WithC)
 
 #pragma region ToFullRange
 
-void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1644,12 +1643,12 @@ void TestBase::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, ToFullRangeTest_WithC)
+TEST_F(KTGMCTest, ToFullRangeTest_WithC)
 {
   ToFullRangeTest(TF_MID, true);
 }
 
-TEST_F(TestBase, ToFullRangeTest_NoC)
+TEST_F(KTGMCTest, ToFullRangeTest_NoC)
 {
   ToFullRangeTest(TF_MID, false);
 }
@@ -1658,7 +1657,7 @@ TEST_F(TestBase, ToFullRangeTest_NoC)
 
 #pragma region TweakSearchClip
 
-void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1703,12 +1702,12 @@ void TestBase::TweakSearchClipTest(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, TweakSearchClipTest_WithC)
+TEST_F(KTGMCTest, TweakSearchClipTest_WithC)
 {
   TweakSearchClipTest(TF_MID, true);
 }
 
-TEST_F(TestBase, TweakSearchClipTest_NoC)
+TEST_F(KTGMCTest, TweakSearchClipTest_NoC)
 {
   TweakSearchClipTest(TF_MID, false);
 }
@@ -1717,7 +1716,7 @@ TEST_F(TestBase, TweakSearchClipTest_NoC)
 
 #pragma region LosslessProc
 
-void TestBase::LosslessProcTest(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::LosslessProcTest(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1758,12 +1757,12 @@ void TestBase::LosslessProcTest(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, LosslessProcTest_WithC)
+TEST_F(KTGMCTest, LosslessProcTest_WithC)
 {
   LosslessProcTest(TF_MID, true);
 }
 
-TEST_F(TestBase, LosslessProcTest_NoC)
+TEST_F(KTGMCTest, LosslessProcTest_NoC)
 {
   LosslessProcTest(TF_MID, false);
 }
@@ -1772,7 +1771,7 @@ TEST_F(TestBase, LosslessProcTest_NoC)
 
 #pragma region Merge
 
-void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::MergeTest(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -1817,12 +1816,12 @@ void TestBase::MergeTest(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, MergeTest_WithC)
+TEST_F(KTGMCTest, MergeTest_WithC)
 {
   MergeTest(TF_MID, true);
 }
 
-TEST_F(TestBase, MergeTest_NoC)
+TEST_F(KTGMCTest, MergeTest_NoC)
 {
   MergeTest(TF_MID, false);
 }
@@ -1831,7 +1830,7 @@ TEST_F(TestBase, MergeTest_NoC)
 
 #pragma region Weave
 
-void TestBase::WeaveTest(TEST_FRAMES tf, bool parity, bool dbl)
+void KTGMCTest::WeaveTest(TEST_FRAMES tf, bool parity, bool dbl)
 {
   PEnv env;
   try {
@@ -1880,22 +1879,22 @@ void TestBase::WeaveTest(TEST_FRAMES tf, bool parity, bool dbl)
   }
 }
 
-TEST_F(TestBase, WeaveTest_DoubleTFF)
+TEST_F(KTGMCTest, WeaveTest_DoubleTFF)
 {
   WeaveTest(TF_MID, true, true);
 }
 
-TEST_F(TestBase, WeaveTest_DoubleBFF)
+TEST_F(KTGMCTest, WeaveTest_DoubleBFF)
 {
   WeaveTest(TF_MID, false, true);
 }
 
-TEST_F(TestBase, WeaveTest_TFF)
+TEST_F(KTGMCTest, WeaveTest_TFF)
 {
   WeaveTest(TF_MID, true, false);
 }
 
-TEST_F(TestBase, WeaveTest_BFF)
+TEST_F(KTGMCTest, WeaveTest_BFF)
 {
   WeaveTest(TF_MID, false, false);
 }
@@ -1904,7 +1903,7 @@ TEST_F(TestBase, WeaveTest_BFF)
 
 #pragma region Copy
 
-void TestBase::CopyTest(TEST_FRAMES tf, bool cuda)
+void KTGMCTest::CopyTest(TEST_FRAMES tf, bool cuda)
 {
   PEnv env;
   try {
@@ -1947,12 +1946,12 @@ void TestBase::CopyTest(TEST_FRAMES tf, bool cuda)
   }
 }
 
-TEST_F(TestBase, CopyTest_CUDA)
+TEST_F(KTGMCTest, CopyTest_CUDA)
 {
   CopyTest(TF_MID, true);
 }
 
-TEST_F(TestBase, CopyTest_CPU)
+TEST_F(KTGMCTest, CopyTest_CPU)
 {
   CopyTest(TF_MID, false);
 }
@@ -1961,7 +1960,7 @@ TEST_F(TestBase, CopyTest_CPU)
 
 #pragma region ErrorAdjust
 
-void TestBase::ErrorAdjustTest(TEST_FRAMES tf, bool chroma)
+void KTGMCTest::ErrorAdjustTest(TEST_FRAMES tf, bool chroma)
 {
   PEnv env;
   try {
@@ -2004,7 +2003,7 @@ void TestBase::ErrorAdjustTest(TEST_FRAMES tf, bool chroma)
   }
 }
 
-TEST_F(TestBase, ErrorAdjustTest_WithC)
+TEST_F(KTGMCTest, ErrorAdjustTest_WithC)
 {
   ErrorAdjustTest(TF_MID, true);
 }
@@ -2013,7 +2012,7 @@ TEST_F(TestBase, ErrorAdjustTest_WithC)
 
 #pragma region NNEDI3
 
-void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn)
+void KTGMCTest::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn)
 {
   PEnv env;
   try {
@@ -2057,79 +2056,79 @@ void TestBase::NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int q
   }
 }
 
-TEST_F(TestBase, NNEDI3Test_NS0NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS0NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 0, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS1NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS1NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 1, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS2NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS2NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 2, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS3NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS3NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 3, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS4NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS4NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 4, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS5NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS5NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 5, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS6NN0Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS6NN0Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 6, 0, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS0NN1Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS0NN1Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 0, 1, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS0NN2Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS0NN2Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 0, 2, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS0NN3Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS0NN3Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 0, 3, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS0NN4Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS0NN4Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 0, 4, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NS0NN0Q2PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS0NN0Q2PS2)
 {
   NNEDI3Test(TF_MID, true, 0, 0, 2, 2);
 }
 
 // 性能評価用
-TEST_F(TestBase, NNEDI3Test_NS1NN1Q1PS2)
+TEST_F(KTGMCTest, NNEDI3Test_NS1NN1Q1PS2)
 {
   NNEDI3Test(TF_MID, true, 1, 1, 1, 2);
 }
 
-TEST_F(TestBase, NNEDI3Test_NoC)
+TEST_F(KTGMCTest, NNEDI3Test_NoC)
 {
   NNEDI3Test(TF_MID, false, 0, 0, 1, 2);
 }
 
 // 性能評価用
-TEST_F(TestBase, NNEDI3Test_Perf)
+TEST_F(KTGMCTest, NNEDI3Test_Perf)
 {
   PEnv env;
   try {
@@ -2175,7 +2174,7 @@ TEST_F(TestBase, NNEDI3Test_Perf)
 
 #pragma region AviSynthPlus
 
-TEST_F(TestBase, DeviceCheck)
+TEST_F(KTGMCTest, DeviceCheck)
 {
   PEnv env;
   try {
@@ -2196,7 +2195,7 @@ TEST_F(TestBase, DeviceCheck)
   }
 }
 
-TEST_F(TestBase, StartupTime)
+TEST_F(KTGMCTest, StartupTime)
 {
 	PEnv env;
 	try {
@@ -2237,7 +2236,7 @@ TEST_F(TestBase, StartupTime)
 #pragma endregion
 
 // 性能評価用
-TEST_F(TestBase, KTGMC_Perf)
+TEST_F(KTGMCTest, KTGMC_Perf)
 {
   PEnv env;
   try {
@@ -2275,7 +2274,7 @@ TEST_F(TestBase, KTGMC_Perf)
   }
 }
 
-TEST_F(TestBase, MemoryLeak)
+TEST_F(KTGMCTest, MemoryLeak)
 {
   PEnv env;
   try {
@@ -2303,7 +2302,7 @@ TEST_F(TestBase, MemoryLeak)
   }
 }
 
-TEST_F(TestBase, DeviceMatchingBug)
+TEST_F(KTGMCTest, DeviceMatchingBug)
 {
   PEnv env;
   try {
@@ -2332,7 +2331,7 @@ TEST_F(TestBase, DeviceMatchingBug)
 
 #pragma region MergeStatic
 
-TEST_F(TestBase, AnalyzeStaticTest)
+TEST_F(KTGMCTest, AnalyzeStaticTest)
 {
   PEnv env;
   try {
@@ -2369,7 +2368,7 @@ TEST_F(TestBase, AnalyzeStaticTest)
   }
 }
 
-TEST_F(TestBase, MergeStaticTest)
+TEST_F(KTGMCTest, MergeStaticTest)
 {
   PEnv env;
   try {
@@ -2413,7 +2412,7 @@ TEST_F(TestBase, MergeStaticTest)
 
 #pragma region Telecine
 
-TEST_F(TestBase, AnalyzeFrameTest)
+TEST_F(KTGMCTest, AnalyzeFrameTest)
 {
   PEnv env;
   try {
@@ -2450,7 +2449,7 @@ TEST_F(TestBase, AnalyzeFrameTest)
   }
 }
 
-TEST_F(TestBase, TelecineTest)
+TEST_F(KTGMCTest, TelecineTest)
 {
   PEnv env;
   try {
@@ -2488,7 +2487,7 @@ TEST_F(TestBase, TelecineTest)
   }
 }
 
-TEST_F(TestBase, RemoveCombeTest)
+TEST_F(KTGMCTest, RemoveCombeTest)
 {
 	PEnv env;
 	try {
@@ -2528,7 +2527,7 @@ TEST_F(TestBase, RemoveCombeTest)
 	}
 }
 
-TEST_F(TestBase, SwitchTest)
+TEST_F(KTGMCTest, SwitchTest)
 {
 	PEnv env;
 	try {
@@ -2577,7 +2576,7 @@ TEST_F(TestBase, SwitchTest)
 
 #pragma region TemporalNR
 
-void TestBase::TemporalNRTest(TEST_FRAMES tf)
+void KTGMCTest::TemporalNRTest(TEST_FRAMES tf)
 {
 	PEnv env;
 	try {
@@ -2614,7 +2613,7 @@ void TestBase::TemporalNRTest(TEST_FRAMES tf)
 	}
 }
 
-TEST_F(TestBase, TemporalNRTest)
+TEST_F(KTGMCTest, TemporalNRTest)
 {
 	TemporalNRTest(TF_MID);
 }
@@ -2623,7 +2622,7 @@ TEST_F(TestBase, TemporalNRTest)
 
 #pragma region Deband
 
-void TestBase::DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first)
+void KTGMCTest::DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first)
 {
 	PEnv env;
 	try {
@@ -2662,32 +2661,32 @@ void TestBase::DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first)
 	}
 }
 
-TEST_F(TestBase, DebandTest_Mode0F)
+TEST_F(KTGMCTest, DebandTest_Mode0F)
 {
 	DebandTest(TF_MID, 0, false);
 }
 
-TEST_F(TestBase, DebandTest_Mode1F)
+TEST_F(KTGMCTest, DebandTest_Mode1F)
 {
 	DebandTest(TF_MID, 1, false);
 }
 
-TEST_F(TestBase, DebandTest_Mode2F)
+TEST_F(KTGMCTest, DebandTest_Mode2F)
 {
 	DebandTest(TF_MID, 2, false);
 }
 
-TEST_F(TestBase, DebandTest_Mode0T)
+TEST_F(KTGMCTest, DebandTest_Mode0T)
 {
 	DebandTest(TF_MID, 0, true);
 }
 
-TEST_F(TestBase, DebandTest_Mode1T)
+TEST_F(KTGMCTest, DebandTest_Mode1T)
 {
 	DebandTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, DebandTest_Mode2T)
+TEST_F(KTGMCTest, DebandTest_Mode2T)
 {
 	DebandTest(TF_MID, 2, true);
 }
@@ -2696,7 +2695,7 @@ TEST_F(TestBase, DebandTest_Mode2T)
 
 #pragma region EdgeLevel
 
-void TestBase::EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma)
+void KTGMCTest::EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma)
 {
 	PEnv env;
 	try {
@@ -2733,39 +2732,39 @@ void TestBase::EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma)
 	}
 }
 
-TEST_F(TestBase, EdgeLevel_Rep0WithC)
+TEST_F(KTGMCTest, EdgeLevel_Rep0WithC)
 {
 	EdgeLevelTest(TF_MID, 0, true);
 }
 
-TEST_F(TestBase, EdgeLevel_Rep1WithC)
+TEST_F(KTGMCTest, EdgeLevel_Rep1WithC)
 {
 	EdgeLevelTest(TF_MID, 1, true);
 }
 
-TEST_F(TestBase, EdgeLevel_Rep2WithC)
+TEST_F(KTGMCTest, EdgeLevel_Rep2WithC)
 {
 	EdgeLevelTest(TF_MID, 2, true);
 }
 
-TEST_F(TestBase, EdgeLevel_Rep0NoC)
+TEST_F(KTGMCTest, EdgeLevel_Rep0NoC)
 {
 	EdgeLevelTest(TF_MID, 0, false);
 }
 
-TEST_F(TestBase, EdgeLevel_Rep1NoC)
+TEST_F(KTGMCTest, EdgeLevel_Rep1NoC)
 {
 	EdgeLevelTest(TF_MID, 1, false);
 }
 
-TEST_F(TestBase, EdgeLevel_Rep2NoC)
+TEST_F(KTGMCTest, EdgeLevel_Rep2NoC)
 {
 	EdgeLevelTest(TF_MID, 2, false);
 }
 
 #pragma endregion
 
-TEST_F(TestBase, DISABLED_DumpAVSProperty)
+TEST_F(KTGMCTest, DISABLED_DumpAVSProperty)
 {
 	PEnv env;
 	try {
@@ -2948,15 +2947,3 @@ TEST_F(TestBase, DISABLED_DumpAVSProperty)
 		GTEST_FAIL();
 	}
 }
-
-int main(int argc, char **argv)
-{
-	::testing::GTEST_FLAG(filter) = "TestBase.SwitchTest*";
-	::testing::InitGoogleTest(&argc, argv);
-	int result = RUN_ALL_TESTS();
-
-	getchar();
-
-	return result;
-}
-
