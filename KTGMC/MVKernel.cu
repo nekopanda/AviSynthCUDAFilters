@@ -1345,6 +1345,7 @@ __global__ void kl_mean_global_mv(const short2* vectors, int vectorsPitch, int n
   meanvy = red_vy[tid];
   num = red_num[tid];
   if (tid < 32) {
+#if CUDART_VERSION >= 9000
     meanvx += __shfl_down_sync(0xffffffff, meanvx, 16);
     meanvy += __shfl_down_sync(0xffffffff, meanvy, 16);
     num += __shfl_down_sync(0xffffffff, num, 16);
@@ -1360,7 +1361,23 @@ __global__ void kl_mean_global_mv(const short2* vectors, int vectorsPitch, int n
     meanvx += __shfl_down_sync(0xffffffff, meanvx, 1);
     meanvy += __shfl_down_sync(0xffffffff, meanvy, 1);
     num += __shfl_down_sync(0xffffffff, num, 1);
-
+#else
+    meanvx += __shfl_down(meanvx, 16);
+    meanvy += __shfl_down(meanvy, 16);
+    num += __shfl_down(num, 16);
+    meanvx += __shfl_down(meanvx, 8);
+    meanvy += __shfl_down(meanvy, 8);
+    num += __shfl_down(num, 8);
+    meanvx += __shfl_down(meanvx, 4);
+    meanvy += __shfl_down(meanvy, 4);
+    num += __shfl_down(num, 4);
+    meanvx += __shfl_down(meanvx, 2);
+    meanvy += __shfl_down(meanvy, 2);
+    num += __shfl_down(num, 2);
+    meanvx += __shfl_down(meanvx, 1);
+    meanvy += __shfl_down(meanvy, 1);
+    num += __shfl_down(num, 1);
+#endif
     if (tid == 0) {
       globalMVec[blockIdx.y].x = 2 * meanvx / num;
       globalMVec[blockIdx.y].y = 2 * meanvy / num;

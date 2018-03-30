@@ -1861,7 +1861,11 @@ __global__ void kl_detect_combe(pixel_t* flagp, int fpitch,
 		int4 diffO = absdiff(L0, L1) + absdiff(L1, L3) + absdiff(L3, L5) + absdiff(L5, L7) - diff8;
 		int4 score = diffT - diffE - diffO;
 		int sum = score.x + score.y + score.z + score.w;
+#if CUDART_VERSION >= 9000
 		sum += __shfl_down_sync(0xffffffff, sum, 1);
+#else
+		sum += __shfl_up(sum, 1);
+#endif
 		if (tx == 0) {
 			flagp[(bx + 1) + (by + 1) * fpitch] = clamp(sum >> shift, 0, 255);
 		}

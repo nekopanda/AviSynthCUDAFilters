@@ -24,11 +24,19 @@ __device__ void dev_reduce_warp(int tid, T& value)
 {
   REDUCER red;
   // warp shuffle‚Åreduce
+#if CUDART_VERSION >= 9000
   if (MAX >= 32) red(value, __shfl_down_sync(0xffffffff, value, 16));
   if (MAX >= 16) red(value, __shfl_down_sync(0xffffffff, value, 8));
   if (MAX >= 8) red(value, __shfl_down_sync(0xffffffff, value, 4));
   if (MAX >= 4) red(value, __shfl_down_sync(0xffffffff, value, 2));
   if (MAX >= 2) red(value, __shfl_down_sync(0xffffffff, value, 1));
+#else
+  if (MAX >= 32) red(value, __shfl_down(value, 16));
+  if (MAX >= 16) red(value, __shfl_down(value, 8));
+  if (MAX >= 8) red(value, __shfl_down(value, 4));
+  if (MAX >= 4) red(value, __shfl_down(value, 2));
+  if (MAX >= 2) red(value, __shfl_down(value, 1));
+#endif
 }
 
 // MAX‚Í2‚×‚«‚Ì‚Ý‘Î‰ž
@@ -83,28 +91,53 @@ __device__ void dev_reduce2_warp(int tid, K& key, V& value)
 {
   REDUCER red;
   if (MAX >= 32) {
+#if CUDART_VERSION >= 9000
     K okey = __shfl_down_sync(0xffffffff, key, 16);
     V ovalue = __shfl_down_sync(0xffffffff, value, 16);
+#else
+    K okey = __shfl_down(key, 16);
+    V ovalue = __shfl_down(value, 16);
+#endif
     red(key, value, okey, ovalue);
   }
   if (MAX >= 16) {
+#if CUDART_VERSION >= 9000
     K okey = __shfl_down_sync(0xffffffff, key, 8);
     V ovalue = __shfl_down_sync(0xffffffff, value, 8);
+#else
+    K okey = __shfl_down(key, 8);
+    V ovalue = __shfl_down(value, 8);
+#endif
     red(key, value, okey, ovalue);
   }
   if (MAX >= 8) {
+#if CUDART_VERSION >= 9000
     K okey = __shfl_down_sync(0xffffffff, key, 4);
     V ovalue = __shfl_down_sync(0xffffffff, value, 4);
+#else
+    K okey = __shfl_down(key, 4);
+    V ovalue = __shfl_down(value, 4);
+#endif
     red(key, value, okey, ovalue);
   }
   if (MAX >= 4) {
+#if CUDART_VERSION >= 9000
     K okey = __shfl_down_sync(0xffffffff, key, 2);
     V ovalue = __shfl_down_sync(0xffffffff, value, 2);
+#else
+    K okey = __shfl_down(key, 2);
+    V ovalue = __shfl_down(value, 2);
+#endif
     red(key, value, okey, ovalue);
   }
   if (MAX >= 2) {
+#if CUDART_VERSION >= 9000
     K okey = __shfl_down_sync(0xffffffff, key, 1);
     V ovalue = __shfl_down_sync(0xffffffff, value, 1);
+#else
+    K okey = __shfl_down(key, 1);
+    V ovalue = __shfl_down(value, 1);
+#endif
     red(key, value, okey, ovalue);
   }
 }
@@ -163,23 +196,43 @@ __device__ void dev_scan_warp(int tid, T& value)
   REDUCER red;
   // warp shuffle‚Åscan
   if (MAX >= 2) {
+#if CUDART_VERSION >= 9000
     T tmp = __shfl_up_sync(0xffffffff, value, 1);
+#else
+    T tmp = __shfl_up(value, 1);
+#endif
     if (tid >= 1) red(value, tmp);
   }
   if (MAX >= 4) {
+#if CUDART_VERSION >= 9000
     T tmp = __shfl_up_sync(0xffffffff, value, 2);
+#else
+    T tmp = __shfl_up(value, 2);
+#endif
     if (tid >= 2) red(value, tmp);
   }
   if (MAX >= 8) {
+#if CUDART_VERSION >= 9000
     T tmp = __shfl_up_sync(0xffffffff, value, 4);
+#else
+    T tmp = __shfl_up(value, 4);
+#endif
     if (tid >= 4) red(value, tmp);
   }
   if (MAX >= 16) {
+#if CUDART_VERSION >= 9000
     T tmp = __shfl_up_sync(0xffffffff, value, 8);
+#else
+    T tmp = __shfl_up(value, 8);
+#endif
     if (tid >= 8) red(value, tmp);
   }
   if (MAX >= 32) {
+#if CUDART_VERSION >= 9000
     T tmp = __shfl_up_sync(0xffffffff, value, 16);
+#else
+    T tmp = __shfl_up(value, 16);
+#endif
     if (tid >= 16) red(value, tmp);
   }
 }
