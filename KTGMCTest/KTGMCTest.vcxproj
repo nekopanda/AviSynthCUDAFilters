@@ -164,7 +164,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="KTGMCTest.cpp" />
+    <ClCompile Include="MaskToolsTest.cpp" />
+    <ClCompile Include="TestCommons.cpp" />
     <ClCompile Include="TestMain.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="TestCommons.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

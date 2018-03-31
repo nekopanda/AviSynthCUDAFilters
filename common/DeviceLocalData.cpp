@@ -1,5 +1,8 @@
 
+#include "CommonFunctions.h"
 #include "DeviceLocalData.h"
+
+#include <cuda_runtime.h>
 
 DeviceLocalBase::DeviceLocalBase(const void* init_data, size_t length, IScriptEnvironment2* env)
   : length(length)

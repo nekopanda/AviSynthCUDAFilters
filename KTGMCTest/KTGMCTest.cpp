@@ -1,73 +1,10 @@
 
-#define _CRT_SECURE_NO_WARNINGS
-#define NOMINMAX
-#include <Windows.h>
-
-#include "gtest/gtest.h"
-
-#define AVS_LINKAGE_DLLIMPORT
-#include "avisynth.h"
-
-#include <fstream>
-#include <string>
-#include <iostream>
-#include <memory>
-
-#define O_C(n) ".OnCUDA(" #n ", 1)"
-
-std::string GetDirectoryName(const std::string& filename)
-{
-	std::string directory;
-	const size_t last_slash_idx = filename.rfind('\\');
-	if (std::string::npos != last_slash_idx)
-	{
-		directory = filename.substr(0, last_slash_idx);
-	}
-	return directory;
-}
-
-struct ScriptEnvironmentDeleter {
-  void operator()(IScriptEnvironment* env) {
-    env->DeleteScriptEnvironment();
-  }
-};
-
-typedef std::unique_ptr<IScriptEnvironment2, ScriptEnvironmentDeleter> PEnv;
+#include "TestCommons.h"
 
 // テスト対象となるクラス Foo のためのフィクスチャ
-class KTGMCTest : public ::testing::Test {
+class KTGMCTest : public AvsTestBase {
 protected:
 	KTGMCTest() { }
-
-	virtual ~KTGMCTest() {
-		// テスト毎に実行される，例外を投げない clean-up をここに書きます．
-	}
-
-	// コンストラクタとデストラクタでは不十分な場合．
-	// 以下のメソッドを定義することができます：
-
-	virtual void SetUp() {
-		// このコードは，コンストラクタの直後（各テストの直前）
-		// に呼び出されます．
-		char buf[MAX_PATH];
-		GetModuleFileName(nullptr, buf, MAX_PATH);
-		modulePath = GetDirectoryName(buf);
-		workDirPath = GetDirectoryName(GetDirectoryName(modulePath)) + "\\TestScripts";
-	}
-
-	virtual void TearDown() {
-		// このコードは，各テストの直後（デストラクタの直前）
-		// に呼び出されます．
-	}
-
-	std::string modulePath;
-	std::string workDirPath;
-
-  enum TEST_FRAMES {
-    TF_MID, TF_BEGIN, TF_END
-  };
-
-  void GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env);
 
   void MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level);
   void AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
@@ -107,34 +44,6 @@ protected:
 	void DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first);
 	void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
 };
-
-void KTGMCTest::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
-{
-  int nframes = clip->GetVideoInfo().num_frames;
-  switch (tf) {
-  case TF_MID:
-    for (int i = 0; i < 8; ++i) {
-      clip->GetFrame(100 + i, env);
-    }
-    break;
-  case TF_BEGIN:
-    clip->GetFrame(0, env);
-    clip->GetFrame(1, env);
-    clip->GetFrame(2, env);
-    clip->GetFrame(3, env);
-    clip->GetFrame(4, env);
-    clip->GetFrame(5, env);
-    break;
-  case TF_END:
-    clip->GetFrame(nframes - 6, env);
-    clip->GetFrame(nframes - 5, env);
-    clip->GetFrame(nframes - 4, env);
-    clip->GetFrame(nframes - 3, env);
-    clip->GetFrame(nframes - 2, env);
-    clip->GetFrame(nframes - 1, env);
-    break;
-  }
-}
 
 #pragma region MSuper
 
