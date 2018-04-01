@@ -33,6 +33,11 @@ template <> struct VectorType<unsigned short> {
   typedef ushort4 type;
 };
 
+static int scaleParam(float thresh, int pixelBits)
+{
+   return (int)(thresh * (1 << (pixelBits - 8)) + 0.5f);
+}
+
 int Get8BitType(VideoInfo& vi) {
   if (vi.Is420()) return VideoInfo::CS_YV12;
   else if (vi.Is422()) return VideoInfo::CS_YV16;
@@ -2918,6 +2923,182 @@ public:
 	}
 };
 
+template <typename vpixel_t>
+void cpu_calc_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, unsigned long long int *sum)
+{
+   for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+         int4 combe = CalcCombe(
+            to_int(ptr[x + (y - 2) * pitch]),
+            to_int(ptr[x + (y - 1) * pitch]),
+            to_int(ptr[x + (y + 0) * pitch]),
+            to_int(ptr[x + (y + 1) * pitch]),
+            to_int(ptr[x + (y + 2) * pitch]));
+
+         *sum += ((combe.x > nt) ? combe.x : 0);
+         *sum += ((combe.y > nt) ? combe.y : 0);
+         *sum += ((combe.z > nt) ? combe.z : 0);
+         *sum += ((combe.w > nt) ? combe.w : 0);
+      }
+   }
+}
+
+enum {
+   CALC_FIELD_DIFF_X = 16,
+   CALC_FIELD_DIFF_Y = 16,
+   CALC_FIELD_DIFF_THREADS = CALC_FIELD_DIFF_X * CALC_FIELD_DIFF_Y
+};
+
+__global__ void kl_init_field_diff(unsigned long long int *sum)
+{
+   sum[threadIdx.x] = 0;
+}
+
+template <typename vpixel_t>
+__global__ void kl_calculate_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, unsigned long long int *sum)
+{
+   int x = threadIdx.x + blockIdx.x * blockDim.x;
+   int y = threadIdx.y + blockIdx.y * blockDim.y;
+   int tid = threadIdx.x + threadIdx.y * CALC_FIELD_DIFF_X;
+
+   int tmpsum = 0;
+   if (x < width && y < height) {
+      int4 combe = CalcCombe(
+         to_int(ptr[x + (y - 2) * pitch]),
+         to_int(ptr[x + (y - 1) * pitch]),
+         to_int(ptr[x + (y + 0) * pitch]),
+         to_int(ptr[x + (y + 1) * pitch]),
+         to_int(ptr[x + (y + 2) * pitch]));
+
+      tmpsum += ((combe.x > nt) ? combe.x : 0);
+      tmpsum += ((combe.y > nt) ? combe.y : 0);
+      tmpsum += ((combe.z > nt) ? combe.z : 0);
+      tmpsum += ((combe.w > nt) ? combe.w : 0);
+   }
+
+   __shared__ int sbuf[CALC_FIELD_DIFF_THREADS];
+   dev_reduce<int, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, tmpsum, sbuf);
+
+   if (tid == 0) {
+      atomicAdd(sum, tmpsum);
+   }
+}
+
+class KFieldDiff : public KFMFilterBase
+{
+   int nt6;
+   bool chroma;
+
+   VideoInfo padvi;
+   VideoInfo workvi;
+
+   template <typename pixel_t>
+   unsigned long long int CalcFieldDiff(PVideoFrame& frame, PVideoFrame& work, IScriptEnvironment2* env)
+   {
+      typedef typename VectorType<pixel_t>::type vpixel_t;
+      const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(frame->GetReadPtr(PLANAR_Y));
+      const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(frame->GetReadPtr(PLANAR_U));
+      const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(frame->GetReadPtr(PLANAR_V));
+      unsigned long long int* sum = reinterpret_cast<unsigned long long int*>(work->GetWritePtr());
+
+      int pitchY = frame->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+      int pitchUV = frame->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+      int width4 = vi.width >> 2;
+      int width4UV = width4 >> logUVx;
+      int heightUV = vi.height >> logUVy;
+
+      if (IS_CUDA) {
+         dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
+         dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+         dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+         kl_init_field_diff << <1, 1 >> > (sum);
+         DEBUG_SYNC;
+         kl_calculate_field_diff << <blocks, threads >> >(srcY, nt6, width4, vi.height, pitchY, sum);
+         DEBUG_SYNC;
+         if (chroma) {
+            kl_calculate_field_diff << <blocksUV, threads >> > (srcU, nt6, width4UV, heightUV, pitchUV, sum);
+            DEBUG_SYNC;
+            kl_calculate_field_diff << <blocksUV, threads >> > (srcV, nt6, width4UV, heightUV, pitchUV, sum);
+            DEBUG_SYNC;
+         }
+         long long int result;
+         CUDA_CHECK(cudaMemcpy(&result, sum, sizeof(sum), cudaMemcpyDeviceToHost));
+         return result;
+      }
+      else {
+         *sum = 0;
+         cpu_calc_field_diff(srcY, nt6, width4, vi.height, pitchY, sum);
+         if (chroma) {
+            cpu_calc_field_diff(srcU, nt6, width4UV, heightUV, pitchUV, sum);
+            cpu_calc_field_diff(srcV, nt6, width4UV, heightUV, pitchUV, sum);
+         }
+         return *sum;
+      }
+   }
+
+   template <typename pixel_t>
+   double InternalFieldDiff(int n, IScriptEnvironment2* env)
+   {
+      PVideoFrame src = child->GetFrame(n, env);
+      PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
+      PVideoFrame work = env->NewVideoFrame(workvi);
+
+      CopyFrame<pixel_t>(src, padded, env);
+      PadFrame<pixel_t>(padded, env);
+      auto raw = CalcFieldDiff<pixel_t>(padded, work, env);
+
+      int shift = vi.BitsPerComponent() - 8; // 8bit‚É‡‚í‚¹‚é
+      return (double)((raw / 6) >> shift);
+   }
+
+public:
+   KFieldDiff(PClip clip, float nt, bool chroma)
+      : KFMFilterBase(clip)
+      , nt6(scaleParam(nt * 6, vi.BitsPerComponent()))
+      , chroma(chroma)
+      , padvi(vi)
+   {
+      padvi.height += VPAD * 2;
+
+      int work_bytes = sizeof(long long int);
+      workvi.pixel_type = VideoInfo::CS_BGR32;
+      workvi.width = 4;
+      workvi.height = nblocks(work_bytes, workvi.width * 4);
+   }
+
+   AVSValue ConditionalFieldDiff(int n, IScriptEnvironment* env_)
+   {
+      IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+      int pixelSize = vi.ComponentSize();
+      switch (pixelSize) {
+      case 1:
+         return InternalFieldDiff<uint8_t>(n, env);
+      case 2:
+         return InternalFieldDiff<uint16_t>(n, env);
+      default:
+         env->ThrowError("[KFieldDiff] Unsupported pixel format");
+      }
+
+      return 0;
+   }
+
+   static AVSValue __cdecl CFunc(AVSValue args, void* user_data, IScriptEnvironment* env)
+   {
+      AVSValue cnt = env->GetVar("current_frame");
+      if (!cnt.IsInt()) {
+         env->ThrowError("[KCFieldDiff] This filter can only be used within ConditionalFilter!");
+      }
+      int n = cnt.AsInt();
+      std::unique_ptr<KFieldDiff> f = std::unique_ptr<KFieldDiff>(new KFieldDiff(
+         args[0].AsClip(),    // clip
+         (float)args[1].AsFloat(3),    // nt
+         args[2].AsBool(true) // chroma
+      ));
+      return f->ConditionalFieldDiff(n, env);
+   }
+};
+
 class AssertOnCUDA : public GenericVideoFilter
 {
 public:
@@ -2952,6 +3133,8 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 	env->AddFunction("KRemoveCombeCheck", "cc", KRemoveCombeCheck::Create, 0);
 
 	env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
+
+   env->AddFunction("KCFieldDiff", "c[nt]f[chroma]b", KFieldDiff::CFunc, 0);
 
 	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }

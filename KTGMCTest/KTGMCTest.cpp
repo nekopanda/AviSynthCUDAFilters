@@ -43,6 +43,8 @@ protected:
 	void TemporalNRTest(TEST_FRAMES tf);
 	void DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first);
 	void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
+
+   void CFieldDiffTest(int nt, bool chroma);
 };
 
 #pragma region MSuper
@@ -2669,6 +2671,72 @@ TEST_F(KTGMCTest, EdgeLevel_Rep1NoC)
 TEST_F(KTGMCTest, EdgeLevel_Rep2NoC)
 {
 	EdgeLevelTest(TF_MID, 2, false);
+}
+
+#pragma endregion
+
+#pragma region CFieldDiff
+
+void KTGMCTest::CFieldDiffTest(int nt, bool chroma)
+{
+   PEnv env;
+   try {
+      env = PEnv(CreateScriptEnvironment2());
+
+      AVSValue result;
+      std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+      env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+      std::string ktgmcPath = modulePath + "\\KFM.dll";
+      env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+      std::string scriptpath = workDirPath + "\\script.avs";
+
+      std::ofstream out(scriptpath);
+
+      out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+      out << "srcuda = src.OnCPU(0)" << std::endl;
+
+      out << "current_frame = 100" << std::endl;
+      out << "ref = src.CFieldDiff(nt = " << nt << ", chroma=" << (chroma ? "true" : "false") << ")" << std::endl;
+      out << "cuda = EvalOnCUDA(\"srcuda.KCFieldDiff(nt = " << nt << ", chroma=" << (chroma ? "true" : "false") << ")\")" << std::endl;
+
+      out.close();
+
+      {
+         env->Invoke("Import", scriptpath.c_str());
+         double ref = env->GetVar("ref").AsFloat();
+         double cuda = env->GetVar("cuda").AsFloat();
+         // 境界の扱いが異なるので（多分）一致しない
+         // 差が1%未満であることを確認
+         if (std::abs(ref - cuda) / ref >= 0.01) {
+            printf("誤差が大きすぎます %f vs %f\n", ref, cuda);
+         }
+      }
+   }
+   catch (const AvisynthError& err) {
+      printf("%s\n", err.msg);
+      GTEST_FAIL();
+   }
+}
+
+TEST_F(KTGMCTest, CFieldDiff_Nt0WithC)
+{
+   CFieldDiffTest(0, true);
+}
+
+TEST_F(KTGMCTest, CFieldDiff_Nt0NoC)
+{
+   CFieldDiffTest(0, false);
+}
+
+TEST_F(KTGMCTest, CFieldDiff_Nt3WithC)
+{
+   CFieldDiffTest(3, true);
+}
+
+TEST_F(KTGMCTest, CFieldDiff_Nt3NoC)
+{
+   CFieldDiffTest(3, false);
 }
 
 #pragma endregion
