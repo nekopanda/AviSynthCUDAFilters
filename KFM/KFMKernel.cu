@@ -3099,6 +3099,264 @@ public:
    }
 };
 
+
+void cpu_init_block_sum(int *sumAbs, int* sumSig, int length)
+{
+  for(int x = 0; x < length; ++x) {
+    sumAbs[x] = 0;
+    sumSig[x] = 0;
+  }
+}
+
+template <typename vpixel_t, int BLOCK_SIZE, int TH_Z>
+void cpu_add_block_sum(
+  const vpixel_t* __restrict__ src0,
+  const vpixel_t* __restrict__ src1,
+  int width, int height, int pitch,
+  int blocks_w, int blocks_h, int block_pitch, 
+  int *sumAbs, int* sumSig)
+{
+  for (int by = 0; by < blocks_h; ++by) {
+    for (int bx = 0; bx < blocks_w; ++bx) {
+      int abssum = 0;
+      int sigsum = 0;
+      for (int ty = 0; ty < BLOCK_SIZE; ++ty) {
+        for (int tx = 0; tx < BLOCK_SIZE / 4; ++tx) {
+          int x = tx + bx * blocks_w;
+          int y = ty + by * blocks_h;
+          if (x < width && y < height) {
+            auto s0 = src0[x + y * pitch];
+            auto s1 = src1[x + y * pitch];
+            auto t0 = absdiff(s0, s1);
+            auto t1 = to_int(s0) - to_int(s1);
+            abssum += t0.x + t0.y + t0.z + t0.w;
+            sigsum += t1.x + t1.y + t1.z + t1.w;
+          }
+        }
+      }
+      sumAbs[bx + by * block_pitch] += absbum;
+      sumSig[bx + by * block_pitch] += abssig;
+    }
+  }
+}
+
+__global__ void kl_init_block_sum(int *sumAbs, int* sumSig, int length)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  if (x < length) {
+    sumAbs[x] = 0;
+    sumSig[x] = 0;
+  }
+}
+
+template <typename vpixel_t, int BLOCK_SIZE, int TH_Z>
+__global__ void kl_add_block_sum(
+  const vpixel_t* __restrict__ src0,
+  const vpixel_t* __restrict__ src1,
+  int width, int height, int pitch, 
+  int blocks_w, int blocks_h, int block_pitch,
+  int *sumAbs, int* sumSig)
+{
+  // blockDim.x == BLOCK_SIZE/4
+  // blockDim.y == BLOCK_SIZE
+  int bx = threadIdx.z + TH_Z * blockIdx.x;
+  int by = blockIdx.y;
+  int x = threadIdx.x + (BLOCK_SIZE/4) * bx;
+  int y = threadIdx.y + BLOCK_SIZE * by;
+  int tz = threadIdx.z;
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
+
+  int abssum = 0;
+  int sigsum = 0;
+  if (x < width && y < height) {
+    auto s0 = src0[x + y * pitch];
+    auto s1 = src1[x + y * pitch];
+    auto t0 = absdiff(s0, s1);
+    auto t1 = to_int(s0) - to_int(s1);
+    abssum = t0.x + t0.y + t0.z + t0.w;
+    sigsum = t1.x + t1.y + t1.z + t1.w;
+  }
+
+  __shared__ int sbuf[TH_Z][BLOCK_SIZE*BLOCK_SIZE/4];
+  dev_reduce<int, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, abssum, sbuf[tz]);
+  dev_reduce<int, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, sigsum, sbuf[tz]);
+
+  if (tid == 0) {
+    atomicAdd(&sumAbs[bx + by * block_pitch], abssum);
+    atomicAdd(&sumSig[bx + by * block_pitch], sigsum);
+  }
+}
+
+void cpu_block_sum_max(
+  const int4* sumAbs, const int4* sumSig,
+  int blocks_w, int blocks_h, int block_pitch,
+  int* highest_sum)
+{
+  int tmpmax = 0;
+  for (int y = 0; y < blocks_h; ++y) {
+    for (int x = 0; x < blocks_w; ++x) {
+      int4 metric = sumAbs[x + y * block_pitch] + sumSig[x + y * block_pitch] * 4;
+      tmpmax = max(tmpmax, max(max(metric.x, metric.y), max(metric.z, metric.w)));
+    }
+  }
+  *highest_sum = tmpmax;
+}
+
+__global__ void kl_block_sum_max(
+  const int4* sumAbs, const int4* sumSig,
+  int blocks_w, int blocks_h, int block_pitch, 
+  int* highest_sum)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  int tid = threadIdx.x + threadIdx.y * CALC_FIELD_DIFF_X;
+
+  int tmpmax = 0;
+  if (x < blocks_w && y < blocks_h) {
+    int4 metric = sumAbs[x + y * block_pitch] + sumSig[x + y * block_pitch] * 4;
+    tmpmax = max(max(metric.x, metric.y), max(metric.z, metric.w));
+  }
+
+  __shared__ int sbuf[CALC_FIELD_DIFF_THREADS];
+  dev_reduce<int, CALC_FIELD_DIFF_THREADS, MaxReducer<int>>(tid, tmpmax, sbuf);
+
+  if (tid == 0) {
+    atomicMax(highest_sum, tmpmax);
+  }
+}
+
+class KFrameDiffDup : public KFMFilterBase
+{
+  bool chroma;
+  int blocksize;
+
+  int logUVx;
+  int logUVy;
+
+  int th_z, th_uv_z;
+  int blocks_w, blocks_h, block_pitch;
+  VideoInfo workvi;
+
+  template <typename pixel_t>
+  int CalcFrameDiff(PVideoFrame& src0, PVideoFrame& src1, PVideoFrame& work, IScriptEnvironment2* env)
+  {
+    typedef typename VectorType<pixel_t>::type vpixel_t;
+    const vpixel_t* src0Y = reinterpret_cast<const vpixel_t*>(src0->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src0U = reinterpret_cast<const vpixel_t*>(src0->GetReadPtr(PLANAR_U));
+    const vpixel_t* src0V = reinterpret_cast<const vpixel_t*>(src0->GetReadPtr(PLANAR_V));
+    const vpixel_t* src1Y = reinterpret_cast<const vpixel_t*>(src1->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src1U = reinterpret_cast<const vpixel_t*>(src1->GetReadPtr(PLANAR_U));
+    const vpixel_t* src1V = reinterpret_cast<const vpixel_t*>(src1->GetReadPtr(PLANAR_V));
+    int* sumAbs = reinterpret_cast<int*>(work->GetWritePtr());
+    int* sumSig = &sumAbs[block_pitch * blocks_h];
+    int* maxSum = &sumSig[block_pitch * blocks_h];
+
+    // TODO:
+
+    int pitchY = frame->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+    int pitchUV = frame->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int width4 = vi.width >> 2;
+    int width4UV = width4 >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    if (IS_CUDA) {
+      dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+      kl_init_field_diff << <1, 1 >> > (sum);
+      DEBUG_SYNC;
+      kl_calculate_field_diff << <blocks, threads >> >(srcY, nt6, width4, vi.height, pitchY, sum);
+      DEBUG_SYNC;
+      if (chroma) {
+        kl_calculate_field_diff << <blocksUV, threads >> > (srcU, nt6, width4UV, heightUV, pitchUV, sum);
+        DEBUG_SYNC;
+        kl_calculate_field_diff << <blocksUV, threads >> > (srcV, nt6, width4UV, heightUV, pitchUV, sum);
+        DEBUG_SYNC;
+      }
+      long long int result;
+      CUDA_CHECK(cudaMemcpy(&result, sum, sizeof(sum), cudaMemcpyDeviceToHost));
+      return result;
+    }
+    else {
+      *sum = 0;
+      cpu_calc_field_diff(srcY, nt6, width4, vi.height, pitchY, sum);
+      if (chroma) {
+        cpu_calc_field_diff(srcU, nt6, width4UV, heightUV, pitchUV, sum);
+        cpu_calc_field_diff(srcV, nt6, width4UV, heightUV, pitchUV, sum);
+      }
+      return *sum;
+    }
+  }
+
+  template <typename pixel_t>
+  int InternalFrameDiff(int n, IScriptEnvironment2* env)
+  {
+    PVideoFrame src0 = child->GetFrame(clamp(n - 1, 0, vi.num_frames - 1), env);
+    PVideoFrame src1 = child->GetFrame(clamp(n, 0, vi.num_frames - 1), env);
+    PVideoFrame work = env->NewVideoFrame(workvi);
+
+    auto raw = CalcFrameDiff<pixel_t>(src0, src1, work, env);
+
+    int shift = vi.BitsPerComponent() - 8; // 8bit‚É‡‚í‚¹‚é
+    return (raw >> shift);
+  }
+
+public:
+  KFrameDiffDup(PClip clip, bool chroma, int blocksize)
+    : KFMFilterBase(clip)
+    , chroma(chroma)
+    , blocksize(blocksize)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    blocks_w = nblocks(vi.width, blocksize);
+    blocks_h = nblocks(vi.height, blocksize);
+
+    th_z = 256 / (blocksize * (blocksize / 4));
+    th_uv_z = th_z * (chroma ? (1 << (logUVx + logUVy)) : 1);
+
+    int block_align = max(4, th_uv_z);
+    block_pitch = nblocks(blocks_w, block_align) * block_align;
+
+    int work_bytes = sizeof(int) * block_pitch * blocks_h * 2 + sizeof(int);
+    workvi.pixel_type = VideoInfo::CS_BGR32;
+    workvi.width = 4;
+    workvi.height = nblocks(work_bytes, workvi.width * 4);
+  }
+
+  AVSValue ConditionalFrameDiff(int n, IScriptEnvironment* env_)
+  {
+    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return InternalFrameDiff<uint8_t>(n, env);
+    case 2:
+      return InternalFrameDiff<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KFrameDiffDup] Unsupported pixel format");
+    }
+
+    return 0;
+  }
+
+  static AVSValue __cdecl CFunc(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    AVSValue cnt = env->GetVar("current_frame");
+    if (!cnt.IsInt()) {
+      env->ThrowError("[KFrameDiffDup] This filter can only be used within ConditionalFilter!");
+    }
+    int n = cnt.AsInt();
+    std::unique_ptr<KFrameDiffDup> f = std::unique_ptr<KFrameDiffDup>(new KFrameDiffDup(
+      args[0].AsClip(),     // clip
+      args[1].AsBool(true), // chroma
+      args[2].AsInt(32)     // blocksize
+    ));
+    return f->ConditionalFrameDiff(n, env);
+  }
+};
+
 class AssertOnCUDA : public GenericVideoFilter
 {
 public:
@@ -3134,7 +3392,8 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 
 	env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
 
-   env->AddFunction("KCFieldDiff", "c[nt]f[chroma]b", KFieldDiff::CFunc, 0);
+  env->AddFunction("KCFieldDiff", "c[nt]f[chroma]b", KFieldDiff::CFunc, 0);
+  env->AddFunction("KFrameDiffDup", "c[threshold]f[chroma]b[blksize]i", KFrameDiffDup::CFunc, 0);
 
 	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }

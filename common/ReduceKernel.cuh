@@ -9,6 +9,11 @@ struct AddReducer {
 };
 
 template <typename T>
+struct MaxReducer {
+  __device__ void operator()(T& v, T o) { v = max(v, o); }
+};
+
+template <typename T>
 struct MaxIndexReducer {
 	__device__ void operator()(T& cnt, int& idx, T ocnt, int oidx) {
     if (ocnt > cnt) {
