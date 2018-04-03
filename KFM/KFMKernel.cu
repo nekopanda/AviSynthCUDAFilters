@@ -3046,9 +3046,10 @@ class KFieldDiff : public KFMFilterBase
       CopyFrame<pixel_t>(src, padded, env);
       PadFrame<pixel_t>(padded, env);
       auto raw = CalcFieldDiff<pixel_t>(padded, work, env);
+      raw /= 6; // åvéZéÆÇ©ÇÁ
 
       int shift = vi.BitsPerComponent() - 8; // 8bitÇ…çáÇÌÇπÇÈ
-      return (double)((raw / 6) >> shift);
+      return (double)(raw >> shift);
    }
 
 public:
@@ -3100,18 +3101,19 @@ public:
 };
 
 
-void cpu_init_block_sum(int *sumAbs, int* sumSig, int length)
+void cpu_init_block_sum(int *sumAbs, int* sumSig, int* maxSum, int length)
 {
   for(int x = 0; x < length; ++x) {
     sumAbs[x] = 0;
     sumSig[x] = 0;
   }
+  maxSum[0] = 0;
 }
 
 template <typename vpixel_t, int BLOCK_SIZE, int TH_Z>
 void cpu_add_block_sum(
-  const vpixel_t* __restrict__ src0,
-  const vpixel_t* __restrict__ src1,
+  const vpixel_t* src0,
+  const vpixel_t* src1,
   int width, int height, int pitch,
   int blocks_w, int blocks_h, int block_pitch, 
   int *sumAbs, int* sumSig)
@@ -3122,8 +3124,8 @@ void cpu_add_block_sum(
       int sigsum = 0;
       for (int ty = 0; ty < BLOCK_SIZE; ++ty) {
         for (int tx = 0; tx < BLOCK_SIZE / 4; ++tx) {
-          int x = tx + bx * blocks_w;
-          int y = ty + by * blocks_h;
+          int x = tx + bx * BLOCK_SIZE / 4;
+          int y = ty + by * BLOCK_SIZE;
           if (x < width && y < height) {
             auto s0 = src0[x + y * pitch];
             auto s1 = src1[x + y * pitch];
@@ -3134,18 +3136,21 @@ void cpu_add_block_sum(
           }
         }
       }
-      sumAbs[bx + by * block_pitch] += absbum;
-      sumSig[bx + by * block_pitch] += abssig;
+      sumAbs[bx + by * block_pitch] += abssum;
+      sumSig[bx + by * block_pitch] += sigsum;
     }
   }
 }
 
-__global__ void kl_init_block_sum(int *sumAbs, int* sumSig, int length)
+__global__ void kl_init_block_sum(int *sumAbs, int* sumSig, int* maxSum, int length)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   if (x < length) {
     sumAbs[x] = 0;
     sumSig[x] = 0;
+  }
+  if (x == 0) {
+    maxSum[0] = 0;
   }
 }
 
@@ -3159,6 +3164,7 @@ __global__ void kl_add_block_sum(
 {
   // blockDim.x == BLOCK_SIZE/4
   // blockDim.y == BLOCK_SIZE
+  enum { PIXELS = BLOCK_SIZE * BLOCK_SIZE / 4 };
   int bx = threadIdx.z + TH_Z * blockIdx.x;
   int by = blockIdx.y;
   int x = threadIdx.x + (BLOCK_SIZE/4) * bx;
@@ -3177,14 +3183,28 @@ __global__ void kl_add_block_sum(
     sigsum = t1.x + t1.y + t1.z + t1.w;
   }
 
-  __shared__ int sbuf[TH_Z][BLOCK_SIZE*BLOCK_SIZE/4];
-  dev_reduce<int, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, abssum, sbuf[tz]);
-  dev_reduce<int, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, sigsum, sbuf[tz]);
+  __shared__ int sbuf[TH_Z][PIXELS];
+  dev_reduce<int, PIXELS, AddReducer<int>>(tid, abssum, sbuf[tz]);
+  dev_reduce<int, PIXELS, AddReducer<int>>(tid, sigsum, sbuf[tz]);
 
   if (tid == 0) {
-    atomicAdd(&sumAbs[bx + by * block_pitch], abssum);
-    atomicAdd(&sumSig[bx + by * block_pitch], sigsum);
+    sumAbs[bx + by * block_pitch] += abssum;
+    sumSig[bx + by * block_pitch] += sigsum;
   }
+}
+
+template <typename vpixel_t, int BLOCK_SIZE, int TH_Z>
+void launch_add_block_sum(
+  const vpixel_t* src0,
+  const vpixel_t* src1,
+  int width, int height, int pitch,
+  int blocks_w, int blocks_h, int block_pitch,
+  int *sumAbs, int* sumSig)
+{
+  dim3 threads(BLOCK_SIZE >> 2, BLOCK_SIZE, TH_Z);
+  dim3 blocks(nblocks(blocks_w, TH_Z), blocks_h);
+  kl_add_block_sum<vpixel_t, BLOCK_SIZE, TH_Z><<<blocks, threads>>>(src0, src1, 
+    width, height, pitch, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
 }
 
 void cpu_block_sum_max(
@@ -3237,6 +3257,9 @@ class KFrameDiffDup : public KFMFilterBase
   int blocks_w, blocks_h, block_pitch;
   VideoInfo workvi;
 
+  enum { THREADS = 256 };
+
+  // returns argmax(subAbs + sumSig * 4)
   template <typename pixel_t>
   int CalcFrameDiff(PVideoFrame& src0, PVideoFrame& src1, PVideoFrame& work, IScriptEnvironment2* env)
   {
@@ -3251,54 +3274,96 @@ class KFrameDiffDup : public KFMFilterBase
     int* sumSig = &sumAbs[block_pitch * blocks_h];
     int* maxSum = &sumSig[block_pitch * blocks_h];
 
-    // TODO:
-
-    int pitchY = frame->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = frame->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int pitchY = src0->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+    int pitchUV = src0->GetPitch(PLANAR_U) / sizeof(vpixel_t);
     int width4 = vi.width >> 2;
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
+    int blocks_w4 = blocks_w >> 2;
+    int block_pitch4 = block_pitch >> 2;
+
+    void (*table[2][4])(
+      const vpixel_t* src0,
+      const vpixel_t* src1,
+      int width, int height, int pitch,
+      int blocks_w, int blocks_h, int block_pitch,
+      int *sumAbs, int* sumSig) =
+    {
+      {
+        launch_add_block_sum<vpixel_t, 32, THREADS / (32 * (32 / 4))>,
+        launch_add_block_sum<vpixel_t, 16, THREADS / (16 * (16 / 4))>,
+        launch_add_block_sum<vpixel_t, 8, THREADS / (8 * (8 / 4))>,
+        launch_add_block_sum<vpixel_t, 4, THREADS / (4 * (4 / 4))>,
+      },
+      {
+        cpu_add_block_sum<vpixel_t, 32, THREADS / (32 * (32 / 4))>,
+        cpu_add_block_sum<vpixel_t, 16, THREADS / (16 * (16 / 4))>,
+        cpu_add_block_sum<vpixel_t, 8, THREADS / (8 * (8 / 4))>,
+        cpu_add_block_sum<vpixel_t, 4, THREADS / (4 * (4 / 4))>,
+      }
+    };
+
+    int f_idx;
+    switch (blocksize) {
+    case 32: f_idx = 0; break;
+    case 16: f_idx = 1; break;
+    case 8: f_idx = 2; break;
+    }
 
     if (IS_CUDA) {
-      dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
-      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_init_field_diff << <1, 1 >> > (sum);
+      kl_init_block_sum << <64, nblocks(block_pitch * blocks_h, 64) >> > (
+        sumAbs, sumSig, maxSum, block_pitch * blocks_h);
       DEBUG_SYNC;
-      kl_calculate_field_diff << <blocks, threads >> >(srcY, nt6, width4, vi.height, pitchY, sum);
+      table[0][f_idx](src0Y, src1Y,
+        width4, vi.height, pitchY, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
       DEBUG_SYNC;
       if (chroma) {
-        kl_calculate_field_diff << <blocksUV, threads >> > (srcU, nt6, width4UV, heightUV, pitchUV, sum);
+        table[0][f_idx + logUVx](src0U, src1U,
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
         DEBUG_SYNC;
-        kl_calculate_field_diff << <blocksUV, threads >> > (srcV, nt6, width4UV, heightUV, pitchUV, sum);
+        table[0][f_idx + logUVx](src0V, src1V,
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
         DEBUG_SYNC;
       }
-      long long int result;
-      CUDA_CHECK(cudaMemcpy(&result, sum, sizeof(sum), cudaMemcpyDeviceToHost));
+      dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
+      dim3 blocks(nblocks(blocks_w4, threads.x), nblocks(blocks_h, threads.y));
+      kl_block_sum_max << <blocks, threads >> > (
+        (int4*)sumAbs, (int4*)sumSig, blocks_w4, blocks_h, block_pitch4, maxSum);
+      int result;
+      CUDA_CHECK(cudaMemcpy(&result, maxSum, sizeof(int), cudaMemcpyDeviceToHost));
       return result;
     }
     else {
-      *sum = 0;
-      cpu_calc_field_diff(srcY, nt6, width4, vi.height, pitchY, sum);
+      cpu_init_block_sum(
+        sumAbs, sumSig, maxSum, block_pitch * blocks_h);
+      table[1][f_idx](src0Y, src1Y,
+        width4, vi.height, pitchY, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
       if (chroma) {
-        cpu_calc_field_diff(srcU, nt6, width4UV, heightUV, pitchUV, sum);
-        cpu_calc_field_diff(srcV, nt6, width4UV, heightUV, pitchUV, sum);
+        table[1][f_idx + logUVx](src0U, src1U,
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+        table[1][f_idx + logUVx](src0V, src1V,
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
       }
-      return *sum;
+      cpu_block_sum_max(
+        (int4*)sumAbs, (int4*)sumSig, blocks_w4, blocks_h, block_pitch4, maxSum);
+      return *maxSum;
     }
   }
 
   template <typename pixel_t>
-  int InternalFrameDiff(int n, IScriptEnvironment2* env)
+  double InternalFrameDiff(int n, IScriptEnvironment2* env)
   {
     PVideoFrame src0 = child->GetFrame(clamp(n - 1, 0, vi.num_frames - 1), env);
     PVideoFrame src1 = child->GetFrame(clamp(n, 0, vi.num_frames - 1), env);
     PVideoFrame work = env->NewVideoFrame(workvi);
 
-    auto raw = CalcFrameDiff<pixel_t>(src0, src1, work, env);
+    int diff = CalcFrameDiff<pixel_t>(src0, src1, work, env);
 
-    int shift = vi.BitsPerComponent() - 8; // 8bitÇ…çáÇÌÇπÇÈ
-    return (raw >> shift);
+    int shift = vi.BitsPerComponent() - 8;
+
+    // dup232aÇæÇ∆Ç±Ç§ÇæÇØÇ«ÅAÇ±ÇÃåvéZéÆÇÕÇ®Ç©ÇµÇ¢Ç∆évÇ§ÇÃÇ≈èCê≥
+    //return  diff / (64.0 * (235 << shift) * blocksize) * 100.0;
+    return  diff / (2.0 * (235 << shift) * blocksize * blocksize) * 100.0;
   }
 
 public:
@@ -3312,7 +3377,7 @@ public:
     blocks_w = nblocks(vi.width, blocksize);
     blocks_h = nblocks(vi.height, blocksize);
 
-    th_z = 256 / (blocksize * (blocksize / 4));
+    th_z = THREADS / (blocksize * (blocksize / 4));
     th_uv_z = th_z * (chroma ? (1 << (logUVx + logUVy)) : 1);
 
     int block_align = max(4, th_uv_z);
@@ -3320,7 +3385,7 @@ public:
 
     int work_bytes = sizeof(int) * block_pitch * blocks_h * 2 + sizeof(int);
     workvi.pixel_type = VideoInfo::CS_BGR32;
-    workvi.width = 4;
+    workvi.width = 256;
     workvi.height = nblocks(work_bytes, workvi.width * 4);
   }
 
@@ -3393,7 +3458,7 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 	env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
 
   env->AddFunction("KCFieldDiff", "c[nt]f[chroma]b", KFieldDiff::CFunc, 0);
-  env->AddFunction("KFrameDiffDup", "c[threshold]f[chroma]b[blksize]i", KFrameDiffDup::CFunc, 0);
+  env->AddFunction("KCFrameDiffDup", "c[chroma]b[blksize]i", KFrameDiffDup::CFunc, 0);
 
 	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }

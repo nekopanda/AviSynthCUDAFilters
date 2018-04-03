@@ -45,6 +45,7 @@ protected:
 	void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
 
    void CFieldDiffTest(int nt, bool chroma);
+   void CFrameDiffDupTest(int blocksize, bool chroma);
 };
 
 #pragma region MSuper
@@ -2710,6 +2711,7 @@ void KTGMCTest::CFieldDiffTest(int nt, bool chroma)
          // 差が1%未満であることを確認
          if (std::abs(ref - cuda) / ref >= 0.01) {
             printf("誤差が大きすぎます %f vs %f\n", ref, cuda);
+            GTEST_FAIL();
          }
       }
    }
@@ -2740,6 +2742,103 @@ TEST_F(KTGMCTest, CFieldDiff_Nt3NoC)
 }
 
 #pragma endregion
+
+#pragma region CFrameDiffDup
+
+void KTGMCTest::CFrameDiffDupTest(int blocksize, bool chroma)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KFM.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "srcuda = src.OnCPU(0)" << std::endl;
+
+    out << "current_frame = 100" << std::endl;
+    out << "ref = src.KCFrameDiffDup(blksize = " << blocksize << ", chroma=" << (chroma ? "true" : "false") << ")" << std::endl;
+    out << "cuda = EvalOnCUDA(\"srcuda.KCFrameDiffDup(blksize = " << blocksize << ", chroma=" << (chroma ? "true" : "false") << ")\")" << std::endl;
+
+    out.close();
+
+    {
+      env->Invoke("Import", scriptpath.c_str());
+      double ref = env->GetVar("ref").AsFloat();
+      double cuda = env->GetVar("cuda").AsFloat();
+      // 境界の扱いが異なるので（多分）一致しない
+      // 差が1%未満であることを確認
+      if (std::abs(ref - cuda) / ref >= 0.01) {
+        printf("誤差が大きすぎます %f vs %f\n", ref, cuda);
+        GTEST_FAIL();
+      }
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(KTGMCTest, CFrameDiffDup_Blk32WithC)
+{
+  CFrameDiffDupTest(32, true);
+}
+
+TEST_F(KTGMCTest, CFrameDiffDup_Blk32NoC)
+{
+  CFrameDiffDupTest(32, false);
+}
+
+TEST_F(KTGMCTest, CFrameDiffDup_Blk8WithC)
+{
+  CFrameDiffDupTest(8, true);
+}
+
+TEST_F(KTGMCTest, CFrameDiffDup_Blk8NoC)
+{
+  CFrameDiffDupTest(8, false);
+}
+
+#pragma endregion
+
+
+TEST_F(KTGMCTest, AvsProp)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+
+    out << "AddProp(\"luma\", \"AverageLuma()\")" << std::endl;
+    out << "ScriptClip(\"\"\"subtitle(string(getprop(\"luma\")))\"\"\")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, TF_MID, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
 
 TEST_F(KTGMCTest, DISABLED_DumpAVSProperty)
 {

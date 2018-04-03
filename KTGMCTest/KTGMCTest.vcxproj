@@ -163,6 +163,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="AvsCUDATest.cpp" />
     <ClCompile Include="KTGMCTest.cpp" />
     <ClCompile Include="MaskToolsTest.cpp" />
     <ClCompile Include="TestCommons.cpp" />

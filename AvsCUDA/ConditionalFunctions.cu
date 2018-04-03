@@ -40,7 +40,7 @@ __global__ void kl_sum_of_pixels(const vpixel_t* __restrict__ src, int width, in
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
-  int tid = threadIdx.x + threadIdx.y;
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
 
   lsum_t tmpsum = lsum_t();
   if (x < width && y < height) {
@@ -57,7 +57,7 @@ __global__ void kl_sum_of_pixels(const vpixel_t* __restrict__ src, int width, in
 }
 
 template <typename vpixel_t, typename gsum_t, typename lsum_t>
-float calc_sum_of_pixels(const void* src, int width, int height, int pitch, int maxv, void* sum, IScriptEnvironment* env)
+double calc_sum_of_pixels(const void* src, int width, int height, int pitch, int maxv, void* sum, IScriptEnvironment* env)
 {
   int width4 = width >> 2;
   int pitch4 = pitch >> 2;
@@ -73,7 +73,7 @@ float calc_sum_of_pixels(const void* src, int width, int height, int pitch, int 
 
   gsum_t ret;
   CUDA_CHECK(cudaMemcpy(&ret, sum, sizeof(gsum_t), cudaMemcpyDeviceToHost));
-  return (float)(ret / (height * width));;
+  return ((double)ret / (height * width));;
 }
 
 class AveragePlane {
@@ -192,7 +192,7 @@ __global__ void kl_sad(
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
-  int tid = threadIdx.x + threadIdx.y;
+  int tid = threadIdx.x + threadIdx.y * blockDim.x;
 
   lsum_t tmpsum = lsum_t();
   if (x < width && y < height) {
@@ -209,7 +209,7 @@ __global__ void kl_sad(
 }
 
 template <typename vpixel_t, typename gsum_t, typename lsum_t>
-float calc_sad(const void* src0, const void* src1, int width, int height, int pitch, int maxv, void* sum, bool is_rgb, IScriptEnvironment* env)
+double calc_sad(const void* src0, const void* src1, int width, int height, int pitch, int maxv, void* sum, bool is_rgb, IScriptEnvironment* env)
 {
   int width4 = width >> 2;
   int pitch4 = pitch >> 2;
@@ -227,9 +227,9 @@ float calc_sad(const void* src0, const void* src1, int width, int height, int pi
   CUDA_CHECK(cudaMemcpy(&sad, sum, sizeof(gsum_t), cudaMemcpyDeviceToHost));
 
   if (is_rgb)
-    return (float)((sad * 4) / (height * width * 3)); // why * 4/3? alpha plane was masked out, anyway
+    return (((double)sad * 4) / (height * width * 3)); // why * 4/3? alpha plane was masked out, anyway
   else
-    return (float)(sad / (height * width));
+    return ((double)sad / (height * width));
 }
 
 class ComparePlane {

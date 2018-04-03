@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-	::testing::GTEST_FLAG(filter) = "KTGMCTest.CFieldDiff*";
+	::testing::GTEST_FLAG(filter) = "AvsCUDATest.*";
 	::testing::InitGoogleTest(&argc, argv);
 	int result = RUN_ALL_TESTS();
 
