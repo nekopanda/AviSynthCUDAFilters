@@ -29,8 +29,8 @@ function KClean_SC(clip clip, float "b_diff_th", float "b_dup_th", float "d_diff
   show_mode = default(show_mode, 0)
   
   clip
-  prev = Trim(0,-1) ++ clip
-  next = Trim(1,0)
+  prev = DuplicateFrame(0)
+  next = DeleteFrame(0)
   diff = AddProp("val", "KCFrameDiffDup()")
   ScriptClip("""
   

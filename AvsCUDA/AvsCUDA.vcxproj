@@ -173,6 +173,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AvsCUDA.cpp" />
+    <ClCompile Include="SupportFilters.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="ConditionalFunctions.cu" />

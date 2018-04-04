@@ -55,9 +55,9 @@ function KDecombUCF(clip s, float "y1",float "y2",float "y3",float "y4",float "y
     frame_cache = Default(frame_cache, 10) #逆テレシネ関数はフレーム再取得(第一、二判定、BOB)すると結果が変わる場合があるのでCache必須 #(3-5-10) #WriteFile(txt_file,"current_frame") 
     Assert(debug!=4&&debug!=5&&debug!=6&&debug!=7||Defined(txt_file), "If you use debug4,5,6,7 in DecombUCF(), you need to set txt_file.")
     txt_file = Default(txt_file, "nul")
-    global chroma_y = (chroma==1) ? 2 : 3
-    global chroma_uv = (chroma==0) ? 2 : 3
-    c = s.FrameCache(frame_cache)
+    chroma_y = (chroma==1) ? 2 : 3
+    chroma_uv = (chroma==0) ? 2 : 3
+    c = s
     ## diff threshold ## (x=nmin, y=diff)
     #                                                                    5      1     2     3     4    5     6     7     8    9    10  
     y1=Select(th_mode, Default(y1, 15), 13, 14, 15, 15, 15, 15, 15, 17, 20, 22)
@@ -90,40 +90,40 @@ function KDecombUCF(clip s, float "y1",float "y2",float "y3",float "y4",float "y
     bob_b = SelectOdd() #keep 2nd field
     ## Noise detection ##
         # make diff # (検出したいノイズを特異的に変化させる)
-        function Affect_Noise(clip c){
+        function Affect_Noise(clip c, int "chroma_y", int "chroma_uv"){
+			# TODO: GaussResize
             c.binomialblur(3,3,chroma_y,chroma_uv,chroma_uv) #0.5,1.5が早い #好きなNRもしくはSharp。検出したいノイズに特異的に反応するものが良い。
         }
         function Limitter(clip c, int "nmin_y", int "nrange_y", int "nmin_uv", int "nrange_uv", int "chroma"){
             c
             range_y = nmin_y+nrange_y
             range_uv = nmin_uv+nrange_uv
-            str_y = "(Y==128)? 128 : (Y<128)? ( ((127-"+String(range_y)+"<Y)(Y<128-"+String(nmin_y)+"))? 0 : 56 ) : ( ((128+"+String(nmin_y)+"<Y)(Y<129+"+String(range_y)+")) ? 255 : 199 )"
-            str_u = "(U==128)? 128 : (U<128)? ( ((127-"+String(range_uv)+"<U)(U<128-"+String(nmin_uv)+"))? 0 : 56 ) : ( ((128+"+String(nmin_uv)+"<U)(U<129+"+String(range_uv)+")) ? 255 : 199)"
-            str_v = "(V==128)? 128 : (V<128)? ( ((127-"+String(range_uv)+"<V)(V<128-"+String(nmin_uv)+"))? 0 : 56 ) : ( ((128+"+String(nmin_uv)+"<V)(V<129+"+String(range_uv)+")) ? 255 : 199)"
-            eval_y = Select(chroma, str_y, "Y", str_y)
-            eval_u = Select(chroma, "U", str_u, str_u)
-            eval_v = Select(chroma, "V", str_v, str_v)
-            return c.SmoothCustom(eval_y, eval_u, eval_v, false, 0, 0, -1)
+			str_y = mt_polish("(x==128)? 128 : ((x<128)? ( (((127-"+String(range_y)+")<x)&(x<(128-"+String(nmin_y)+")))? 0 : 56 ) : ( (((128+"+String(nmin_y)+")<x)&(x<(129+"+String(range_y)+"))) ? 255 : 199 ))")
+			str_uv = mt_polish("(x==128)? 128 : ((x<128)? ( (((127-"+String(range_uv)+")<x)&(x<(128-"+String(nmin_uv)+")))? 0 : 56 ) : ( (((128+"+String(nmin_uv)+")<x)&(x<(129+"+String(range_uv)+"))) ? 255 : 199))")
+			eval_y = Select(chroma, 3, 2, 3)
+			eval_u = Select(chroma, 2, 3, 3)
+			eval_v = Select(chroma, 2, 3, 3)
+			return c.kmt_lut(yExpr=str_y,expr=str_uv,Y=eval_y,U=eval_u,V=eval_v)
         }
-        c.SeparateFields()
-        ori = Crop(4,4,-4,-4,true).BlankClip(color_yuv=$808080)
+        c.SeparateFields().KCopy()
+        ori = Crop(4,4,-4,-4).BlankClip(color_yuv=$808080).OnCPU(0).StaticFrame()
         ori_t = ori.SelectEven()
         ori_b = ori.SelectOdd()
-        con = merge( Affect_Noise().invert() ).Crop(4,4,-4,-4,true) .Limitter(nmin_y,nrange_y,nmin_uv,nrange_uv,chroma).FrameCache(2)
+        con = Merge( Affect_Noise(chroma_y, chroma_uv).kmt_lut("255 x -",U=3,V=3) ).Crop(4,4,-4,-4).KCopy().Limitter(nmin_y,nrange_y,nmin_uv,nrange_uv,chroma)
         con_t = con.SelectEven()
         con_b = con.SelectOdd()
         # calc diff # (元フレームからの変化を絶対値で数値化)
             string1 = Select(chroma
                                        \,"""c = last
                             #絶対ノイズ量
-                            noise_t_y = LumaDifference( ori_t, con_t )
+                            noise_t_y = KLumaDifference( ori_t, con_t )
                             noise_t_uv = -1
-                            noise_b_y = LumaDifference( ori_b, con_b )
+                            noise_b_y = KLumaDifference( ori_b, con_b )
                             noise_b_uv = -1
                             #絶対ノイズ-平均(reverseで利用)
                             navg1_y =  ( noise_t_y + noise_b_y )/2 #Max(noise_t_y,noise_b_y)
                             #相対ノイズ-平均 [comp t,b](diff計算で利用)
-                            navg2_y = LumaDifference( con_t, con_b )/2
+                            navg2_y = KLumaDifference( con_t, con_b )/2
                             #絶対ノイズ-符号付差分(diff計算で利用)
                             diff1_y = noise_t_y - noise_b_y
                             #パラメタ
@@ -135,13 +135,13 @@ function KDecombUCF(clip s, float "y1",float "y2",float "y3",float "y4",float "y
                                        \,"""c = last
                             #絶対ノイズ量
                             noise_t_y = -1
-                            noise_t_uv = ( ChromaUDifference( ori_t,con_t ) + ChromaVDifference( ori_t,con_t ) )/2
+                            noise_t_uv = ( KChromaUDifference( ori_t,con_t ) + KChromaVDifference( ori_t,con_t ) )/2
                             noise_b_y = -1
-                            noise_b_uv = ( ChromaUDifference( ori_b,con_b ) + ChromaVDifference( ori_b,con_b ) )/2
+                            noise_b_uv = ( KChromaUDifference( ori_b,con_b ) + KChromaVDifference( ori_b,con_b ) )/2
                             #絶対ノイズ-平均(reverseで利用)
                             navg1_uv = ( noise_t_uv + noise_b_uv )/2 #Max(noise_t_uv,noise_b_uv)
                             #相対ノイズ-平均 [comp t,b](diff計算で利用)
-                            navg2_uv = ( ChromaUDifference( con_t,con_b ) + ChromaVDifference( con_t,con_b ) )/4
+                            navg2_uv = ( KChromaUDifference( con_t,con_b ) + KChromaVDifference( con_t,con_b ) )/4
                             #絶対ノイズ-符号付差分(diff計算で利用)
                             diff1_uv = noise_t_uv - noise_b_uv
                             #パラメタ
@@ -152,17 +152,17 @@ function KDecombUCF(clip s, float "y1",float "y2",float "y3",float "y4",float "y
                           """
                                        \,"""c = last
                             #絶対ノイズ量
-                            noise_t_y = LumaDifference( ori_t,con_t )
-                            noise_t_uv = ( ChromaUDifference( ori_t,con_t ) + ChromaVDifference( ori_t,con_t ) )/2
-                            noise_b_y = LumaDifference( ori_b,con_b )
-                            noise_b_uv = ( ChromaUDifference( ori_b,con_b ) + ChromaVDifference( ori_b,con_b ) )/2
+                            noise_t_y = KLumaDifference( ori_t,con_t )
+                            noise_t_uv = ( KChromaUDifference( ori_t,con_t ) + KChromaVDifference( ori_t,con_t ) )/2
+                            noise_b_y = KLumaDifference( ori_b,con_b )
+                            noise_b_uv = ( KChromaUDifference( ori_b,con_b ) + KChromaVDifference( ori_b,con_b ) )/2
                             #絶対ノイズ-平均(reverseで利用)
                             navg1_y =  ( noise_t_y + noise_b_y )/2 #Max(noise_t_y,noise_b_y)
                             navg1_uv = ( noise_t_uv + noise_b_uv )/2 #Max(noise_t_uv,noise_b_uv)
                             navg1_yuv = ( navg1_y + navg1_uv )/2
                             #相対ノイズ-平均 [comp t,b](diff計算で利用)
-                            navg2_y = LumaDifference( con_t,con_b )/2
-                            navg2_uv = ( ChromaUDifference( con_t,con_b ) + ChromaVDifference( con_t,con_b ) )/4
+                            navg2_y = KLumaDifference( con_t,con_b )/2
+                            navg2_uv = ( KChromaUDifference( con_t,con_b ) + KChromaVDifference( con_t,con_b ) )/4
                             navg2_yuv = ( navg2_y + navg2_uv )/2
                             #絶対ノイズ-符号付差分(diff計算で利用)
                             diff1_y = noise_t_y - noise_b_y
@@ -281,9 +281,9 @@ function KDecombUCF(clip s, float "y1",float "y2",float "y3",float "y4",float "y
     ## Apply to dirty frame ##
         # dmode1 : field diff detection #
         conditionalfilter(c
-                            \, (debug==1)? c.ScriptClip("""subtitle("[A] notbob  //  Fdiff =  " + string(CFieldDiff(nt=0,chroma=true)*100.0/"""+String(Width(c)*Height(c))+""")+"  (FieldDiff < """+String(fd_thresh)+""")")""") : c
+                            \, (debug==1)? c.ScriptClip("""subtitle("[A] notbob  //  Fdiff =  " + string(KCFieldDiff(nt=0,chroma=true)*100.0/"""+String(Width(c)*Height(c))+""")+"  (FieldDiff < """+String(fd_thresh)+""")")""") : c
                             \, c.ScriptClip(string1+string2+string3)
-                            \, "CFieldDiff(nt=0,chroma=true)*100.0/"+String(Width(c)*Height(c)),"<", String(0*fd_thresh) )
+                            \, "KCFieldDiff(nt=0,chroma=true)*100.0/"+String(Width(c)*Height(c)),"<", String(fd_thresh) )
                             \.UseVar("y1", "y2", "y3", "y4", "y5", 
                             \             "x1", "x2", "x3", "x4", "x5")
 
