@@ -1,6 +1,6 @@
 #include "avisynth.h"
 
-#include "AvsCUDA.h"
+#include "../AvsCUDA.h"
 
 #include <stdint.h>
 #include "CommonFunctions.h"
@@ -167,6 +167,6 @@ public:
 };
 
 extern const FuncDefinition generic_filters[] = {
-  { "Align",    "c", Align::Create, 0 },
+  { "Align",  BUILTIN_FUNC_PREFIX,  "c", Align::Create, 0 },
   { 0 }
 };

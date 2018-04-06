@@ -13,26 +13,35 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="AvsCUDA.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
-    <ClCompile Include="SupportFilters.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <CudaCompile Include="ConditionalFunctions.cu">
-      <Filter>ソース ファイル</Filter>
-    </CudaCompile>
-    <CudaCompile Include="Filters.cu">
-      <Filter>ソース ファイル</Filter>
-    </CudaCompile>
+    <Filter Include="ソース ファイル\filters">
+      <UniqueIdentifier>{927c6064-298f-407a-94e9-0ec13573f764}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AvsCUDA.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AvsCUDA.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\focus.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\SupportFilters.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\focus_avx2.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="filters\ConditionalFunctions.cu">
+      <Filter>ソース ファイル\filters</Filter>
+    </CudaCompile>
+    <CudaCompile Include="filters\Filters.cu">
+      <Filter>ソース ファイル\filters</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>

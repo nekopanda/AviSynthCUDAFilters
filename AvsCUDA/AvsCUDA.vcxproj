@@ -172,15 +172,22 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AvsCUDA.cpp" />
-    <ClCompile Include="SupportFilters.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <CudaCompile Include="ConditionalFunctions.cu" />
-    <CudaCompile Include="Filters.cu" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="AvsCUDA.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="AvsCUDA.cpp" />
+    <ClCompile Include="filters\focus.cpp" />
+    <ClCompile Include="filters\focus_avx2.cpp">
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <ClCompile Include="filters\SupportFilters.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="filters\ConditionalFunctions.cu" />
+    <CudaCompile Include="filters\Filters.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

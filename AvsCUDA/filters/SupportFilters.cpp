@@ -2,7 +2,7 @@
 #include <avisynth.h>
 #include <stdlib.h>
 
-#include "AvsCUDA.h"
+#include "../AvsCUDA.h"
 
 class StaticFrame : public GenericVideoFilter {
    int n;
@@ -41,6 +41,6 @@ public:
 };
 
 extern const FuncDefinition support_filters[] = {
-   { "StaticFrame",    "c[n]i", StaticFrame::Create, 0 },
+   { "StaticFrame",  BUILTIN_FUNC_PREFIX,  "c[n]i", StaticFrame::Create, 0 },
    { 0 }
 };
