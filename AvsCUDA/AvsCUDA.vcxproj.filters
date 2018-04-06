@@ -26,6 +26,9 @@
     <CudaCompile Include="ConditionalFunctions.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
+    <CudaCompile Include="Filters.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AvsCUDA.h">

@@ -177,6 +177,7 @@
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="ConditionalFunctions.cu" />
+    <CudaCompile Include="Filters.cu" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AvsCUDA.h" />

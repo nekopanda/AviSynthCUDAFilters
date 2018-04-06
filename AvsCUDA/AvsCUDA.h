@@ -8,3 +8,5 @@ struct FuncDefinition {
    IScriptEnvironment::ApplyFunc func;
    void* user_data;
 };
+
+int GetDeviceType(const PClip& clip);

@@ -83,3 +83,29 @@ TEST_F(MaskToolsTest, Lutxy_1)
       GTEST_FAIL();
    }
 }
+
+TEST_F(MaskToolsTest, Func)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "LWLibavVideoSource(\"test.ts\")" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, TF_MID, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
