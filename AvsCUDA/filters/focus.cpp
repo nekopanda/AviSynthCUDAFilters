@@ -37,7 +37,6 @@
 #include <vector>
 #include <avs/alignment.h>
 #include "../core/internal.h"
-#include <avs/minmax.h>
 #include <emmintrin.h>
 #include <smmintrin.h>
 #include <stdint.h>

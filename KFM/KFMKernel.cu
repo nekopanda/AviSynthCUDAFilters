@@ -23,16 +23,6 @@
 
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
-template <typename T> struct VectorType {};
-
-template <> struct VectorType<unsigned char> {
-  typedef uchar4 type;
-};
-
-template <> struct VectorType<unsigned short> {
-  typedef ushort4 type;
-};
-
 static int scaleParam(float thresh, int pixelBits)
 {
    return (int)(thresh * (1 << (pixelBits - 8)) + 0.5f);
@@ -710,7 +700,7 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) &
+      return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
@@ -1742,8 +1732,8 @@ class KTelecine : public KFMFilterBase
     int cycleIndex = n / 4;
     int parity = child->GetParity(cycleIndex * 5);
     PVideoFrame fm = fmclip->GetFrame(cycleIndex, env);
-    int pattern = (int)fm->GetProps("KFM_Pattern")->GetInt();
-    float cost = (float)fm->GetProps("KFM_Cost")->GetFloat();
+    int pattern = (int)fm->GetProperty("KFM_Pattern")->GetInt();
+    float cost = (float)fm->GetProperty("KFM_Cost")->GetFloat();
     Frame24Info frameInfo = patterns.GetFrame24(pattern, n);
 
     int fstart = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex;
@@ -1787,7 +1777,7 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) &
+      return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
@@ -2099,8 +2089,8 @@ public:
   {
     IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
 
-    PVideoFrame frameA = child->GetFrame(n, env)->GetProps(COMBE_FLAG_STR)->GetFrame();
-    PVideoFrame frameB = clipB->GetFrame(n, env)->GetProps(COMBE_FLAG_STR)->GetFrame();
+    PVideoFrame frameA = child->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
+    PVideoFrame frameB = clipB->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
 
     const uint8_t* fmcntA = reinterpret_cast<const uint8_t*>(frameA->GetReadPtr());
     const uint8_t* fmcntB = reinterpret_cast<const uint8_t*>(frameB->GetReadPtr());
@@ -2394,7 +2384,7 @@ class KRemoveCombe : public KFMFilterBase
 			MergeUVCoefs(combe, env);
 		}
 		MakeSwitchFlag(flag, flagtmp, combe, env);
-		dst->SetProps(COMBE_FLAG_STR, flag);
+		dst->SetProperty(COMBE_FLAG_STR, flag);
 
 		if (!IS_CUDA && show) {
 			VisualizeCombe<pixel_t>(dst, combe, (int)thcombe, env);
@@ -2770,8 +2760,8 @@ class KFMSwitch : public KFMFilterBase
 	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, IScriptEnvironment2* env)
 	{
 		int cycleIndex = n60 / 10;
-		int kfmPattern = (int)fmframe->GetProps("KFM_Pattern")->GetInt();
-		float kfmCost = (float)fmframe->GetProps("KFM_Cost")->GetFloat();
+		int kfmPattern = (int)fmframe->GetProperty("KFM_Pattern")->GetInt();
+		float kfmCost = (float)fmframe->GetProperty("KFM_Cost")->GetFloat();
 
 		if (kfmCost > thswitch || PulldownPatterns::Is30p(kfmPattern)) {
 			// コストが高いので60pと判断 or 30pの場合
@@ -2793,7 +2783,7 @@ class KFMSwitch : public KFMFilterBase
 		else if (frameInfo.frameIndex >= 4) {
 			// 後ろのサイクルのパターンを取得
 			PVideoFrame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-			int nextPattern = (int)nextfmframe->GetProps("KFM_Pattern")->GetInt();
+			int nextPattern = (int)nextfmframe->GetProperty("KFM_Pattern")->GetInt();
 			int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
 			if (fstart > 0) {
 				// 前に空きがあるので前のサイクル
@@ -2806,7 +2796,7 @@ class KFMSwitch : public KFMFilterBase
 		}
 
 		PVideoFrame frame24 = clip24->GetFrame(n24, env);
-		PVideoFrame flag = combeclip->GetFrame(n24, env)->GetProps(COMBE_FLAG_STR)->GetFrame();
+		PVideoFrame flag = combeclip->GetFrame(n24, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
 
 		{
 			PVideoFrame work = env->NewVideoFrame(workvi);

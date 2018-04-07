@@ -49,15 +49,24 @@ class ImageCompare : GenericVideoFilter
   PClip child2;
 
   const bool chroma;
-  const int thresh;
+  const bool alpha;
+  const double thresh;
+
+  void PrintMissMatch(int a, int b, int x, int y) {
+    printf("miss match %d vs %d at (%d,%d)\n", a, b, x, y);
+  }
+  void PrintMissMatch(float a, float b, int x, int y) {
+    printf("miss match %f vs %f at (%d,%d)\n", a, b, x, y);
+  }
 
   template <typename pixel_t>
-  void ComparePlanar(
+  void ComparePlane(
     pixel_t* d, int dpitch, 
     const pixel_t* a, int apitch,
     const pixel_t* b, int bpitch, 
     int width, int height, IScriptEnvironment2* env)
   {
+    pixel_t thresh = (pixel_t)this->thresh;
     //DebugWriteBitmap("bob-ref-%d.bmp", (const uint8_t*)a, width, height, pitch, 1);
     //DebugWriteBitmap("bob-cuda-%d.bmp", (const uint8_t*)b, width, height, pitch, 1);
 
@@ -65,7 +74,7 @@ class ImageCompare : GenericVideoFilter
       for (int x = 0; x < width; ++x) {
         pixel_t diff = std::abs(a[x + y * apitch] - b[x + y * bpitch]);
         if (diff > thresh) {
-          printf("miss match %d vs %d at (%d,%d)\n", a[x + y * apitch], b[x + y * bpitch], x, y);
+          PrintMissMatch(a[x + y * apitch], b[x + y * bpitch], x, y);
           env->ThrowError("[ImageCompare] âÊëúÇ™àÍívÇµÇ‹ÇπÇÒÅBÉeÉXÉgé∏îs");
         }
         d[x + y * dpitch] = diff;
@@ -74,50 +83,101 @@ class ImageCompare : GenericVideoFilter
   }
 
   template <typename pixel_t>
-  void CompareFrame(PVideoFrame& dst, PVideoFrame& frame1, PVideoFrame& frame2, IScriptEnvironment2* env)
+  void ComparePlanar(PVideoFrame& dst, PVideoFrame& frame1, PVideoFrame& frame2, IScriptEnvironment2* env)
   {
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
-    const pixel_t* f1Y = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(PLANAR_Y));
-    const pixel_t* f1U = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(PLANAR_U));
-    const pixel_t* f1V = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(PLANAR_V));
-    const pixel_t* f2Y = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(PLANAR_Y));
-    const pixel_t* f2U = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(PLANAR_U));
-    const pixel_t* f2V = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(PLANAR_V));
+    int isRGB = vi.IsPlanarRGB() || vi.IsPlanarRGBA();
+    static const int planesYUV[] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
+    static const int planesRGB[] = { PLANAR_G, PLANAR_B, PLANAR_R, PLANAR_A };
+    const int *planes = isRGB ? planesRGB : planesYUV;
 
-    int nPixelShift = (sizeof(pixel_t) == 1) ? 0 : 1;
-    int nUVShiftX = vi.GetPlaneWidthSubsampling(PLANAR_U);
-    int nUVShiftY = vi.GetPlaneHeightSubsampling(PLANAR_U);
+    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[0]));
+    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[1]));
+    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[2]));
+    pixel_t* dstA = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[3]));
+    const pixel_t* f1Y = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(planes[0]));
+    const pixel_t* f1U = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(planes[1]));
+    const pixel_t* f1V = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(planes[2]));
+    const pixel_t* f1A = reinterpret_cast<const pixel_t*>(frame1->GetReadPtr(planes[3]));
+    const pixel_t* f2Y = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(planes[0]));
+    const pixel_t* f2U = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(planes[1]));
+    const pixel_t* f2V = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(planes[2]));
+    const pixel_t* f2A = reinterpret_cast<const pixel_t*>(frame2->GetReadPtr(planes[3]));
 
-    ComparePlanar<pixel_t>(
-      dstY, dst->GetPitch(PLANAR_Y) >> nPixelShift, 
-      f1Y, frame1->GetPitch(PLANAR_Y) >> nPixelShift,
-      f2Y, frame2->GetPitch(PLANAR_Y) >> nPixelShift,
-      vi.width, vi.height, env);
+    ComparePlane<pixel_t>(
+      dstY, dst->GetPitch(planes[0]) / sizeof(pixel_t),
+      f1Y, frame1->GetPitch(planes[0]) / sizeof(pixel_t),
+      f2Y, frame2->GetPitch(planes[0]) / sizeof(pixel_t),
+      dst->GetRowSize(planes[0]) / sizeof(pixel_t), dst->GetHeight(planes[0]), env);
 
     if (chroma) {
-      ComparePlanar<pixel_t>(
-        dstU, dst->GetPitch(PLANAR_U) >> nPixelShift,
-        f1U, frame1->GetPitch(PLANAR_U) >> nPixelShift,
-        f2U, frame2->GetPitch(PLANAR_U) >> nPixelShift,
-        vi.width >> nUVShiftX, vi.height >> nUVShiftY, env);
-      ComparePlanar<pixel_t>(
-        dstV, dst->GetPitch(PLANAR_V) >> nPixelShift,
-        f1V, frame1->GetPitch(PLANAR_V) >> nPixelShift,
-        f2V, frame2->GetPitch(PLANAR_V) >> nPixelShift,
-        vi.width >> nUVShiftX, vi.height >> nUVShiftY, env);
+      if (frame1->GetPitch(planes[1])) {
+        ComparePlane<pixel_t>(
+          dstU, dst->GetPitch(planes[1]) / sizeof(pixel_t),
+          f1U, frame1->GetPitch(planes[1]) / sizeof(pixel_t),
+          f2U, frame2->GetPitch(planes[1]) / sizeof(pixel_t),
+          dst->GetRowSize(planes[1]) / sizeof(pixel_t), dst->GetHeight(planes[1]), env);
+      }
+      if (frame1->GetPitch(planes[2])) {
+        ComparePlane<pixel_t>(
+          dstV, dst->GetPitch(planes[2]) / sizeof(pixel_t),
+          f1V, frame1->GetPitch(planes[2]) / sizeof(pixel_t),
+          f2V, frame2->GetPitch(planes[2]) / sizeof(pixel_t),
+          dst->GetRowSize(planes[2]) / sizeof(pixel_t), dst->GetHeight(planes[2]), env);
+      }
+    }
+    if (alpha && frame1->GetPitch(planes[2])) {
+      ComparePlane<pixel_t>(
+        dstY, dst->GetPitch(planes[3]) / sizeof(pixel_t),
+        f1Y, frame1->GetPitch(planes[3]) / sizeof(pixel_t),
+        f2Y, frame2->GetPitch(planes[3]) / sizeof(pixel_t),
+        dst->GetRowSize(planes[3]) / sizeof(pixel_t), dst->GetHeight(planes[3]), env);
+    }
+  }
+
+  template <typename pixel_t>
+  void CompareRGB(PVideoFrame& dst, PVideoFrame& frameA, PVideoFrame& frameB, IScriptEnvironment2* env)
+  {
+    pixel_t* d = reinterpret_cast<pixel_t*>(dst->GetWritePtr());
+    const pixel_t* a = reinterpret_cast<const pixel_t*>(frameA->GetReadPtr());
+    const pixel_t* b = reinterpret_cast<const pixel_t*>(frameB->GetReadPtr());
+
+    int dpitch = dst->GetPitch() / sizeof(pixel_t);
+    int apitch = frameA->GetPitch() / sizeof(pixel_t);
+    int bpitch = frameB->GetPitch() / sizeof(pixel_t);
+
+    int width = vi.width;
+    int height = vi.height;
+    int el = ((vi.IsRGB24() || vi.IsRGB48()) ? 3 : 4);
+    pixel_t thresh = (pixel_t)this->thresh;
+
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width * el; ++x) {
+        pixel_t diff = std::abs(a[x + y * apitch] - b[x + y * bpitch]);
+        if (diff > thresh) {
+          const char* color = "BGRA";
+          printf("miss match %d vs %d at %c(%d,%d)\n", a[x + y * apitch], b[x + y * bpitch],
+            color[x % el], x / el , y);
+          env->ThrowError("[ImageCompare] âÊëúÇ™àÍívÇµÇ‹ÇπÇÒÅBÉeÉXÉgé∏îs");
+        }
+        d[x + y * dpitch] = diff;
+      }
     }
   }
 
 public:
-  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, IScriptEnvironment2* env)
+  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, bool alpha, IScriptEnvironment2* env)
     : GenericVideoFilter(child1)
     , child2(child2)
     , thresh(thresh)
     , chroma(chroma)
+    , alpha(alpha)
   {
-    //
+    if (vi.IsYUY2()) {
+      env->ThrowError("[ImageCompare] YUY2 is not supported");
+    }
+    if (vi.ComponentSize() == 4) {
+      thresh /= 65536;
+    }
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -129,11 +189,24 @@ public:
     PVideoFrame dst = env->NewVideoFrame(vi);
 
     int nPixelSize = vi.ComponentSize();
-    if (nPixelSize == 1) {
-      CompareFrame<uint8_t>(dst, frame1, frame2, env);
+    if (vi.IsPlanar()) {
+      if (nPixelSize == 1) {
+        ComparePlanar<uint8_t>(dst, frame1, frame2, env);
+      }
+      else if (nPixelSize == 2) {
+        ComparePlanar<uint16_t>(dst, frame1, frame2, env);
+      }
+      else {
+        ComparePlanar<float>(dst, frame1, frame2, env);
+      }
     }
     else {
-      CompareFrame<uint16_t>(dst, frame1, frame2, env);
+      if (nPixelSize == 1) {
+        CompareRGB<uint8_t>(dst, frame1, frame2, env);
+      }
+      else if (nPixelSize == 2) {
+        CompareRGB<uint16_t>(dst, frame1, frame2, env);
+      }
     }
 
     return dst;
@@ -146,7 +219,8 @@ public:
       args[0].AsClip(),
       args[1].AsClip(),
       args[2].AsInt(2), // thresh
-      args[3].AsBool(true), // thresh
+      args[3].AsBool(true), // chroma
+      args[4].AsBool(true), // alpha
       env);
   }
 };
@@ -158,7 +232,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   //init_console();
   
   env->AddFunction("Time", "c[name]s", Create_Time, 0);
-  env->AddFunction("ImageCompare", "cc[thresh]i[chroma]b", ImageCompare::Create, 0);
+  env->AddFunction("ImageCompare", "cc[thresh]i[chroma]b[alpha]b", ImageCompare::Create, 0);
 
   return "K Debug Plugin";
 }

@@ -22,17 +22,7 @@
 
 #define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
 
-int GetDeviceType(const PClip& clip);
-
-template <typename T> struct VectorType {};
-
-template <> struct VectorType<unsigned char> {
-	typedef uchar4 type;
-};
-
-template <> struct VectorType<unsigned short> {
-	typedef ushort4 type;
-};
+int GetDeviceTypes(const PClip& clip);
 
 static int scaleParam(float thresh, int pixelBits)
 {
@@ -53,7 +43,7 @@ public:
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
 		if (cachehints == CACHE_GET_DEV_TYPE) {
-			return GetDeviceType(child) &
+			return GetDeviceTypes(child) &
 				(DEV_TYPE_CPU | DEV_TYPE_CUDA);
 		}
 		return 0;

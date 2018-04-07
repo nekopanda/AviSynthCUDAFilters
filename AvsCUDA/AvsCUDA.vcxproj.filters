@@ -16,10 +16,22 @@
     <Filter Include="ソース ファイル\filters">
       <UniqueIdentifier>{927c6064-298f-407a-94e9-0ec13573f764}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\filters">
+      <UniqueIdentifier>{a62e137c-b16d-4dae-945a-8e3160480d22}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AvsCUDA.h">
       <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\focus.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\merge.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\merge_avx2.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -33,6 +45,12 @@
       <Filter>ソース ファイル\filters</Filter>
     </ClCompile>
     <ClCompile Include="filters\focus_avx2.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\merge_avx2.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\merge.cu">
       <Filter>ソース ファイル\filters</Filter>
     </ClCompile>
   </ItemGroup>

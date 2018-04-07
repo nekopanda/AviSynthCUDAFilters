@@ -65,4 +65,4 @@ public:
 
 #define COMBE_FLAG_STR "KRemoveCombe_Flag"
 
-int GetDeviceType(const PClip& clip);
+int GetDeviceTypes(const PClip& clip);

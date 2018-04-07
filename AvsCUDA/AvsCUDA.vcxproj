@@ -173,11 +173,23 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="AvsCUDA.h" />
+    <ClInclude Include="filters\focus.h" />
+    <ClInclude Include="filters\merge.h" />
+    <ClInclude Include="filters\merge_avx2.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AvsCUDA.cpp" />
     <ClCompile Include="filters\focus.cpp" />
     <ClCompile Include="filters\focus_avx2.cpp">
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <CudaCompile Include="filters\merge.cu">
+      <FileType>CppCode</FileType>
+    </CudaCompile>
+    <ClCompile Include="filters\merge_avx2.cpp">
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>

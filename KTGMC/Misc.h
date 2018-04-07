@@ -2,5 +2,5 @@
 
 #include "avisynth.h"
 
-int GetDeviceType(const PClip& clip);
+int GetDeviceTypes(const PClip& clip);
 

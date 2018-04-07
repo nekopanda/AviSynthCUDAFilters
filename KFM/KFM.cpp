@@ -18,7 +18,7 @@ void OnCudaError(cudaError_t err) {
 #endif
 }
 
-int GetDeviceType(const PClip& clip)
+int GetDeviceTypes(const PClip& clip)
 {
   int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
   if (devtypes == 0) {
@@ -366,8 +366,8 @@ public:
 
 		// フレームをCUDAに持っていった後、
     // CPUからも取得できるようにプロパティにも入れておく
-    dst->SetProps("KFM_Pattern", result.first);
-    dst->SetProps("KFM_Cost", result.second);
+    dst->SetProperty("KFM_Pattern", result.first);
+    dst->SetProperty("KFM_Cost", result.second);
 
     return dst;
 	}
@@ -452,7 +452,7 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
   {
     PVideoFrame src = child->GetFrame(n, env);
-    PVideoFrame flag = src->GetProps(COMBE_FLAG_STR)->GetFrame();
+    PVideoFrame flag = src->GetProperty(COMBE_FLAG_STR)->GetFrame();
     PVideoFrame dst = env->NewVideoFrame(vi);
 
     ShowCombe(src, flag, dst);

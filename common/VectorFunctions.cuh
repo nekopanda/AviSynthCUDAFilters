@@ -329,6 +329,9 @@ template <> struct VHelper<float4> {
     float4 r = { a, a, a, a };
     return r;
   }
+  static __device__ __host__ float4 cast_to(float4 a) {
+    return a;
+  }
 };
 
 template <int VLEN> struct VLoad { };
@@ -360,3 +363,16 @@ template <> struct VLoad<4> {
 	}
 };
 
+template <typename T> struct VectorType {};
+
+template <> struct VectorType<unsigned char> {
+  typedef uchar4 type;
+};
+
+template <> struct VectorType<unsigned short> {
+  typedef ushort4 type;
+};
+
+template <> struct VectorType<float> {
+  typedef float4 type;
+};

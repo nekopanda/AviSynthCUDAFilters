@@ -10,17 +10,6 @@
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
 
-#ifndef NDEBUG
-//#if 1
-#define DEBUG_SYNC \
-CUDA_CHECK(cudaGetLastError()); \
-CUDA_CHECK(cudaDeviceSynchronize())
-#else
-#define DEBUG_SYNC
-#endif
-
-#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
-
 #pragma region AveragePlane CUDA
 enum {
   SUM_TH_W = 16,
@@ -808,7 +797,7 @@ __global__ void kl_init_hist(T* sum, int len)
 
 __device__ uchar4 to_count_index(uchar4 src, int maxv) { return src; }
 __device__ int4 to_count_index(ushort4 src, int maxv) { return min(to_int(src), maxv); }
-__device__ int4 to_count_index(float4 src, int maxv) { return to_int(clamp(src * 65536.0f, 0.0f, 65536.0f)); }
+__device__ int4 to_count_index(float4 src, int maxv) { return to_int(clamp(src * 65535.0f + 0.5f, 0.0f, 65535.0f)); }
 
 template <typename vpixel_t, typename sum_t>
 __global__ void kl_count_hist(

@@ -30,7 +30,7 @@ void OnCudaError(cudaError_t err) {
 #endif
 }
 
-int GetDeviceType(const PClip& clip)
+int GetDeviceTypes(const PClip& clip)
 {
   int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
   if (devtypes == 0) {

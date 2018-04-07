@@ -31,17 +31,6 @@
 
 #define LOG_PRINT 0
 
-template <typename T> struct VectorType {};
-
-template <> struct VectorType<unsigned char> {
-  typedef uchar4 type;
-};
-
-template <> struct VectorType<unsigned short> {
-  typedef ushort4 type;
-};
-
-
 class CUDAFilterBase : public GenericVideoFilter {
 public:
   CUDAFilterBase(PClip _child) : GenericVideoFilter(_child) { }
@@ -3279,7 +3268,7 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+      return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   };

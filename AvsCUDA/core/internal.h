@@ -37,7 +37,7 @@
 #define __Internal_H__
 
 #include <avs/config.h>
-#include <avs/minmax.h>
+#include "CommonFunctions.h"
 #include <stdint.h>
 #include <string.h>
 

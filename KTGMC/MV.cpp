@@ -783,7 +783,7 @@ public:
   
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+      return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   };
@@ -2741,7 +2741,7 @@ public:
 			// fill all vectors with invalid data
 			pAnalyzer->WriteDefault(pDst);
 
-			dst->SetProps(GetAnalyzeValidPropName(), false);
+			dst->SetProperty(GetAnalyzeValidPropName(), false);
 
 			return dst;
 		}
@@ -2775,7 +2775,7 @@ public:
 		for (int b = 0; b < numBatch; ++b) {
 			// フレーム確保
 			batchFrames[b] = env->NewVideoFrame(vi);
-			batchFrames[b]->SetProps(GetAnalyzeValidPropName(), true);
+			batchFrames[b]->SetProperty(GetAnalyzeValidPropName(), true);
 			ppOut[b] = reinterpret_cast<VECTOR*>(batchFrames[b]->GetWritePtr());
 
 			const int nsrc = requestedBatch * maxBatch + minframe + b;
@@ -2832,7 +2832,7 @@ public:
       return MT_MULTI_INSTANCE;
     }
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+      return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   }
@@ -2993,7 +2993,7 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+      return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
   };
@@ -3183,7 +3183,7 @@ public:
     VECTOR* kdata = reinterpret_cast<VECTOR*>(ret->GetWritePtr());
 
     // validity
-    ret->SetProps(GetAnalyzeValidPropName(), pMv[1]);
+    ret->SetProperty(GetAnalyzeValidPropName(), pMv[1]);
     pMv += 2;
 
     // mvデータ
@@ -3279,7 +3279,7 @@ public:
     pMv += pMv[0] / sizeof(int);
 
     // validity
-    bool isValid = (kmvframe->GetProps(GetAnalyzeValidPropName())->GetInt() != 0);
+    bool isValid = (kmvframe->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0);
     pMv[1] = isValid;
     pMv += 2;
 
@@ -3370,7 +3370,7 @@ public:
     GetMVData(n, pMv, data_size, env);
 
     // validity
-		bool isValid = (kmvframe->GetProps(GetAnalyzeValidPropName())->GetInt() != 0);
+		bool isValid = (kmvframe->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0);
 		if (isValid != (pMv[1] != 0)) {
       env->ThrowError("Validity missmatch");
     }
@@ -3430,8 +3430,8 @@ public:
 		const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
 
 		// validity
-		bool data1valid = kmvframe1->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
-		bool data2valid = kmvframe2->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
+		bool data1valid = kmvframe1->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+		bool data2valid = kmvframe2->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
     if (data1valid != data2valid) {
       env->ThrowError("Validity missmatch");
     }
@@ -4687,7 +4687,7 @@ public:
     for (int j = delta - 1; j >= 0; j--)
     {
 			mvF[j] = rawClipF[j]->GetFrame(n, env);
-			bool isValid = mvF[j]->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
+			bool isValid = mvF[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
 			mvClipF[j]->SetData(reinterpret_cast<const VECTOR*>(mvF[j]->GetReadPtr()), isValid);
       refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
       SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
@@ -4700,7 +4700,7 @@ public:
     for (int j = 0; j < delta; j++)
     {
       mvB[j] = rawClipB[j]->GetFrame(n, env);
-			bool isValid = mvB[j]->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
+			bool isValid = mvB[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
 			mvClipB[j]->SetData(reinterpret_cast<const VECTOR*>(mvB[j]->GetReadPtr()), isValid);
       refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
       SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
@@ -4735,8 +4735,8 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       int devtypes = DEV_TYPE_CPU | DEV_TYPE_CUDA;
       for (int i = 0; i < 2; ++i) {
-        if (rawClipB[i]) devtypes &= GetDeviceType(rawClipB[i]);
-        if (rawClipF[i]) devtypes &= GetDeviceType(rawClipF[i]);
+        if (rawClipB[i]) devtypes &= GetDeviceTypes(rawClipB[i]);
+        if (rawClipF[i]) devtypes &= GetDeviceTypes(rawClipF[i]);
       }
       return devtypes;
     }
@@ -5264,9 +5264,9 @@ public:
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
-      return GetDeviceType(child) &
-        GetDeviceType(super) &
-        GetDeviceType(vectors) &
+      return GetDeviceTypes(child) &
+        GetDeviceTypes(super) &
+        GetDeviceTypes(vectors) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
     return 0;
@@ -5281,7 +5281,7 @@ public:
     SetSuperFrameTarget(superFrame[0].get(), ref0, params->nPixelShift);
 
 		PVideoFrame mv = vectors->GetFrame(n, env);
-		bool isValid = mv->GetProps(GetAnalyzeValidPropName())->GetInt() != 0;
+		bool isValid = mv->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
 		mvClip->SetData(reinterpret_cast<const VECTOR*>(mv->GetReadPtr()), isValid);
     PVideoFrame	ref = mvClip->GetRefFrame(usable_flag, super, n, env);
     SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);

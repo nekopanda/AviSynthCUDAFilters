@@ -20,4 +20,18 @@ struct FuncDefinition {
 
 #define BUILTIN_FUNC_PREFIX "dummy"
 
-int GetDeviceType(const PClip& clip);
+int GetDeviceTypes(const PClip& clip);
+
+void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, IScriptEnvironment2* env);
+
+#ifndef NDEBUG
+//#if 1
+#define DEBUG_SYNC \
+CUDA_CHECK(cudaGetLastError()); \
+CUDA_CHECK(cudaDeviceSynchronize())
+#else
+#define DEBUG_SYNC
+#endif
+
+#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
+
