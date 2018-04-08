@@ -720,7 +720,7 @@ __global__ void kl_merge_plane(vpixel_t* srcp, const vpixel_t* otherp,
 
 static void merge_plane_cuda(BYTE* srcp, const BYTE* otherp,
   int src_pitch, int other_pitch, int src_rowsize, int src_height,
-  float weight, int pixelsize, int bits_per_pixel, IScriptEnvironment2 *env)
+  float weight, int pixelsize, int bits_per_pixel, PNeoEnv env)
 {
   int pixelshift = (pixelsize == 1) ? 0 : (pixelsize == 2) ? 1 : 2;
   int width4 = ((src_rowsize >> pixelshift) + 3) >> 2;
@@ -770,7 +770,7 @@ __global__ void kl_average_plane(vpixel_t* srcp, const vpixel_t* otherp,
 
 static void average_plane_cuda(BYTE* srcp, const BYTE* otherp,
   int src_pitch, int other_pitch, int src_rowsize, int src_height,
-  int pixelsize, int bits_per_pixel, IScriptEnvironment2 *env)
+  int pixelsize, int bits_per_pixel, PNeoEnv env)
 {
   int pixelshift = (pixelsize == 1) ? 0 : (pixelsize == 2) ? 1 : 2;
   int width4 = ((src_rowsize >> pixelshift) + 3) >> 2;
@@ -849,7 +849,7 @@ MergeFuncPtr getMergeFunc(int bits_per_pixel, int cpuFlags, BYTE *srcp, const BY
   return &weighted_merge_planar_c_float;
 }
 
-static void merge_plane(BYTE* srcp, const BYTE* otherp, int src_pitch, int other_pitch, int src_rowsize, int src_height, float weight, int pixelsize, int bits_per_pixel, IScriptEnvironment2 *env)
+static void merge_plane(BYTE* srcp, const BYTE* otherp, int src_pitch, int other_pitch, int src_rowsize, int src_height, float weight, int pixelsize, int bits_per_pixel, PNeoEnv env)
 {
   if ((weight > 0.4961f) && (weight < 0.5039f))
   {
@@ -939,7 +939,7 @@ MergeChroma::MergeChroma(PClip _child, PClip _clip, float _weight, IScriptEnviro
 
 PVideoFrame __stdcall MergeChroma::GetFrame(int n, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  PNeoEnv env = env_;
 
   PVideoFrame src = child->GetFrame(n, env);
 
@@ -1103,7 +1103,7 @@ MergeLuma::MergeLuma(PClip _child, PClip _clip, float _weight, IScriptEnvironmen
 
 PVideoFrame __stdcall MergeLuma::GetFrame(int n, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  PNeoEnv env = env_;
 
   PVideoFrame src = child->GetFrame(n, env);
 
@@ -1247,7 +1247,7 @@ MergeAll::MergeAll(PClip _child, PClip _clip, float _weight, IScriptEnvironment*
 
 PVideoFrame __stdcall MergeAll::GetFrame(int n, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  PNeoEnv env = env_;
 
   if (weight<0.0039f) return child->GetFrame(n, env);
   if (weight>0.9961f) return clip->GetFrame(n, env);

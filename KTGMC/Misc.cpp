@@ -1,7 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
+#include "avisynth.h"
+
 #define NOMINMAX
 #include <windows.h>
-#include "avisynth.h"
 
 #include "CommonFunctions.h"
 #include "DeviceLocalData.h"
@@ -14,8 +15,8 @@
 #include "DebugWriter.cpp"
 #include "DeviceLocalData.cpp"
 
-void AddFuncKernel(IScriptEnvironment2* env);
-void AddFuncMV(IScriptEnvironment2* env);
+void AddFuncKernel(IScriptEnvironment* env);
+void AddFuncMV(IScriptEnvironment* env);
 
 static void init_console()
 {
@@ -71,10 +72,9 @@ AVSValue __cdecl Create_Time(AVSValue args, void* user_data, IScriptEnvironment*
 
 const AVS_Linkage *AVS_linkage = 0;
 
-extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env_, const AVS_Linkage* const vectors)
+extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
-	AVS_linkage = vectors;
+  AVS_linkage = vectors;
 	//init_console();
 
 	AddFuncKernel(env);

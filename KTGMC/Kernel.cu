@@ -1,7 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
+#include "avisynth.h"
+
 #define NOMINMAX
 #include <windows.h>
-#include "avisynth.h"
 
 #include <algorithm>
 #include <memory>
@@ -27,7 +28,7 @@
 #define DEBUG_SYNC
 #endif
 
-#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
+#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
 
 #define LOG_PRINT 0
 
@@ -45,7 +46,7 @@ public:
 #pragma region resample
 
 struct ResamplingProgram {
-	IScriptEnvironment2 * env;
+	PNeoEnv env;
 	int source_size, target_size;
 	double crop_start, crop_size;
 	int filter_size;
@@ -58,7 +59,7 @@ struct ResamplingProgram {
   std::unique_ptr<DeviceLocalData<float>> pixel_coefficient_float;
 
 	ResamplingProgram(int filter_size, int source_size, int target_size, double crop_start, double crop_size, 
-    int* ppixel_offset, float* ppixel_coefficient_float, IScriptEnvironment2* env)
+    int* ppixel_offset, float* ppixel_coefficient_float, PNeoEnv env)
 		: filter_size(filter_size), source_size(source_size), target_size(target_size), crop_start(crop_start), crop_size(crop_size),
 		env(env)
 	{
@@ -78,10 +79,10 @@ public:
 	virtual double f(double x) = 0;
 	virtual double support() = 0;
 
-	virtual std::unique_ptr<ResamplingProgram> GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, IScriptEnvironment2* env);
+	virtual std::unique_ptr<ResamplingProgram> GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, PNeoEnv env);
 };
 
-std::unique_ptr<ResamplingProgram> ResamplingFunction::GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, IScriptEnvironment2* env)
+std::unique_ptr<ResamplingProgram> ResamplingFunction::GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, PNeoEnv env)
 {
 	double filter_scale = double(target_size) / crop_size;
 	double filter_step = min(filter_scale, 1.0);
@@ -389,7 +390,7 @@ class KTGMC_Bob : public CUDAFilterBase {
 
   template <typename pixel_t>
 	void MakeFrameT(bool top, PVideoFrame& src, PVideoFrame& dst,
-		ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
+		ResamplingProgram* program_y, ResamplingProgram* program_uv, PNeoEnv env)
 	{
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -426,7 +427,7 @@ class KTGMC_Bob : public CUDAFilterBase {
 	}
 
   void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
-    ResamplingProgram* program_y, ResamplingProgram* program_uv, IScriptEnvironment2* env)
+    ResamplingProgram* program_y, ResamplingProgram* program_uv, PNeoEnv env)
   {
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
@@ -449,7 +450,7 @@ public:
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 
 		// フレーム数、FPSを2倍
 		vi.num_frames *= 2;
@@ -468,7 +469,7 @@ public:
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KTGMC_Bob] CUDAフレームを入力してください");
@@ -603,14 +604,14 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
   int logUVx;
   int logUVy;
 
-  PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+  PVideoFrame GetRefFrame(int ref, PNeoEnv env)
   {
     ref = clamp(ref, 0, vi.num_frames);
     return child->GetFrame(ref, env);
   }
 
   template <typename pixel_t>
-  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -721,7 +722,7 @@ public:
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (radius != 1 && radius != 2) {
       env->ThrowError("[KBinomialTemporalSoften] radiusは1か2です");
@@ -730,7 +731,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KBinomialTemporalSoften] CUDAフレームを入力してください");
@@ -1012,7 +1013,7 @@ class KRemoveGrain : public CUDAFilterBase {
   int logUVy;
 
   template <typename pixel_t>
-  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -1117,7 +1118,7 @@ public:
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int modes[] = { mode, modeU, modeV };
     for (int p = 0; p < 3; ++p) {
@@ -1140,7 +1141,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KRemoveGrain] CUDAフレームを入力してください");
@@ -1183,7 +1184,7 @@ class KRepair : public CUDAFilterBase {
   int logUVy;
 
   template <typename pixel_t>
-  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -1277,7 +1278,7 @@ public:
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int modes[] = { mode, modeU, modeV };
     for (int p = 0; p < 3; ++p) {
@@ -1297,7 +1298,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KRepair] CUDAフレームを入力してください");
@@ -1356,7 +1357,7 @@ class KVerticalCleaner : public CUDAFilterBase {
   int logUVy;
 
   template <typename pixel_t>
-  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -1430,7 +1431,7 @@ public:
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int modes[] = { mode, modeU, modeV };
     for (int p = 0; p < 3; ++p) {
@@ -1446,7 +1447,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KVerticalCleaner] CUDAフレームを入力してください");
@@ -1488,7 +1489,7 @@ class KGaussResize : public CUDAFilterBase {
   int logUVy;
 
   template <typename pixel_t>
-  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -1579,7 +1580,7 @@ public:
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
     , chroma(chroma)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int width = vi.width;
     int height = vi.height;
@@ -1599,7 +1600,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KGaussResize] CUDAフレームを入力してください");
@@ -1637,14 +1638,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env) { }
+    int width, int height, int pitch, PNeoEnv env) { }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env) { }
+    int width, int height, int pitch, PNeoEnv env) { }
 
   template <typename pixel_t>
-  PVideoFrame Proc(int n, IScriptEnvironment2* env)
+  PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -1760,7 +1761,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KMasktoolFilterBase] CUDAフレームを入力してください");
@@ -1817,14 +1818,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
@@ -1832,7 +1833,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -1940,14 +1941,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
@@ -1955,7 +1956,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2072,14 +2073,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
@@ -2087,7 +2088,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2115,14 +2116,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
@@ -2130,7 +2131,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2158,14 +2159,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
@@ -2173,7 +2174,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2262,14 +2263,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
   }
@@ -2277,7 +2278,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc, const pixel_t* pDiff, const pixel_t* pChoke1, const pixel_t* pChoke2,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2381,21 +2382,21 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, width, height, pitch, env);
   }
 
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, int width, int height, int pitch, IScriptEnvironment2* env)
+    const pixel_t* pSrc0, int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2463,14 +2464,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
@@ -2478,7 +2479,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, 
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2557,14 +2558,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, env);
   }
@@ -2572,7 +2573,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc, const pixel_t* pRef, const pixel_t* pCompB, const pixel_t* pCompF,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2648,21 +2649,21 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(p, pDst, pSrc0, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(p, pDst, pSrc0, width, height, pitch, env);
   }
 
   template <typename pixel_t>
   void ProcPlane_(int p, pixel_t* pDst,
-    const pixel_t* pSrc, int width, int height, int pitch, IScriptEnvironment2* env)
+    const pixel_t* pSrc, int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2753,14 +2754,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
@@ -2768,7 +2769,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pX, const pixel_t* pY,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2831,14 +2832,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
@@ -2846,7 +2847,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1, 
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -2946,14 +2947,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
   }
@@ -2961,7 +2962,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pRepair, const pixel_t* pBobbed, const pixel_t* pBlur,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -3027,14 +3028,14 @@ protected:
 
   virtual void ProcPlane(int p, uint8_t* pDst,
     const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
 
   virtual void ProcPlane(int p, uint16_t* pDst,
     const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, env);
   }
@@ -3042,7 +3043,7 @@ protected:
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
     const pixel_t* pSrc0, const pixel_t* pSrc1,
-    int width, int height, int pitch, IScriptEnvironment2* env)
+    int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -3098,7 +3099,7 @@ class KDoubleWeave : public CUDAFilterBase
   int logUVy;
 
   template <typename pixel_t>
-  void Proc(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, IScriptEnvironment2* env)
+  void Proc(PVideoFrame& dst, PVideoFrame& top, PVideoFrame& bottom, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -3141,7 +3142,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KDoubleWeave] CUDAフレームを入力してください");
@@ -3197,7 +3198,7 @@ class KCopy : public GenericVideoFilter
   int logUVy;
 
   template <typename pixel_t>
-  void Proc(PVideoFrame& dst, PVideoFrame& src, IScriptEnvironment2* env)
+  void Proc(PVideoFrame& dst, PVideoFrame& src, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
@@ -3247,7 +3248,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame dst = env->NewVideoFrame(vi);
 
@@ -3280,7 +3281,7 @@ public:
   }
 };
 
-void AddFuncKernel(IScriptEnvironment2* env)
+void AddFuncKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KTGMC_Bob", "c[b]f[c]f", KTGMC_Bob::Create, 0);
   env->AddFunction("KBinomialTemporalSoften", "ci[scenechange]i[chroma]b", KBinomialTemporalSoften::Create, 0);

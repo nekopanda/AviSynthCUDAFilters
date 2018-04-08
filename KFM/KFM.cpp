@@ -101,7 +101,7 @@ class KShowStatic : public GenericVideoFilter
   }
 
 public:
-  KShowStatic(PClip sttclip, PClip clip30, IScriptEnvironment2* env)
+  KShowStatic(PClip sttclip, PClip clip30, PNeoEnv env)
     : GenericVideoFilter(clip30)
     , sttclip(sttclip)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -111,7 +111,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     PVideoFrame flag = sttclip->GetFrame(n, env);
     PVideoFrame frame30 = child->GetFrame(n, env);
@@ -125,7 +125,7 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
     return new KShowStatic(
       args[0].AsClip(),       // sttclip
       args[1].AsClip(),       // clip30

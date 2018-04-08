@@ -20,7 +20,7 @@ __global__ void kl_copy(
   }
 }
 
-void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, IScriptEnvironment2* env)
+void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, PNeoEnv env)
 {
   if (src_pitch == 0) return;
 
@@ -75,7 +75,7 @@ class Align : public GenericVideoFilter
   }
 
   template <typename pixel_t>
-  void Proc(PVideoFrame& dst, PVideoFrame& src, IScriptEnvironment2* env)
+  void Proc(PVideoFrame& dst, PVideoFrame& src, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const int *planes = GetPlanes();
@@ -119,13 +119,13 @@ public:
     : GenericVideoFilter(child)
     , isRGB(vi.IsPlanarRGB() || vi.IsPlanarRGBA())
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
     systemFrameAlign = env->GetProperty(AEP_FRAME_ALIGN);
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     PVideoFrame src = child->GetFrame(n, env);
     if (IsAligned(src)) {
@@ -182,7 +182,7 @@ public:
 
 void copy_field(const PVideoFrame& dst, const PVideoFrame& src, bool yuv, bool planarRGB, bool parity, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  PNeoEnv env = env_;
 
   bool noTopBottom = yuv || planarRGB;
 
@@ -254,7 +254,7 @@ public:
 
 void copy_alternate_lines(const PVideoFrame& dst, const PVideoFrame& src, bool yuv, bool planarRGB, bool parity, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  PNeoEnv env = env_;
 
   bool noTopBottom = yuv || planarRGB;
 
@@ -487,7 +487,7 @@ __global__ void kl_invert_plane(vpixel_t* ptr, int width, int height, int pitch,
 }
 
 template <typename vpixel_t>
-static void launch_invert_plane(vpixel_t* ptr, int width, int height, int pitch, int mask0, int mask1, IScriptEnvironment2 *env)
+static void launch_invert_plane(vpixel_t* ptr, int width, int height, int pitch, int mask0, int mask1, PNeoEnv env)
 {
   dim3 threads(32, 8);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
@@ -509,7 +509,7 @@ __global__ void kl_invert_rgb(pixel_t* ptr, int width, int height, int el_pitch,
 }
 
 template <typename pixel_t>
-static void launch_invert_rgb(pixel_t* ptr, int width, int height, int el_pitch, int bMask, int gMask, int rMask, IScriptEnvironment2 *env)
+static void launch_invert_rgb(pixel_t* ptr, int width, int height, int el_pitch, int bMask, int gMask, int rMask, PNeoEnv env)
 {
   dim3 threads(32, 8);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
@@ -662,7 +662,7 @@ static void invert_plane_float_c(BYTE* frame, int pitch, int row_size, int heigh
   }
 }
 
-static void invert_frame(BYTE* frame, int pitch, int rowsize, int height, int mask, uint64_t mask64, int pixelsize, IScriptEnvironment2 *env) {
+static void invert_frame(BYTE* frame, int pitch, int rowsize, int height, int mask, uint64_t mask64, int pixelsize, PNeoEnv env) {
   if (IS_CUDA) {
     if (pixelsize == 1) {
       launch_invert_plane((int*)frame, (rowsize + 3) >> 2, height, pitch >> 2, mask, 0, env);
@@ -707,7 +707,7 @@ static void invert_frame_uint16(BYTE* frame, int pitch, int rowsize, int height,
 }
 
 
-static void invert_plane(BYTE* frame, int pitch, int rowsize, int height, int pixelsize, uint64_t mask64, bool chroma, IScriptEnvironment2 *env) {
+static void invert_plane(BYTE* frame, int pitch, int rowsize, int height, int pixelsize, uint64_t mask64, bool chroma, PNeoEnv env) {
   if (IS_CUDA) {
     if (pixelsize == 1) {
       launch_invert_plane((int*)frame, (rowsize + 3) >> 2, height, pitch >> 2, 0xFFFFFFFF, 0, env);
@@ -748,7 +748,7 @@ static void invert_plane(BYTE* frame, int pitch, int rowsize, int height, int pi
 
 PVideoFrame Invert::GetFrame(int n, IScriptEnvironment* env_)
 {
-  IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+  PNeoEnv env = env_;
 
   PVideoFrame f = child->GetFrame(n, env);
 

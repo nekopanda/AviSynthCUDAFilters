@@ -1,8 +1,8 @@
 #pragma once
+#include "avisynth.h"
 
 #define NOMINMAX
 #include <windows.h>
-#include "avisynth.h"
 
 #include "CommonFunctions.h"
 
@@ -10,11 +10,11 @@
 class CudaKernelBase
 {
 protected:
-  IScriptEnvironment2* env;
+  PNeoEnv env;
   cudaStream_t stream;
 public:
 
-  void SetEnv(IScriptEnvironment2* env)
+  void SetEnv(PNeoEnv env)
   {
     this->env = env;
     stream = static_cast<cudaStream_t>(env->GetDeviceStream());

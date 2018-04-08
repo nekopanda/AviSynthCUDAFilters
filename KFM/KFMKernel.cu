@@ -21,7 +21,7 @@
 #define DEBUG_SYNC
 #endif
 
-#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
+#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
 
 static int scaleParam(float thresh, int pixelBits)
 {
@@ -418,7 +418,7 @@ protected:
   int logUVy;
 
   template <typename pixel_t>
-  void CopyFrame(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment2* env)
+  void CopyFrame(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
@@ -453,7 +453,7 @@ protected:
   }
 
   template <typename pixel_t>
-  void PadFrame(PVideoFrame& dst, IScriptEnvironment2* env)
+  void PadFrame(PVideoFrame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
@@ -490,7 +490,7 @@ protected:
   void LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
     const vpixel_t* base, const vpixel_t* sref, const vpixel_t* mref,
     int width, int height, int pitch, int threshM, int threshS, int threshLS,
-    IScriptEnvironment2* env)
+    PNeoEnv env)
   {
     if (IS_CUDA) {
       dim3 threads(32, 16);
@@ -506,7 +506,7 @@ protected:
 
   template <typename pixel_t>
   void AnalyzeFrame(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& flag, 
-    const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, IScriptEnvironment2* env)
+    const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -551,7 +551,7 @@ protected:
     }
   }
 
-  void MergeUVFlags(PVideoFrame& flag, IScriptEnvironment2* env)
+  void MergeUVFlags(PVideoFrame& flag, PNeoEnv env)
   {
     uint8_t* fY = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_Y));
     uint8_t* fU = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_U));
@@ -573,7 +573,7 @@ protected:
   }
 
   template <typename pixel_t>
-  void MergeUVCoefs(PVideoFrame& flag, IScriptEnvironment2* env)
+  void MergeUVCoefs(PVideoFrame& flag, PNeoEnv env)
   {
     pixel_t* fY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
     pixel_t* fU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
@@ -595,7 +595,7 @@ protected:
   }
 
   template <typename pixel_t>
-  void ApplyUVCoefs(PVideoFrame& flag, IScriptEnvironment2* env)
+  void ApplyUVCoefs(PVideoFrame& flag, PNeoEnv env)
   {
     pixel_t* fY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
     pixel_t* fU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
@@ -618,7 +618,7 @@ protected:
   }
 
   template <typename pixel_t>
-  void ExtendCoefs(PVideoFrame& src, PVideoFrame& dst, IScriptEnvironment2* env)
+  void ExtendCoefs(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
@@ -646,7 +646,7 @@ protected:
   }
 
   template <typename pixel_t>
-  void CompareFields(PVideoFrame& src, PVideoFrame& flag, IScriptEnvironment2* env)
+  void CompareFields(PVideoFrame& src, PVideoFrame& flag, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
@@ -680,7 +680,7 @@ protected:
     }
   }
 
-  PVideoFrame OffsetPadFrame(const PVideoFrame& frame, IScriptEnvironment2* env)
+  PVideoFrame OffsetPadFrame(const PVideoFrame& frame, PNeoEnv env)
   {
     int vpad = VPAD;
     int vpadUV = VPAD >> logUVy;
@@ -819,14 +819,14 @@ class KTemporalDiff : public KFMFilterBase
 		N_REFS = DIST * 2 + 1,
 	};
 
-	PVideoFrame GetRefFrame(int ref, IScriptEnvironment2* env)
+	PVideoFrame GetRefFrame(int ref, PNeoEnv env)
 	{
 		ref = clamp(ref, 0, vi.num_frames);
 		return child->GetFrame(ref, env);
 	}
 
 	template <typename pixel_t>
-	void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, IScriptEnvironment2* env)
+	void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -872,7 +872,7 @@ class KTemporalDiff : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		PVideoFrame frames[N_REFS];
 		for (int i = 0; i < N_REFS; ++i) {
@@ -886,13 +886,13 @@ class KTemporalDiff : public KFMFilterBase
 	}
 
 public:
-	KTemporalDiff(PClip clip30, IScriptEnvironment2* env)
+	KTemporalDiff(PClip clip30, PNeoEnv env)
 		: KFMFilterBase(clip30)
 	{ }
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
@@ -909,7 +909,7 @@ public:
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		return new KTemporalDiff(
 			args[0].AsClip(),       // clip30
 			env);
@@ -930,14 +930,14 @@ class KAnalyzeStatic : public KFMFilterBase
   float thcombe;
   float thdiff;
 
-  PVideoFrame GetDiffFrame(int ref, IScriptEnvironment2* env)
+  PVideoFrame GetDiffFrame(int ref, PNeoEnv env)
   {
     ref = clamp(ref, 0, vi.num_frames);
     return diffclip->GetFrame(ref, env);
   }
 
   template <typename pixel_t>
-  void GetTemporalDiff(PVideoFrame* frames, PVideoFrame& flag, IScriptEnvironment2* env)
+  void GetTemporalDiff(PVideoFrame* frames, PVideoFrame& flag, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -983,7 +983,7 @@ class KAnalyzeStatic : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  void AndCoefs(PVideoFrame& dst, PVideoFrame& flagd, IScriptEnvironment2* env)
+  void AndCoefs(PVideoFrame& dst, PVideoFrame& flagd, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const vpixel_t* diffp = reinterpret_cast<const vpixel_t*>(flagd->GetReadPtr());
@@ -1009,7 +1009,7 @@ class KAnalyzeStatic : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     PVideoFrame diffframes[N_DIFFS];
     for (int i = 0; i < N_DIFFS; ++i) {
@@ -1038,7 +1038,7 @@ class KAnalyzeStatic : public KFMFilterBase
   }
 
 public:
-  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, IScriptEnvironment2* env)
+  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, PNeoEnv env)
     : KFMFilterBase(clip30)
 		, diffclip(diffclip)
     , thcombe(thcombe)
@@ -1052,7 +1052,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
@@ -1069,7 +1069,7 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 		PClip clip30 = args[0].AsClip();
 		PClip diffclip = env_->Invoke("KTemporalDiff", clip30).AsClip();
     return new KAnalyzeStatic(
@@ -1120,7 +1120,7 @@ class KMergeStatic : public KFMFilterBase
   PClip sttclip;
 
   template <typename pixel_t>
-  void MergeStatic(PVideoFrame& src60, PVideoFrame& src30, PVideoFrame& flag, PVideoFrame& dst, IScriptEnvironment2* env)
+  void MergeStatic(PVideoFrame& src60, PVideoFrame& src30, PVideoFrame& flag, PVideoFrame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const vpixel_t* src60Y = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_Y));
@@ -1164,7 +1164,7 @@ class KMergeStatic : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     int n30 = n >> 1;
     PVideoFrame flag = sttclip->GetFrame(n30, env);
@@ -1179,7 +1179,7 @@ class KMergeStatic : public KFMFilterBase
   }
 
 public:
-  KMergeStatic(PClip clip60, PClip clip30, PClip sttclip, IScriptEnvironment2* env)
+  KMergeStatic(PClip clip60, PClip clip30, PClip sttclip, PNeoEnv env)
     : KFMFilterBase(clip60)
     , clip30(clip30)
     , sttclip(sttclip)
@@ -1192,7 +1192,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
@@ -1209,7 +1209,7 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
     return new KMergeStatic(
       args[0].AsClip(),       // clip60
       args[1].AsClip(),       // clip30
@@ -1292,7 +1292,7 @@ class KFMFrameAnalyze : public KFMFilterBase
   FrameAnalyzeParam prmY;
   FrameAnalyzeParam prmC;
 
-  void CountFlags(PVideoFrame& flag, PVideoFrame& dst, int parity, IScriptEnvironment2* env)
+  void CountFlags(PVideoFrame& flag, PVideoFrame& dst, int parity, PNeoEnv env)
   {
     const uchar4* flagp = reinterpret_cast<const uchar4*>(flag->GetReadPtr(PLANAR_Y));
     FMCount* fmcnt = reinterpret_cast<FMCount*>(dst->GetWritePtr());
@@ -1324,7 +1324,7 @@ class KFMFrameAnalyze : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     int parity = child->GetParity(n);
     PVideoFrame f0 = child->GetFrame(n, env);
@@ -1369,7 +1369,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
@@ -1408,7 +1408,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
     
     PVideoFrame frameA = child->GetFrame(n, env);
     PVideoFrame frameB = clipB->GetFrame(n, env);
@@ -1453,7 +1453,7 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
   int logUVx;
   int logUVy;
 
-  void VisualizeFlags(PVideoFrame& dst, PVideoFrame& fflag, IScriptEnvironment2* env)
+  void VisualizeFlags(PVideoFrame& dst, PVideoFrame& fflag, PNeoEnv env)
   {
     // 判定結果を表示
     int black[] = { 0, 128, 128 };
@@ -1510,7 +1510,7 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     PVideoFrame f0 = child->GetFrame(n, env);
     PVideoFrame f1 = child->GetFrame(n + 1, env);
@@ -1550,7 +1550,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
@@ -1586,7 +1586,7 @@ class KTelecine : public KFMFilterBase
   PulldownPatterns patterns;
 
 	template <typename pixel_t>
-	void CopyField(bool top, PVideoFrame* const * frames, const PVideoFrame& dst, IScriptEnvironment2* env)
+	void CopyField(bool top, PVideoFrame* const * frames, const PVideoFrame& dst, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		PVideoFrame& frame0 = *frames[0];
@@ -1663,7 +1663,7 @@ class KTelecine : public KFMFilterBase
 	}
 
   template <typename pixel_t>
-  PVideoFrame CreateWeaveFrame(PClip clip, int n, int fstart, int fnum, int parity, IScriptEnvironment2* env)
+  PVideoFrame CreateWeaveFrame(PClip clip, int n, int fstart, int fnum, int parity, PNeoEnv env)
   {
     // fstartは0or1にする
     if (fstart < 0 || fstart >= 2) {
@@ -1719,7 +1719,7 @@ class KTelecine : public KFMFilterBase
     }
   }
 
-  void DrawInfo(PVideoFrame& dst, int pattern, float cost, int fnum, IScriptEnvironment2* env) {
+  void DrawInfo(PVideoFrame& dst, int pattern, float cost, int fnum, PNeoEnv env) {
     env->MakeWritable(&dst);
 
     char buf[100]; sprintf(buf, "KFM: %d (%.1f) - %d", pattern, cost, fnum);
@@ -1727,7 +1727,7 @@ class KTelecine : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     int cycleIndex = n / 4;
     int parity = child->GetParity(cycleIndex * 5);
@@ -1760,7 +1760,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {
@@ -2042,7 +2042,7 @@ __global__ void kl_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height,
 	}
 }
 
-PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, IScriptEnvironment2* env)
+PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, PNeoEnv env)
 {
 	typedef typename VectorType<uint8_t>::type vpixel_t;
 
@@ -2055,13 +2055,14 @@ PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, IScriptEnvironm
 	// ゼロ初期化
 	vpixel_t* flagp = reinterpret_cast<vpixel_t*>(frame->GetWritePtr());
 	int pitch = frame->GetPitch() / sizeof(vpixel_t);
+  int width = frame->GetPitch() / sizeof(vpixel_t);
 	if (IS_CUDA) {
 		dim3 threads(32, 8);
-		dim3 blocks(nblocks(blockpadvi.width, threads.x), nblocks(blockpadvi.height, threads.y));
-		kl_fill<vpixel_t, 0><<<blocks, threads>>>(flagp, blockpadvi.width, blockpadvi.height, pitch);
+		dim3 blocks(nblocks(width, threads.x), nblocks(blockpadvi.height, threads.y));
+		kl_fill<vpixel_t, 0><<<blocks, threads>>>(flagp, width, blockpadvi.height, pitch);
 	}
 	else {
-		cpu_fill<vpixel_t, 0>(flagp, blockpadvi.width, blockpadvi.height, pitch);
+		cpu_fill<vpixel_t, 0>(flagp, width, blockpadvi.height, pitch);
 	}
 
 	return env->SubframePlanar(frame,
@@ -2087,7 +2088,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     PVideoFrame frameA = child->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
     PVideoFrame frameB = clipB->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
@@ -2129,7 +2130,7 @@ class KRemoveCombe : public KFMFilterBase
 	float thcombe;
 
 	template <typename pixel_t>
-	void DetectCombe(PVideoFrame& src, PVideoFrame& combe, IScriptEnvironment2* env)
+	void DetectCombe(PVideoFrame& src, PVideoFrame& combe, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
@@ -2170,7 +2171,7 @@ class KRemoveCombe : public KFMFilterBase
 		}
 	}
 
-	void ExtendBlocks(PVideoFrame& dst, PVideoFrame& tmp, IScriptEnvironment2* env)
+	void ExtendBlocks(PVideoFrame& dst, PVideoFrame& tmp, PNeoEnv env)
 	{
 		uint8_t* tmpY = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_Y));
 		uint8_t* tmpU = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_U));
@@ -2209,7 +2210,7 @@ class KRemoveCombe : public KFMFilterBase
 		}
 	}
 
-	void MergeUVCoefs(PVideoFrame& combe, IScriptEnvironment2* env)
+	void MergeUVCoefs(PVideoFrame& combe, PNeoEnv env)
 	{
 		uint8_t* fY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
 		uint8_t* fU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
@@ -2230,7 +2231,7 @@ class KRemoveCombe : public KFMFilterBase
 		}
 	}
 
-	void ApplyUVCoefs(PVideoFrame& combe, IScriptEnvironment2* env)
+	void ApplyUVCoefs(PVideoFrame& combe, PNeoEnv env)
 	{
 		uint8_t* fY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
 		uint8_t* fU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
@@ -2253,7 +2254,7 @@ class KRemoveCombe : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	void RemoveCombe(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& combe, int thcombe, int thdiff, IScriptEnvironment2* env)
+	void RemoveCombe(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& combe, int thcombe, int thdiff, PNeoEnv env)
 	{
 		const uint8_t* combeY = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
 		const uint8_t* combeU = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_U));
@@ -2291,7 +2292,7 @@ class KRemoveCombe : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	void VisualizeCombe(PVideoFrame& dst, PVideoFrame& combe, int thresh, IScriptEnvironment2* env)
+	void VisualizeCombe(PVideoFrame& dst, PVideoFrame& combe, int thresh, PNeoEnv env)
 	{
 		// 判定結果を表示
 		int blue[] = { 73, 230, 111 };
@@ -2326,7 +2327,7 @@ class KRemoveCombe : public KFMFilterBase
 		}
 	}
 
-	void MakeSwitchFlag(PVideoFrame& flag, PVideoFrame& flagtmp, PVideoFrame& combe, IScriptEnvironment2* env)
+	void MakeSwitchFlag(PVideoFrame& flag, PVideoFrame& flagtmp, PVideoFrame& combe, PNeoEnv env)
 	{
 		const uint8_t* srcp = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
 		uint8_t* flagp = reinterpret_cast<uint8_t*>(flag->GetWritePtr());
@@ -2357,17 +2358,19 @@ class KRemoveCombe : public KFMFilterBase
 		}
 	}
 
-	PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		typedef uint8_t pixel_t;
+
+    int frame_align = env->GetProperty(AEP_FRAME_ALIGN);
 
 		PVideoFrame src = child->GetFrame(n, env);
 		PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
 		PVideoFrame dst = env->NewVideoFrame(vi);
 		PVideoFrame combe = env->NewVideoFrame(combvi);
 		PVideoFrame combetmp = env->NewVideoFrame(combvi);
-		PVideoFrame flag = NewSwitchFlagFrame(vi, 32, 2, env);
-		PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 32, 2, env);
+		PVideoFrame flag = NewSwitchFlagFrame(vi, frame_align, 2, env);
+		PVideoFrame flagtmp = NewSwitchFlagFrame(vi, frame_align, 2, env);
 
 		CopyFrame<pixel_t>(src, padded, env);
 		PadFrame<pixel_t>(padded, env);
@@ -2421,7 +2424,7 @@ public:
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
@@ -2618,7 +2621,7 @@ class KFMSwitch : public KFMFilterBase
 
 	PulldownPatterns patterns;
 
-	bool ContainsDurtyBlock(PVideoFrame& flag, PVideoFrame& work, int thpatch, IScriptEnvironment2* env)
+	bool ContainsDurtyBlock(PVideoFrame& flag, PVideoFrame& work, int thpatch, PNeoEnv env)
 	{
 		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
 		int* pwork = reinterpret_cast<int*>(work->GetWritePtr());
@@ -2638,7 +2641,7 @@ class KFMSwitch : public KFMFilterBase
 		}
 	}
 
-	void MakeMergeFlag(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& dsttmp, PVideoFrame& srctmp, int thpatch, IScriptEnvironment2* env)
+	void MakeMergeFlag(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& dsttmp, PVideoFrame& srctmp, int thpatch, PNeoEnv env)
 	{
 		const uint8_t* srcp = reinterpret_cast<const uint8_t*>(src->GetReadPtr());
 		uint8_t* dstp = reinterpret_cast<uint8_t*>(dst->GetWritePtr());
@@ -2686,7 +2689,7 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	void MergeBlock(PVideoFrame& src24, PVideoFrame& src60, PVideoFrame& flag, PVideoFrame& dst, IScriptEnvironment2* env)
+	void MergeBlock(PVideoFrame& src24, PVideoFrame& src60, PVideoFrame& flag, PVideoFrame& dst, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		const vpixel_t* src24Y = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_Y));
@@ -2729,7 +2732,7 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	void VisualizeFlag(PVideoFrame& dst, PVideoFrame& mf, IScriptEnvironment2* env)
+	void VisualizeFlag(PVideoFrame& dst, PVideoFrame& mf, PNeoEnv env)
 	{
 		// 判定結果を表示
 		int blue[] = { 73, 230, 111 };
@@ -2757,7 +2760,7 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, IScriptEnvironment2* env)
+	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, PNeoEnv env)
 	{
 		int cycleIndex = n60 / 10;
 		int kfmPattern = (int)fmframe->GetProperty("KFM_Pattern")->GetInt();
@@ -2815,7 +2818,7 @@ class KFMSwitch : public KFMFilterBase
 		{
 			// マージ用フラグ作成
 			PVideoFrame mflagtmp = env->NewVideoFrame(mfvi);
-			PVideoFrame flagtmp = NewSwitchFlagFrame(vi, 32, 2, env);
+			PVideoFrame flagtmp = NewSwitchFlagFrame(vi, env->GetProperty(AEP_FRAME_ALIGN), 2, env);
 			MakeMergeFlag(mflag, flag, mflagtmp, flagtmp, (int)thpatch, env);
 		}
 
@@ -2867,7 +2870,7 @@ public:
 
 	PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 
 		int cycleIndex = n60 / 10;
 		PVideoFrame fmframe = fmclip->GetFrame(cycleIndex, env);
@@ -2983,7 +2986,7 @@ class KFieldDiff : public KFMFilterBase
    VideoInfo workvi;
 
    template <typename pixel_t>
-   unsigned long long int CalcFieldDiff(PVideoFrame& frame, PVideoFrame& work, IScriptEnvironment2* env)
+   unsigned long long int CalcFieldDiff(PVideoFrame& frame, PVideoFrame& work, PNeoEnv env)
    {
       typedef typename VectorType<pixel_t>::type vpixel_t;
       const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(frame->GetReadPtr(PLANAR_Y));
@@ -3027,7 +3030,7 @@ class KFieldDiff : public KFMFilterBase
    }
 
    template <typename pixel_t>
-   double InternalFieldDiff(int n, IScriptEnvironment2* env)
+   double InternalFieldDiff(int n, PNeoEnv env)
    {
       PVideoFrame src = child->GetFrame(n, env);
       PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
@@ -3059,7 +3062,7 @@ public:
 
    AVSValue ConditionalFieldDiff(int n, IScriptEnvironment* env_)
    {
-      IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+      PNeoEnv env = env_;
 
       int pixelSize = vi.ComponentSize();
       switch (pixelSize) {
@@ -3251,7 +3254,7 @@ class KFrameDiffDup : public KFMFilterBase
 
   // returns argmax(subAbs + sumSig * 4)
   template <typename pixel_t>
-  int CalcFrameDiff(PVideoFrame& src0, PVideoFrame& src1, PVideoFrame& work, IScriptEnvironment2* env)
+  int CalcFrameDiff(PVideoFrame& src0, PVideoFrame& src1, PVideoFrame& work, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     const vpixel_t* src0Y = reinterpret_cast<const vpixel_t*>(src0->GetReadPtr(PLANAR_Y));
@@ -3341,7 +3344,7 @@ class KFrameDiffDup : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  double InternalFrameDiff(int n, IScriptEnvironment2* env)
+  double InternalFrameDiff(int n, PNeoEnv env)
   {
     PVideoFrame src0 = child->GetFrame(clamp(n - 1, 0, vi.num_frames - 1), env);
     PVideoFrame src1 = child->GetFrame(clamp(n, 0, vi.num_frames - 1), env);
@@ -3381,7 +3384,7 @@ public:
 
   AVSValue ConditionalFrameDiff(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     int pixelSize = vi.ComponentSize();
     switch (pixelSize) {

@@ -7,7 +7,7 @@
 class DeviceLocalBase
 {
 protected:
-  DeviceLocalBase(const void* init_data, size_t length, IScriptEnvironment2* env);
+  DeviceLocalBase(const void* init_data, size_t length, PNeoEnv env);
   virtual ~DeviceLocalBase();
 
   std::atomic<void*>* dataPtrs;
@@ -15,18 +15,18 @@ protected:
   size_t length;
   std::mutex mutex;
 
-  void* GetData_(IScriptEnvironment2* env);
+  void* GetData_(PNeoEnv env);
 };
 
 template <typename T>
 class DeviceLocalData : protected DeviceLocalBase
 {
 public:
-  DeviceLocalData(const T* init_data, int size, IScriptEnvironment2* env)
+  DeviceLocalData(const T* init_data, int size, PNeoEnv env)
     : DeviceLocalBase(init_data, size * sizeof(T), env)
   { }
 
-  T* GetData(IScriptEnvironment2* env) {
+  T* GetData(PNeoEnv env) {
     return (T*)GetData_(env);
   }
 };

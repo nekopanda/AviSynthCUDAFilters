@@ -22,7 +22,7 @@ struct FuncDefinition {
 
 int GetDeviceTypes(const PClip& clip);
 
-void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, IScriptEnvironment2* env);
+void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, PNeoEnv env);
 
 #ifndef NDEBUG
 //#if 1
@@ -33,5 +33,5 @@ CUDA_CHECK(cudaDeviceSynchronize())
 #define DEBUG_SYNC
 #endif
 
-#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
+#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
 

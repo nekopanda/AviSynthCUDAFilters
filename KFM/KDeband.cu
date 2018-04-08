@@ -20,7 +20,7 @@
 #define DEBUG_SYNC
 #endif
 
-#define IS_CUDA (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA)
+#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
 
 int GetDeviceTypes(const PClip& clip);
 
@@ -180,7 +180,7 @@ class KTemporalNR : public KDebandBase
 	int cached_cycle;
 
 	template <typename pixel_t>
-	void MakeFrames(int cycle, IScriptEnvironment2* env)
+	void MakeFrames(int cycle, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		int nframes = dist * 2 + 1;
@@ -242,7 +242,7 @@ class KTemporalNR : public KDebandBase
 			DEBUG_SYNC;
 
 			// 終わったら解放するコールバックを追加
-			static_cast<IScriptEnvironment2*>(env)->DeviceAddCallback([](void* arg) {
+      env->DeviceAddCallback([](void* arg) {
 				delete[]((TemporalNRPtrs<vpixel_t>*)arg);
 			}, ptrs);
 		}
@@ -268,7 +268,7 @@ public:
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		int cycle = n / BATCH;
 		if (cached_cycle == cycle) {
 			return cacheframes[n % BATCH];
@@ -296,7 +296,7 @@ public:
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		return new KTemporalNR(
 			args[0].AsClip(),            // clip
 			args[1].AsInt(3),            // dist
@@ -472,7 +472,7 @@ class KDeband : public KDebandBase
 
 	std::unique_ptr<DeviceLocalData<uint8_t>> rand;
 
-	DeviceLocalData<uint8_t>* CreateDebandRandom(int width, int height, int seed, IScriptEnvironment2* env)
+	DeviceLocalData<uint8_t>* CreateDebandRandom(int width, int height, int seed, PNeoEnv env)
 	{
 		const int max_per_pixel = 2;
 		int length = width * height * max_per_pixel;
@@ -493,7 +493,7 @@ class KDeband : public KDebandBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		PVideoFrame src = child->GetFrame(n, env);
 		PVideoFrame dst = env->NewVideoFrame(vi);
@@ -554,7 +554,7 @@ class KDeband : public KDebandBase
 	}
 
 public:
-	KDeband(PClip clip, int range, float thresh, int sample_mode, bool blur_first, IScriptEnvironment2* env)
+	KDeband(PClip clip, int range, float thresh, int sample_mode, bool blur_first, PNeoEnv env)
 		: KDebandBase(clip)
 		, range(range)
 		, thresh(scaleParam(thresh, vi.BitsPerComponent()))
@@ -570,7 +570,7 @@ public:
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
 		case 1:
@@ -586,7 +586,7 @@ public:
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		return new KDeband(
 			args[0].AsClip(),          // clip
 			args[1].AsInt(25),         // range
@@ -997,7 +997,7 @@ class KEdgeLevel : public KDebandBase
 	int logUVy;
 
 	template <typename pixel_t>
-	void CopyUV(PVideoFrame& dst, PVideoFrame& src, IScriptEnvironment2* env)
+	void CopyUV(PVideoFrame& dst, PVideoFrame& src, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
@@ -1025,7 +1025,7 @@ class KEdgeLevel : public KDebandBase
 	}
 
 	template <typename pixel_t>
-	void ClearUV(PVideoFrame& dst, IScriptEnvironment2* env)
+	void ClearUV(PVideoFrame& dst, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
@@ -1053,7 +1053,7 @@ class KEdgeLevel : public KDebandBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame GetFrameT(int n, IScriptEnvironment2* env)
+	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		PVideoFrame src = child->GetFrame(n, env);
 		PVideoFrame dst = env->NewVideoFrame(vi);
@@ -1197,7 +1197,7 @@ class KEdgeLevel : public KDebandBase
 	}
 
 public:
-	KEdgeLevel(PClip clip, int str, float thrs, int repair, bool uv, bool show, IScriptEnvironment2* env)
+	KEdgeLevel(PClip clip, int str, float thrs, int repair, bool uv, bool show, PNeoEnv env)
 		: KDebandBase(clip)
 		, str(str)
 		, thrs(scaleParam(thrs, vi.BitsPerComponent()))
@@ -1211,7 +1211,7 @@ public:
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
 		case 1:
@@ -1227,7 +1227,7 @@ public:
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
 	{
-		IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+		PNeoEnv env = env_;
 		return new KEdgeLevel(
 			args[0].AsClip(),           // clip
 			args[1].AsInt(10),          // str

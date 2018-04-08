@@ -1,3 +1,5 @@
+#include "avisynth.h"
+
 #define NOMINMAX
 #include <windows.h>
 #include <Psapi.h>
@@ -5,7 +7,6 @@
 #include <string>
 #include <algorithm>
 
-#include "avisynth.h"
 
 bool hasEnding(std::string const &fullString, std::string const &ending) {
   if (fullString.length() >= ending.length()) {

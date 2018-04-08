@@ -1,7 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
+#include "avisynth.h"
+
 #define NOMINMAX
 #include <windows.h>
-#include "avisynth.h"
 
 #include <algorithm>
 #include <memory>
@@ -2167,7 +2168,7 @@ public:
   typedef typename DegrainTypes<pixel_t>::vtmp_t vtmp_t;
 
   virtual bool IsEnabled() const {
-    return (env->GetProperty(AEP_DEVICE_TYPE) == DEV_TYPE_CUDA);
+    return (env->GetDeviceType() == DEV_TYPE_CUDA);
   }
 
   void MemCpy(void* dst, const void* src, int nbytes)
@@ -2621,7 +2622,7 @@ public:
     CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice, stream));
 
     // 終わったら解放するコールバックを追加
-    static_cast<IScriptEnvironment2*>(env)->DeviceAddCallback([](void* arg) {
+    env->DeviceAddCallback([](void* arg) {
       delete[]((DegrainArg<pixel_t, N>*)arg);
     }, hargs);
 
@@ -3043,7 +3044,7 @@ class IMVCUDAImpl : public IMVCUDA
   KDeintKernel<uint16_t> k16;
 
 public:
-  virtual void SetEnv(IScriptEnvironment2* env) {
+  virtual void SetEnv(PNeoEnv env) {
     k8.SetEnv(env);
     k16.SetEnv(env);
   }

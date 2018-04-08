@@ -3,8 +3,8 @@
 //
 //      Borrowed from the author of IT.dll, whose name I
 //      could not determine. Modified for YV12 by Donald Graft.
-#include <string>
 #include "avisynth.h"
+#include <string>
 
 static const unsigned short font[][20] =
 {

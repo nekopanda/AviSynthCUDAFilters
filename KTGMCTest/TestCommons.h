@@ -1,13 +1,14 @@
 #pragma once
 
 #define _CRT_SECURE_NO_WARNINGS
+
+#define AVS_LINKAGE_DLLIMPORT
+#include "avisynth.h"
+
 #define NOMINMAX
 #include <Windows.h>
 
 #include "gtest/gtest.h"
-
-#define AVS_LINKAGE_DLLIMPORT
-#include "avisynth.h"
 
 #include <fstream>
 #include <string>
@@ -58,6 +59,6 @@ protected:
       TF_MID, TF_BEGIN, TF_END
    };
 
-   void GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env);
+   void GetFrames(PClip& clip, TEST_FRAMES tf, PNeoEnv env);
 };
 

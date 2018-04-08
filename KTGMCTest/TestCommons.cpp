@@ -11,7 +11,7 @@ std::string GetDirectoryName(const std::string& filename)
    return directory;
 }
 
-void AvsTestBase::GetFrames(PClip& clip, TEST_FRAMES tf, IScriptEnvironment2* env)
+void AvsTestBase::GetFrames(PClip& clip, TEST_FRAMES tf, PNeoEnv env)
 {
    int nframes = clip->GetVideoInfo().num_frames;
    switch (tf) {

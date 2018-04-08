@@ -1,3 +1,4 @@
+#include "avisynth.h"
 
 #include <limits>
 #include <memory>
@@ -49,7 +50,7 @@ __global__ void kl_sum_of_pixels(const vpixel_t* __restrict__ src, int width, in
 }
 
 template <typename vpixel_t, typename gsum_t, typename lsum_t>
-double calc_sum_of_pixels(const void* src, int width, int height, int pitch, int maxv, void* sum, IScriptEnvironment* env)
+double calc_sum_of_pixels(const void* src, int width, int height, int pitch, int maxv, void* sum, PNeoEnv env)
 {
   int width4 = width >> 2;
   int pitch4 = pitch >> 2;
@@ -152,7 +153,7 @@ public:
   }
   static AVSValue AvgPlane(AVSValue clip, void* user_data, int plane, int offset, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!clip.IsClip())
       env->ThrowError("Average Plane: No clip supplied!");
@@ -299,7 +300,7 @@ __global__ void kl_sad(
 }
 
 template <typename vpixel_t, typename gsum_t, typename lsum_t>
-double calc_sad(const void* src0, const void* src1, int width, int height, int pitch, int maxv, void* sum, bool is_rgb, IScriptEnvironment* env)
+double calc_sad(const void* src0, const void* src1, int width, int height, int pitch, int maxv, void* sum, bool is_rgb, PNeoEnv env)
 {
   int width4 = width >> 2;
   int pitch4 = pitch >> 2;
@@ -431,7 +432,7 @@ class ComparePlane {
 public:
   static AVSValue CmpPlane(AVSValue clip, AVSValue clip2, void* user_data, int plane, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!clip.IsClip())
       env->ThrowError("Plane Difference: No clip supplied!");
@@ -608,7 +609,7 @@ public:
   }
   static AVSValue CmpPlaneSame(AVSValue clip, void* user_data, int offset, int plane, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!clip.IsClip())
       env->ThrowError("Plane Difference: No clip supplied!");
@@ -820,7 +821,7 @@ template <typename vpixel_t>
 void calc_count_hist(
   const void* src, int width, int height, int pitch, int maxv,
   int* dev_sum, int* host_sum, int length,
-  IScriptEnvironment* env)
+  PNeoEnv env)
 {
   int width4 = width >> 2;
   int pitch4 = pitch >> 2;
@@ -844,7 +845,7 @@ class MinMaxPlane {
 public:
   static AVSValue MinMax(AVSValue clip, void* user_data, double threshold, int offset, int plane, int mode, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     if (!clip.IsClip())
       env->ThrowError("MinMax: No clip supplied!");

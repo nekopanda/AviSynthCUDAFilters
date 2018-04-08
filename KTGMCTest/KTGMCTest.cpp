@@ -2822,7 +2822,7 @@ TEST_F(KTGMCTest, AvsProp)
 
     std::ofstream out(scriptpath);
 
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "LWLibavVideoSource(\"test.ts\")" << std::endl;
 
     out << "AddProp(\"luma\", \"AverageLuma()\")" << std::endl;
     out << "ScriptClip(\"\"\"subtitle(string(getprop(\"luma\")))\"\"\")" << std::endl;

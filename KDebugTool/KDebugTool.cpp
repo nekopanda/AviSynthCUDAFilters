@@ -1,7 +1,8 @@
 #define _CRT_SECURE_NO_WARNINGS
+#include "avisynth.h"
+
 #define NOMINMAX
 #include <windows.h>
-#include "avisynth.h"
 
 #include <string>
 
@@ -64,7 +65,7 @@ class ImageCompare : GenericVideoFilter
     pixel_t* d, int dpitch, 
     const pixel_t* a, int apitch,
     const pixel_t* b, int bpitch, 
-    int width, int height, IScriptEnvironment2* env)
+    int width, int height, PNeoEnv env)
   {
     pixel_t thresh = (pixel_t)this->thresh;
     //DebugWriteBitmap("bob-ref-%d.bmp", (const uint8_t*)a, width, height, pitch, 1);
@@ -83,7 +84,7 @@ class ImageCompare : GenericVideoFilter
   }
 
   template <typename pixel_t>
-  void ComparePlanar(PVideoFrame& dst, PVideoFrame& frame1, PVideoFrame& frame2, IScriptEnvironment2* env)
+  void ComparePlanar(PVideoFrame& dst, PVideoFrame& frame1, PVideoFrame& frame2, PNeoEnv env)
   {
     int isRGB = vi.IsPlanarRGB() || vi.IsPlanarRGBA();
     static const int planesYUV[] = { PLANAR_Y, PLANAR_U, PLANAR_V, PLANAR_A };
@@ -135,7 +136,7 @@ class ImageCompare : GenericVideoFilter
   }
 
   template <typename pixel_t>
-  void CompareRGB(PVideoFrame& dst, PVideoFrame& frameA, PVideoFrame& frameB, IScriptEnvironment2* env)
+  void CompareRGB(PVideoFrame& dst, PVideoFrame& frameA, PVideoFrame& frameB, PNeoEnv env)
   {
     pixel_t* d = reinterpret_cast<pixel_t*>(dst->GetWritePtr());
     const pixel_t* a = reinterpret_cast<const pixel_t*>(frameA->GetReadPtr());
@@ -165,7 +166,7 @@ class ImageCompare : GenericVideoFilter
   }
 
 public:
-  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, bool alpha, IScriptEnvironment2* env)
+  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, bool alpha, PNeoEnv env)
     : GenericVideoFilter(child1)
     , child2(child2)
     , thresh(thresh)
@@ -182,7 +183,7 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
 
     PVideoFrame frame1 = child->GetFrame(n, env);
     PVideoFrame frame2 = child2->GetFrame(n, env);
@@ -214,7 +215,7 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    IScriptEnvironment2* env = static_cast<IScriptEnvironment2*>(env_);
+    PNeoEnv env = env_;
     return new ImageCompare(
       args[0].AsClip(),
       args[1].AsClip(),

@@ -4,7 +4,7 @@
 
 #include <cuda_runtime.h>
 
-DeviceLocalBase::DeviceLocalBase(const void* init_data, size_t length, IScriptEnvironment2* env)
+DeviceLocalBase::DeviceLocalBase(const void* init_data, size_t length, PNeoEnv env)
   : length(length)
 {
   numDevices = (int)env->GetProperty(AEP_NUM_DEVICES);
@@ -26,10 +26,10 @@ DeviceLocalBase::~DeviceLocalBase()
   delete[] dataPtrs;
 }
 
-void* DeviceLocalBase::GetData_(IScriptEnvironment2* env)
+void* DeviceLocalBase::GetData_(PNeoEnv env)
 {
   // double checked locking pattern
-  int devid = (int)env->GetProperty(AEP_DEVICE_ID);
+  int devid = env->GetDeviceId();
   void* ptr = dataPtrs[devid].load(std::memory_order_acquire);
   if (ptr) return ptr;
 

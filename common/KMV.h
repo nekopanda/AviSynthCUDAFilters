@@ -93,7 +93,7 @@ struct KMVParam
     , levelInfo()
   { }
 
-  static const KMVParam* GetParam(const VideoInfo& vi, IScriptEnvironment2* env)
+  static const KMVParam* GetParam(const VideoInfo& vi, PNeoEnv env)
   {
     if (vi.sample_type != MAGIC_KEY) {
       env->ThrowError("Invalid source (sample_type signature does not match)");
