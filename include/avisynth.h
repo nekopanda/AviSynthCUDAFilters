@@ -394,7 +394,8 @@ struct AVS_Linkage {
   const char*     (PDevice::*PDevice_GetName)() const;
   // end class PDevice
 
-  int     (VideoFrame::*VdieoFrame_CheckMemory)() const;
+  PDevice     (VideoFrame::*VdieoFrame_GetDevice)() const;
+  int         (VideoFrame::*VdieoFrame_CheckMemory)() const;
 
   /**********************************************************************/
 };
@@ -434,6 +435,39 @@ extern const AVS_Linkage* AVS_linkage;
 # define AVS_LinkCallOptDefault(arg, argDefaultValue)  !AVS_linkage || offsetof(AVS_Linkage, arg) >= AVS_linkage->Size ? (argDefaultValue) : ((this->*(AVS_linkage->arg))())
 
 #endif
+
+class PDevice
+{
+public:
+  PDevice() AVS_BakedCode(AVS_LinkCall_Void(PDevice_CONSTRUCTOR0)())
+    PDevice(Device* p) AVS_BakedCode(AVS_LinkCall_Void(PDevice_CONSTRUCTOR1)(p))
+    PDevice(const PDevice& p) AVS_BakedCode(AVS_LinkCall_Void(PDevice_CONSTRUCTOR2)(p))
+    PDevice& operator=(Device* p) AVS_BakedCode(return AVS_LinkCallV(PDevice_OPERATOR_ASSIGN0)(p))
+    PDevice& operator=(const PDevice& p) AVS_BakedCode(return AVS_LinkCallV(PDevice_OPERATOR_ASSIGN1)(p))
+    ~PDevice() AVS_BakedCode(AVS_LinkCall_Void(PDevice_DESTRUCTOR)())
+
+    int operator!() const { return !e; }
+  operator void*() const { return e; }
+  Device* operator->() const { return e; }
+
+  AvsDeviceType GetType() const AVS_BakedCode(return AVS_LinkCallOptDefault(PDevice_GetType, DEV_TYPE_NONE))
+    int GetId() const AVS_BakedCode(return AVS_LinkCall(PDevice_GetId)())
+    int GetIndex() const AVS_BakedCode(return AVS_LinkCall(PDevice_GetIndex)())
+    const char* GetName() const AVS_BakedCode(return AVS_LinkCall(PDevice_GetName)())
+
+private:
+  Device * e;
+
+#ifdef BUILDING_AVSCORE
+public:
+  void CONSTRUCTOR0();  /* Damn compiler won't allow taking the address of reserved constructs, make a dummy interlude */
+  void CONSTRUCTOR1(Device* p);
+  void CONSTRUCTOR2(const PDevice& p);
+  PDevice& OPERATOR_ASSIGN0(Device* p);
+  PDevice& OPERATOR_ASSIGN1(const PDevice& p);
+  void DESTRUCTOR();
+#endif
+};
 
 struct VideoInfo {
   int width, height;    // width=0 means no video
@@ -940,6 +974,8 @@ public:
   const AVSMapValue* GetProperty(const char* key) const AVS_BakedCode(return AVS_LinkCall(GetProperty)(key))
   bool DeleteProperty(const char* key) AVS_BakedCode(return AVS_LinkCall(DeleteProperty)(key))
 
+  PDevice GetDevice() const AVS_BakedCode(return AVS_LinkCall(VdieoFrame_GetDevice)())
+
   // 0: OK, 1: NG, -1: disabled or non CPU frame
   int CheckMemory() const AVS_BakedCode(return AVS_LinkCall(VdieoFrame_CheckMemory)())
 
@@ -1325,39 +1361,6 @@ public:
   void CONSTRUCTOR2(const PFunction& p);
   PFunction& OPERATOR_ASSIGN0(IFunction* p);
   PFunction& OPERATOR_ASSIGN1(const PFunction& p);
-  void DESTRUCTOR();
-#endif
-};
-
-class PDevice
-{
-public:
-  PDevice() AVS_BakedCode(AVS_LinkCall_Void(PDevice_CONSTRUCTOR0)())
-  PDevice(Device* p) AVS_BakedCode(AVS_LinkCall_Void(PDevice_CONSTRUCTOR1)(p))
-  PDevice(const PDevice& p) AVS_BakedCode(AVS_LinkCall_Void(PDevice_CONSTRUCTOR2)(p))
-  PDevice& operator=(Device* p) AVS_BakedCode(return AVS_LinkCallV(PDevice_OPERATOR_ASSIGN0)(p))
-  PDevice& operator=(const PDevice& p) AVS_BakedCode(return AVS_LinkCallV(PDevice_OPERATOR_ASSIGN1)(p))
-  ~PDevice() AVS_BakedCode(AVS_LinkCall_Void(PDevice_DESTRUCTOR)())
-
-  int operator!() const { return !e; }
-  operator void*() const { return e; }
-  Device* operator->() const { return e; }
-
-  AvsDeviceType GetType() const AVS_BakedCode(return AVS_LinkCallOptDefault(PDevice_GetType, DEV_TYPE_NONE))
-  int GetId() const AVS_BakedCode(return AVS_LinkCall(PDevice_GetId)())
-  int GetIndex() const AVS_BakedCode(return AVS_LinkCall(PDevice_GetIndex)())
-  const char* GetName() const AVS_BakedCode(return AVS_LinkCall(PDevice_GetName)())
-
-private:
-  Device * e;
-
-#ifdef BUILDING_AVSCORE
-public:
-  void CONSTRUCTOR0();  /* Damn compiler won't allow taking the address of reserved constructs, make a dummy interlude */
-  void CONSTRUCTOR1(Device* p);
-  void CONSTRUCTOR2(const PDevice& p);
-  PDevice& OPERATOR_ASSIGN0(Device* p);
-  PDevice& OPERATOR_ASSIGN1(const PDevice& p);
   void DESTRUCTOR();
 #endif
 };
