@@ -122,7 +122,7 @@ void CondFuncTest::CondTest_(const char* fname, bool is_cuda, FORMAT format, int
       out << "src2 = src.GaussResize(1920,1080,0,0,1920.0001,1080.0001,p=2)" << std::endl;
     }
 
-    out << "current_frame = 100" << std::endl;
+    out << "global current_frame = 100" << std::endl;
     out << "ref = src." << fname << "(" << (two_arg ? "src2" : "") << ")" << std::endl;
 
     out << "LoadPlugin(\"" << pluginPath.c_str() << "\")" << std::endl;
@@ -131,7 +131,8 @@ void CondFuncTest::CondTest_(const char* fname, bool is_cuda, FORMAT format, int
       if (two_arg) {
         out << "srcuda2 = src2.OnCPU(0)" << std::endl;
       }
-      out << "cuda = EvalOnCUDA(\"srcuda." << fname << "(" << (two_arg ? "srcuda2" : "") << ")\")" << std::endl;
+      out << "cuda = OnCUDA(function[srcuda" <<  (two_arg ? ", srcuda2" : "") << "](){srcuda." 
+        << fname << "(" << (two_arg ? "srcuda2" : "") << ")})" << std::endl;
     }
     else {
       out << "cuda = src." << fname << "(" << (two_arg ? "src2" : "") << ")" << std::endl;

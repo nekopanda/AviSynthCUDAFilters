@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-  ::testing::GTEST_FLAG(filter) = "*CFieldDiff*:*AvsProp";
+  ::testing::GTEST_FLAG(filter) = "*";
   ::testing::InitGoogleTest(&argc, argv);
 
   //_crtBreakAlloc = 7978;

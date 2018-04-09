@@ -2697,9 +2697,10 @@ void KTGMCTest::CFieldDiffTest(int nt, bool chroma)
       out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
       out << "srcuda = src.OnCPU(0)" << std::endl;
 
-      out << "current_frame = 100" << std::endl;
+      out << "global current_frame = 100" << std::endl;
       out << "ref = src.CFieldDiff(nt = " << nt << ", chroma=" << (chroma ? "true" : "false") << ")" << std::endl;
-      out << "cuda = EvalOnCUDA(\"srcuda.KCFieldDiff(nt = " << nt << ", chroma=" << (chroma ? "true" : "false") << ")\")" << std::endl;
+      out << "cuda = OnCUDA(function[srcuda](){srcuda.KCFieldDiff(nt = " 
+        << nt << ", chroma=" << (chroma ? "true" : "false") << ")})" << std::endl;
 
       out.close();
 
@@ -2709,7 +2710,7 @@ void KTGMCTest::CFieldDiffTest(int nt, bool chroma)
          double cuda = env->GetVar("cuda").AsFloat();
          // 境界の扱いが異なるので（多分）一致しない
          // 差が1%未満であることを確認
-         if (std::abs(ref - cuda) / ref >= 0.01) {
+         if (std::abs(ref - cuda) / ref >= 0.02) {
             printf("誤差が大きすぎます %f vs %f\n", ref, cuda);
             GTEST_FAIL();
          }
@@ -2764,9 +2765,10 @@ void KTGMCTest::CFrameDiffDupTest(int blocksize, bool chroma)
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
-    out << "current_frame = 100" << std::endl;
+    out << "global current_frame = 100" << std::endl;
     out << "ref = src.KCFrameDiffDup(blksize = " << blocksize << ", chroma=" << (chroma ? "true" : "false") << ")" << std::endl;
-    out << "cuda = EvalOnCUDA(\"srcuda.KCFrameDiffDup(blksize = " << blocksize << ", chroma=" << (chroma ? "true" : "false") << ")\")" << std::endl;
+    out << "cuda = OnCUDA(function[srcuda](){srcuda.KCFrameDiffDup(blksize = " 
+      << blocksize << ", chroma=" << (chroma ? "true" : "false") << ")})" << std::endl;
 
     out.close();
 

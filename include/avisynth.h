@@ -394,7 +394,7 @@ struct AVS_Linkage {
   const char*     (PDevice::*PDevice_GetName)() const;
   // end class PDevice
 
-  bool     (VideoFrame::*VdieoFrame_CheckMemory)() const;
+  int     (VideoFrame::*VdieoFrame_CheckMemory)() const;
 
   /**********************************************************************/
 };
@@ -1249,7 +1249,8 @@ public:
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) { child->GetAudio(buf, start, count, env); }
   const VideoInfo& __stdcall GetVideoInfo() { return vi; }
   bool __stdcall GetParity(int n) { return child->GetParity(n); }
-  int __stdcall SetCacheHints(int cachehints,int frame_range) { return 0; } ;  // We do not pass cache requests upwards, only to the next filter.
+  // We do not pass cache requests upwards, only to the next filter.
+  int __stdcall SetCacheHints(int cachehints, int frame_range) { (void)cachehints; (void)frame_range; return 0; };
 };
 
 class AVSMapValue
@@ -1580,18 +1581,29 @@ public:
   virtual void __stdcall ClearAutoloadDirs() = 0;
   virtual void __stdcall AutoloadPlugins() = 0;
 
-  virtual void __stdcall AddFunction(const char* name, const char* params, ApplyFunc apply, void* user_data) = 0;
-  virtual void __stdcall AddFunction(const char* name, const char* params, ApplyFunc apply, void* user_data, const char *exportVar) = 0;
+  virtual void __stdcall AddFunction(
+    const char* name, const char* params, ApplyFunc apply, void* user_data) = 0;
+  virtual void __stdcall AddFunction(
+    const char* name, const char* params, ApplyFunc apply, void* user_data, const char *exportVar) = 0;
   virtual bool __stdcall FunctionExists(const char* name) = 0;
   virtual bool __stdcall InternalFunctionExists(const char* name) = 0;
 
   // Invoke function. Throws NotFounc exception when the specified function is not exists.
-  virtual AVSValue __stdcall Invoke(const char* name, const AVSValue args, const char* const* arg_names = 0) = 0;
-  virtual AVSValue __stdcall Invoke(const PFunction& func, const AVSValue args, const char* const* arg_names = 0) = 0;
+  virtual AVSValue __stdcall Invoke(
+    const char* name, const AVSValue args, const char* const* arg_names = 0) = 0;
+  virtual AVSValue __stdcall Invoke(
+    const AVSValue& implicit_last,
+    const PFunction& func, const AVSValue args, const char* const* arg_names = 0) = 0;
 
   // These versions of Invoke will return false instead of throwing NotFound().
-  virtual bool __stdcall Invoke(AVSValue *result, const char* name, const AVSValue& args, const char* const* arg_names = 0) = 0;
-  virtual bool __stdcall Invoke(AVSValue *result, const PFunction& func, const AVSValue args, const char* const* arg_names = 0) = 0;
+  virtual bool __stdcall Invoke(
+    AVSValue* result, const char* name, const AVSValue& args, const char* const* arg_names = 0) = 0;
+  virtual bool __stdcall Invoke(
+    AVSValue* result, const AVSValue& implicit_last,
+    const char* name, const AVSValue args, const char* const* arg_names = 0) = 0;
+  virtual bool __stdcall Invoke(
+    AVSValue *result, const AVSValue& implicit_last,
+    const PFunction& func, const AVSValue args, const char* const* arg_names = 0) = 0;
 
   // Throws exception when the requested variable is not found.
   virtual AVSValue __stdcall GetVar(const char* name) = 0;
@@ -1644,6 +1656,7 @@ public:
   virtual void __stdcall Free(void* ptr) = 0;
 
   virtual char* __stdcall SaveString(const char* s, int length = -1) = 0;
+  virtual char* __stdcall SaveString(const char* s, int length, bool escape) = 0;
   virtual char* __stdcall Sprintf(const char* fmt, ...) = 0;
   virtual char* __stdcall VSprintf(const char* fmt, void* val) = 0;
 
