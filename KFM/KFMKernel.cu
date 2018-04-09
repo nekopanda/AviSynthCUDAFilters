@@ -1929,7 +1929,7 @@ __global__ void kl_remove_combe2(pixel_t* dst,
 void cpu_max_extend_blocks(uint8_t* dstp, int pitch, int nBlkX, int nBlkY)
 {
 	for (int by = 1; by < nBlkY; ++by) {
-		dstp[0 + by * pitch] = dstp[0 + 1 + (by + 0) * nBlkX];
+		dstp[0 + by * pitch] = dstp[0 + 1 + (by + 0) * pitch];
 		for (int bx = 1; bx < nBlkX - 1; ++bx) {
 			dstp[bx + by * pitch] = max(
 				dstp[bx + by * pitch], dstp[bx + 1 + (by + 0) * pitch]);
@@ -3015,7 +3015,7 @@ class KFieldDiff : public KFMFilterBase
             DEBUG_SYNC;
          }
          long long int result;
-         CUDA_CHECK(cudaMemcpy(&result, sum, sizeof(sum), cudaMemcpyDeviceToHost));
+         CUDA_CHECK(cudaMemcpy(&result, sum, sizeof(*sum), cudaMemcpyDeviceToHost));
          return result;
       }
       else {
