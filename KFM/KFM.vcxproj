@@ -143,6 +143,7 @@
     </Link>
     <CudaCompile>
       <CodeGeneration>compute_61,sm_61;compute_35,sm_35</CodeGeneration>
+      <AdditionalOptions>-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -173,11 +174,21 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="KFM.h" />
+    <ClInclude Include="KFMFilterBase.cuh" />
     <ClInclude Include="TextOut.h" />
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="CombingAnalyze.cu" />
+    <CudaCompile Include="DecombeUCF.cu" />
     <CudaCompile Include="KDeband.cu" />
+    <CudaCompile Include="KFMFilterBase.cu">
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
     <CudaCompile Include="KFMKernel.cu" />
+    <CudaCompile Include="MergeStatic.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

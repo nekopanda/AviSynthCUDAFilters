@@ -29,12 +29,27 @@
     <ClInclude Include="KFM.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="KFMFilterBase.cuh">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="KFMKernel.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
     <CudaCompile Include="KDeband.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
+    <CudaCompile Include="MergeStatic.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
+    <CudaCompile Include="KFMFilterBase.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
+    <CudaCompile Include="CombingAnalyze.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
+    <CudaCompile Include="DecombeUCF.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
   </ItemGroup>

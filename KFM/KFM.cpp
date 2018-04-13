@@ -481,7 +481,10 @@ void AddFuncFM(IScriptEnvironment* env)
 #include <Windows.h>
 
 void AddFuncFMKernel(IScriptEnvironment* env);
+void AddFuncMergeStatic(IScriptEnvironment* env);
+void AddFuncCombingAnalyze(IScriptEnvironment* env);
 void AddFuncDebandKernel(IScriptEnvironment* env);
+void AddFuncUCF(IScriptEnvironment* env);
 
 static void init_console()
 {
@@ -499,7 +502,10 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
 
   AddFuncFM(env);
   AddFuncFMKernel(env);
-	AddFuncDebandKernel(env);
+  AddFuncMergeStatic(env);
+  AddFuncCombingAnalyze(env);
+  AddFuncDebandKernel(env);
+  AddFuncUCF(env);
 
   return "K Field Matching Plugin";
 }
