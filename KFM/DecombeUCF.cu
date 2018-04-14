@@ -33,18 +33,18 @@ void cpu_calc_field_diff(const vpixel_t* ptr, int nt, int width, int height, int
 }
 
 enum {
-  CALC_FIELD_DIFF_X = 16,
+  CALC_FIELD_DIFF_X = 32,
   CALC_FIELD_DIFF_Y = 16,
   CALC_FIELD_DIFF_THREADS = CALC_FIELD_DIFF_X * CALC_FIELD_DIFF_Y
 };
 
-__global__ void kl_init_field_diff(unsigned long long int *sum)
+__global__ void kl_init_uint64(uint64_t* sum)
 {
   sum[threadIdx.x] = 0;
 }
 
 template <typename vpixel_t>
-__global__ void kl_calculate_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, unsigned long long int *sum)
+__global__ void kl_calculate_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, uint64_t* sum)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -100,7 +100,7 @@ class KFieldDiff : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_init_field_diff << <1, 1 >> > (sum);
+      kl_init_uint64 << <1, 1 >> > (sum);
       DEBUG_SYNC;
       kl_calculate_field_diff << <blocks, threads >> >(srcY, nt6, width4, vi.height, pitchY, sum);
       DEBUG_SYNC;
@@ -508,6 +508,482 @@ public:
       args[2].AsInt(32)     // blocksize
     ));
     return f->ConditionalFrameDiff(n, env);
+  }
+};
+
+__host__ __device__ int dev_limitter(int x, int nmin, int range) {
+  return (x == 128)
+    ? 128 
+    : ((x < 128)
+      ? ((((127 - range) < x)&(x < (128 - nmin))) ? 0 : 56)
+      : ((((128 + nmin) < x)&(x < (129 + range))) ? 255 : 199));
+}
+
+void cpu_noise_clip(uchar4* dst, const uchar4* src, const uchar4* noise,
+  int width, int height, int pitch, int nmin, int range)
+{
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      auto s = (to_int(src[x + y * pitch]) - to_int(noise[x + y * pitch]) + 256) >> 1;
+      int4 tmp = {
+        dev_limitter(s.x, nmin, range),
+        dev_limitter(s.y, nmin, range),
+        dev_limitter(s.z, nmin, range),
+        dev_limitter(s.w, nmin, range)
+      };
+      dst[x + y * pitch] = VHelper<uchar4>::cast_to(tmp);
+    }
+  }
+}
+
+__global__ void kl_noise_clip(uchar4* dst, const uchar4* src, const uchar4* noise,
+  int width, int height, int pitch, int nmin, int range)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    auto s = (to_int(src[x + y * pitch]) - to_int(noise[x + y * pitch]) + 256) >> 1;
+    int4 tmp = {
+      dev_limitter(s.x, nmin, range),
+      dev_limitter(s.y, nmin, range),
+      dev_limitter(s.z, nmin, range),
+      dev_limitter(s.w, nmin, range)
+    };
+    dst[x + y * pitch] = VHelper<uchar4>::cast_to(tmp);
+  }
+}
+
+class KNoiseClip : public GenericVideoFilter
+{
+  PClip noiseclip;
+
+  int range_y;
+  int range_uv;
+  int nmin_y;
+  int nmin_uv;
+
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
+  {
+    typedef typename VectorType<uint8_t>::type vpixel_t;
+
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame noise = noiseclip->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
+    const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
+    const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_V));
+    const vpixel_t* noiseY = reinterpret_cast<const vpixel_t*>(noise->GetReadPtr(PLANAR_Y));
+    const vpixel_t* noiseU = reinterpret_cast<const vpixel_t*>(noise->GetReadPtr(PLANAR_U));
+    const vpixel_t* noiseV = reinterpret_cast<const vpixel_t*>(noise->GetReadPtr(PLANAR_V));
+    vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
+    vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
+    vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+
+    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int width = src->GetRowSize(PLANAR_Y) / sizeof(vpixel_t);
+    int widthUV = src->GetRowSize(PLANAR_U) / sizeof(vpixel_t);
+    int height = src->GetHeight(PLANAR_Y);
+    int heightUV = src->GetHeight(PLANAR_U);
+
+    if (IS_CUDA) {
+      dim3 threads(32, 8);
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+      dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
+      kl_noise_clip << <blocks, threads >> >(dstY, srcY, noiseY, width, height, pitchY, nmin_y, range_y);
+      DEBUG_SYNC;
+      kl_noise_clip << <blocksUV, threads >> >(dstU, srcU, noiseU, widthUV, height, pitchUV, nmin_uv, range_uv);
+      DEBUG_SYNC;
+      kl_noise_clip << <blocksUV, threads >> >(dstV, srcV, noiseV, widthUV, height, pitchUV, nmin_uv, range_uv);
+      DEBUG_SYNC;
+    }
+    else {
+      cpu_noise_clip(dstY, srcY, noiseY, width, height, pitchY, nmin_y, range_y);
+      cpu_noise_clip(dstU, srcU, noiseU, widthUV, height, pitchUV, nmin_uv, range_uv);
+      cpu_noise_clip(dstV, srcV, noiseV, widthUV, height, pitchUV, nmin_uv, range_uv);
+    }
+
+    return dst;
+  }
+public:
+  KNoiseClip(PClip src, PClip noise,
+    int nmin_y, int range_y, int nmin_uv, int range_uv, IScriptEnvironment* env)
+    : GenericVideoFilter(src)
+    , noiseclip(noise)
+    , range_y(range_y)
+    , range_uv(range_uv)
+    , nmin_y(nmin_y)
+    , nmin_uv(nmin_uv)
+  {
+    if (vi.width & 3) env->ThrowError("[KNoiseClip]: width must be multiple of 4");
+    if (vi.height & 3) env->ThrowError("[KNoiseClip]: height must be multiple of 4");
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return GetFrameT(n, env);
+    //case 2:
+    //  dst = InternalGetFrame<uint16_t>(n60, fmframe, frameType, env);
+    //  break;
+    default:
+      env->ThrowError("[KNoiseClip] Unsupported pixel format");
+      break;
+    }
+
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KNoiseClip(
+      args[0].AsClip(),       // src
+      args[1].AsClip(),       // noise
+      args[2].AsInt(1),       // fmclip
+      args[3].AsInt(128),     // combeclip
+      args[4].AsInt(1),       // thswitch
+      args[5].AsInt(128),     // thpatch
+      env
+    );
+  }
+};
+
+
+__host__ __device__ int dev_horizontal_sum(int4 s) {
+  return s.x + s.y + s.z + s.w;
+}
+
+void cpu_analyze_noise(uint64_t* result,
+  const uchar4* src0, const uchar4* src1, const uchar4* src2,
+  int width, int height, int pitch)
+{
+  uint64_t sum0 = 0, sum1 = 0, sumR0 = 0, sumR1 = 0;
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      auto s0 = to_int(src0[x + y * pitch]);
+      auto s1 = to_int(src1[x + y * pitch]);
+      auto s2 = to_int(src2[x + y * pitch]);
+
+      sum0 += dev_horizontal_sum(abs(s0 + (-128)));
+      sum1 += dev_horizontal_sum(abs(s1 + (-128)));
+      sumR0 += dev_horizontal_sum(abs(s1 - s0));
+      sumR1 += dev_horizontal_sum(abs(s2 - s1));
+    }
+  }
+  result[0] = sum0;
+  result[1] = sum1;
+  result[2] = sumR0;
+  result[3] = sumR1;
+}
+
+__global__ void kl_analyze_noise(
+  uint64_t* result,
+  const uchar4* src0, const uchar4* src1, const uchar4* src2,
+  int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  int tid = threadIdx.x + threadIdx.y * CALC_FIELD_DIFF_X;
+
+  int sum[4] = { 0 };
+  if (x < width && y < height) {
+    auto s0 = to_int(src0[x + y * pitch]);
+    auto s1 = to_int(src1[x + y * pitch]);
+    auto s2 = to_int(src2[x + y * pitch]);
+
+    sum[0] = dev_horizontal_sum(abs(s0 + (-128)));
+    sum[1] = dev_horizontal_sum(abs(s1 + (-128)));
+    sum[2] = dev_horizontal_sum(abs(s1 - s0));
+    sum[3] = dev_horizontal_sum(abs(s2 - s1));
+  }
+
+  __shared__ int sbuf[CALC_FIELD_DIFF_THREADS * 4];
+  dev_reduceN<int, 4, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, sum, sbuf);
+
+  if (tid == 0) {
+    atomicAdd(&result[0], sum[0]);
+    atomicAdd(&result[1], sum[1]);
+    atomicAdd(&result[2], sum[2]);
+    atomicAdd(&result[3], sum[3]);
+  }
+}
+
+template <typename vpixel_t>
+void cpu_analyze_diff(
+  uint64_t* result, const vpixel_t* f0, const vpixel_t* f1,
+  int width, int height, int pitch)
+{
+  uint64_t sum0 = 0, sum1 = 0;
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      int4 a = to_int(f0[x + (y - 2) * pitch]);
+      int4 b = to_int(f0[x + (y - 1) * pitch]);
+      int4 c = to_int(f0[x + (y + 0) * pitch]);
+      int4 d = to_int(f0[x + (y + 1) * pitch]);
+      int4 e = to_int(f0[x + (y + 2) * pitch]);
+
+      // 現在のフレーム(f0)
+      sum0 += dev_horizontal_sum(CalcCombe(a, b, c, d, e));
+
+      // TFF前提
+      // 現在のフレームのボトムフィールド（奇数ライン）と次のフレームのトップフィールド（偶数ライン）
+      if (y & 1) {
+        // yは奇数ライン
+        a = to_int(f0[x + (y - 2) * pitch]);
+        b = to_int(f1[x + (y - 1) * pitch]);
+        c = to_int(f0[x + (y + 0) * pitch]);
+        d = to_int(f1[x + (y + 1) * pitch]);
+        e = to_int(f0[x + (y + 2) * pitch]);
+        sum1 += dev_horizontal_sum(CalcCombe(a, b, c, d, e));
+      }
+      else {
+        // yは偶数ライン
+        a = to_int(f1[x + (y - 2) * pitch]);
+        b = to_int(f0[x + (y - 1) * pitch]);
+        c = to_int(f1[x + (y + 0) * pitch]);
+        d = to_int(f0[x + (y + 1) * pitch]);
+        e = to_int(f1[x + (y + 2) * pitch]);
+        sum1 += dev_horizontal_sum(CalcCombe(a, b, c, d, e));
+      }
+    }
+  }
+  result[0] = sum0;
+  result[1] = sum1;
+}
+
+template <typename vpixel_t>
+__global__ void kl_analyze_diff(
+  uint64_t* result, const vpixel_t* f0, const vpixel_t* f1,
+  int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  int tid = threadIdx.x + threadIdx.y * CALC_FIELD_DIFF_X;
+
+  int sum[2] = { 0 };
+  if (x < width && y < height) {
+    int4 a = to_int(f0[x + (y - 2) * pitch]);
+    int4 b = to_int(f0[x + (y - 1) * pitch]);
+    int4 c = to_int(f0[x + (y + 0) * pitch]);
+    int4 d = to_int(f0[x + (y + 1) * pitch]);
+    int4 e = to_int(f0[x + (y + 2) * pitch]);
+
+    // 現在のフレーム(f0)
+    sum[0] = dev_horizontal_sum(CalcCombe(a, b, c, d, e));
+
+    // TFF前提
+    // 現在のフレームのボトムフィールド（奇数ライン）と次のフレームのトップフィールド（偶数ライン）
+    if (y & 1) {
+      // yは奇数ライン
+      // ↓必要なくても読むのをやめるとレジスタ使用数が25->32に増える
+      a = to_int(f0[x + (y - 2) * pitch]);
+      b = to_int(f1[x + (y - 1) * pitch]);
+      c = to_int(f0[x + (y + 0) * pitch]);
+      d = to_int(f1[x + (y + 1) * pitch]);
+      e = to_int(f0[x + (y + 2) * pitch]);
+      // ↓この行をifの外に持っていくとレジスタ使用数が25->39に増える
+      sum[1] = dev_horizontal_sum(CalcCombe(a, b, c, d, e));
+    }
+    else {
+      // yは偶数ライン
+      // ↓必要なくても読むのをやめるとレジスタ使用数が25->32に増える
+      a = to_int(f1[x + (y - 2) * pitch]);
+      b = to_int(f0[x + (y - 1) * pitch]);
+      c = to_int(f1[x + (y + 0) * pitch]);
+      d = to_int(f0[x + (y + 1) * pitch]);
+      e = to_int(f1[x + (y + 2) * pitch]);
+      // ↓この行をifの外に持っていくとレジスタ使用数が25->39に増える
+      sum[1] = dev_horizontal_sum(CalcCombe(a, b, c, d, e));
+    }
+  }
+
+  __shared__ int sbuf[CALC_FIELD_DIFF_THREADS * 2];
+  dev_reduceN<int, 2, CALC_FIELD_DIFF_THREADS, AddReducer<int>>(tid, sum, sbuf);
+
+  if (tid == 0) {
+    atomicAdd(&result[0], sum[0]);
+    atomicAdd(&result[1], sum[1]);
+  }
+}
+
+template __global__ void kl_analyze_diff(
+  uint64_t* result, const uchar4* f0, const uchar4* f1,
+  int width, int height, int pitch);
+
+struct NoiseResult {
+  uint64_t noise0, noise1;
+  uint64_t noiseR0, noiseR1;
+  uint64_t diff0, diff1;
+};
+
+class KAnalyzeNoise : public KFMFilterBase
+{
+  PClip noiseclip;
+
+  VideoInfo srcvi;
+  VideoInfo padvi;
+
+  void InitAnalyze(uint64_t* result, PNeoEnv env) {
+    if (IS_CUDA) {
+      kl_init_uint64 << <1, 6 >> > (result);
+      DEBUG_SYNC;
+    }
+    else {
+      memset(result, 0x00, sizeof(NoiseResult));
+    }
+  }
+
+  void AnalyzeNoise(uint64_t* result, PVideoFrame noise0, PVideoFrame noise1, PVideoFrame noise2, PNeoEnv env)
+  {
+    typedef typename VectorType<uint8_t>::type vpixel_t;
+
+    const vpixel_t* src0Y = reinterpret_cast<const vpixel_t*>(noise0->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src0U = reinterpret_cast<const vpixel_t*>(noise0->GetReadPtr(PLANAR_U));
+    const vpixel_t* src0V = reinterpret_cast<const vpixel_t*>(noise0->GetReadPtr(PLANAR_V));
+    const vpixel_t* src1Y = reinterpret_cast<const vpixel_t*>(noise1->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src1U = reinterpret_cast<const vpixel_t*>(noise1->GetReadPtr(PLANAR_U));
+    const vpixel_t* src1V = reinterpret_cast<const vpixel_t*>(noise1->GetReadPtr(PLANAR_V));
+    const vpixel_t* src2Y = reinterpret_cast<const vpixel_t*>(noise2->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src2U = reinterpret_cast<const vpixel_t*>(noise2->GetReadPtr(PLANAR_U));
+    const vpixel_t* src2V = reinterpret_cast<const vpixel_t*>(noise2->GetReadPtr(PLANAR_V));
+
+    int pitchY = noise0->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+    int pitchUV = noise0->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int width = noise0->GetRowSize(PLANAR_Y) / sizeof(vpixel_t);
+    int widthUV = noise0->GetRowSize(PLANAR_U) / sizeof(vpixel_t);
+    int height = noise0->GetHeight(PLANAR_Y);
+    int heightUV = noise0->GetHeight(PLANAR_U);
+
+    if (IS_CUDA) {
+      dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+      dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
+      kl_analyze_noise << <blocks, threads >> >(result, src0Y, src1Y, src2Y, width, height, pitchY);
+      DEBUG_SYNC;
+      kl_analyze_noise << <blocksUV, threads >> >(result, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+      kl_analyze_noise << <blocksUV, threads >> >(result, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+    }
+    else {
+      cpu_analyze_noise(result, src0Y, src1Y, src2Y, width, height, pitchY);
+      cpu_analyze_noise(result, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      cpu_analyze_noise(result, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+    }
+  }
+
+  void AnalyzeDiff(uint64_t* result, PVideoFrame frame0, PVideoFrame frame1, PNeoEnv env)
+  {
+    typedef typename VectorType<uint8_t>::type vpixel_t;
+
+    const vpixel_t* src0Y = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src0U = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_U));
+    const vpixel_t* src0V = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_V));
+    const vpixel_t* src1Y = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_Y));
+    const vpixel_t* src1U = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_U));
+    const vpixel_t* src1V = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_V));
+
+    int pitchY = frame0->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+    int pitchUV = frame0->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int width = frame0->GetRowSize(PLANAR_Y) / sizeof(vpixel_t);
+    int widthUV = frame0->GetRowSize(PLANAR_U) / sizeof(vpixel_t);
+    int height = frame0->GetHeight(PLANAR_Y);
+    int heightUV = frame0->GetHeight(PLANAR_U);
+
+    if (IS_CUDA) {
+      dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+      dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
+      kl_analyze_diff << <blocks, threads >> >(result, src0Y, src1Y, width, height, pitchY);
+      DEBUG_SYNC;
+      kl_analyze_diff << <blocksUV, threads >> >(result, src0U, src1U, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+      kl_analyze_diff << <blocksUV, threads >> >(result, src0V, src1V, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+    }
+    else {
+      cpu_analyze_diff(result, src0Y, src1Y, width, height, pitchY);
+      cpu_analyze_diff(result, src0U, src1U, widthUV, heightUV, pitchUV);
+      cpu_analyze_diff(result, src0V, src1V, widthUV, heightUV, pitchUV);
+    }
+  }
+
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
+  {
+    PVideoFrame f0 = child->GetFrame(n + 0, env);
+    PVideoFrame f1 = child->GetFrame(n + 1, env);
+    PVideoFrame noise0 = noiseclip->GetFrame(2 * n + 0, env);
+    PVideoFrame noise1 = noiseclip->GetFrame(2 * n + 1, env);
+    PVideoFrame noise2 = noiseclip->GetFrame(2 * n + 2, env);
+
+    PVideoFrame f0padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
+    PVideoFrame f1padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+
+    uint64_t* result = reinterpret_cast<uint64_t*>(dst->GetWritePtr());
+
+    // TODO: 切り出し
+    CopyFrame<uint8_t>(f0, f0padded, env);
+    PadFrame<uint8_t>(f0padded, env);
+    CopyFrame<uint8_t>(f1, f1padded, env);
+    PadFrame<uint8_t>(f1padded, env);
+
+    InitAnalyze(result, env);
+    AnalyzeNoise(result, noise0, noise1, noise2, env);
+    AnalyzeDiff(result, f0padded, f1padded, env);
+
+    return dst;
+  }
+public:
+  KAnalyzeNoise(PClip src, PClip noise, IScriptEnvironment* env)
+    : KFMFilterBase(src)
+    , noiseclip(noise)
+    , srcvi(vi)
+    , padvi(vi)
+  {
+    if (srcvi.width & 3) env->ThrowError("[KAnalyzeNoise]: width must be multiple of 4");
+    if (srcvi.height & 3) env->ThrowError("[KAnalyzeNoise]: height must be multiple of 4");
+
+    padvi.height += VPAD * 2;
+
+    int out_bytes = sizeof(NoiseResult);
+    vi.pixel_type = VideoInfo::CS_BGR32;
+    vi.width = 16;
+    vi.height = nblocks(out_bytes, vi.width * 4);
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return GetFrameT(n, env);
+      //case 2:
+      //  dst = InternalGetFrame<uint16_t>(n60, fmframe, frameType, env);
+      //  break;
+    default:
+      env->ThrowError("[KAnalyzeNoise] Unsupported pixel format");
+      break;
+    }
+
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KAnalyzeNoise(
+      args[0].AsClip(),       // src
+      args[1].AsClip(),       // noise
+      env
+    );
   }
 };
 

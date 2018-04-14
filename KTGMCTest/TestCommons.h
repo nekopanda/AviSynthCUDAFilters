@@ -15,7 +15,7 @@
 #include <iostream>
 #include <memory>
 
-#define O_C(n) ".OnCUDA(" #n ", 1)"
+#define O_C(n) ".OnCUDA(" #n ", 0)"
 
 std::string GetDirectoryName(const std::string& filename);
 
@@ -56,7 +56,7 @@ protected:
    std::string workDirPath;
 
    enum TEST_FRAMES {
-      TF_MID, TF_BEGIN, TF_END
+      TF_MID, TF_BEGIN, TF_END, TF_100
    };
 
    void GetFrames(PClip& clip, TEST_FRAMES tf, PNeoEnv env);

@@ -91,6 +91,73 @@ __device__ void dev_reduce(int tid, T& value, T* buf)
 }
 
 // MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
+template <typename T, int N, int MAX, typename REDUCER>
+__device__ void dev_reduceN_warp(int tid, T value[N])
+{
+  REDUCER red;
+  // warp shuffle‚Åreduce
+#if CUDART_VERSION >= 9000
+  if (MAX >= 32) for(int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 16));
+  if (MAX >= 16) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 8));
+  if (MAX >= 8) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 4));
+  if (MAX >= 4) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 2));
+  if (MAX >= 2) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 1));
+#else
+  if (MAX >= 32) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 16));
+  if (MAX >= 16) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 8));
+  if (MAX >= 8) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 4));
+  if (MAX >= 4) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 2));
+  if (MAX >= 2) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 1));
+#endif
+}
+
+// MAX‚Í2‚×‚«‚Ì‚Ý‘Î‰ž
+// buf‚Íshared memory„§
+template <typename T, int N, int MAX, typename REDUCER>
+__device__ void dev_reduceN(int tid, T value[N], T* buf)
+{
+  REDUCER red;
+  if (MAX >= 64) {
+    for (int i = 0; i < N; ++i) buf[i * MAX + tid] = value[i];
+    __syncthreads();
+    if (MAX >= 1024) {
+      if (tid < 512) {
+        for (int i = 0; i < N; ++i) red(buf[i * MAX + tid], buf[i * MAX + tid + 512]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 512) {
+      if (tid < 256) {
+        for (int i = 0; i < N; ++i) red(buf[i * MAX + tid], buf[i * MAX + tid + 256]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 256) {
+      if (tid < 128) {
+        for (int i = 0; i < N; ++i) red(buf[i * MAX + tid], buf[i * MAX + tid + 128]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 128) {
+      if (tid < 64) {
+        for (int i = 0; i < N; ++i) red(buf[i * MAX + tid], buf[i * MAX + tid + 64]);
+      }
+      __syncthreads();
+    }
+    if (MAX >= 64) {
+      if (tid < 32) {
+        for (int i = 0; i < N; ++i) red(buf[i * MAX + tid], buf[i * MAX + tid + 32]);
+      }
+      __syncthreads();
+    }
+    for (int i = 0; i < N; ++i) value[i] = buf[i * MAX + tid];
+  }
+  if (tid < 32) {
+    dev_reduceN_warp<T, N, MAX, REDUCER>(tid, value);
+  }
+}
+
+// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
 template <typename K, typename V, int MAX, typename REDUCER>
 __device__ void dev_reduce2_warp(int tid, K& key, V& value)
 {

@@ -20,6 +20,11 @@ void AvsTestBase::GetFrames(PClip& clip, TEST_FRAMES tf, PNeoEnv env)
          clip->GetFrame(100 + i, env);
       }
       break;
+   case TF_100:
+     for (int i = 0; i < 100; ++i) {
+       clip->GetFrame(100 + i, env);
+     }
+     break;
    case TF_BEGIN:
       clip->GetFrame(0, env);
       clip->GetFrame(1, env);

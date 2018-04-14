@@ -13,16 +13,16 @@
 #include "KFMFilterBase.cuh"
 
 
-__device__ __host__ void CountFlag(FMCount& cnt, int flag)
+__device__ __host__ void CountFlag(int cnt[3], int flag)
 {
-  if (flag & MOVE) cnt.move++;
-  if (flag & SHIMA) cnt.shima++;
-  if (flag & LSHIMA) cnt.lshima++;
+  if (flag & MOVE) cnt[0]++;
+  if (flag & SHIMA) cnt[1]++;
+  if (flag & LSHIMA) cnt[2]++;
 }
 
 void cpu_count_fmflags(FMCount* dst, const uchar4* flagp, int width, int height, int pitch)
 {
-  FMCount cnt = { 0 };
+  int cnt[3] = { 0 };
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
       uchar4 flags = flagp[x + y * pitch];
@@ -32,7 +32,9 @@ void cpu_count_fmflags(FMCount* dst, const uchar4* flagp, int width, int height,
       CountFlag(cnt, flags.w);
     }
   }
-  *dst = cnt;
+  dst->move = cnt[0];
+  dst->shima = cnt[1];
+  dst->lshima = cnt[2];
 }
 
 __global__ void kl_init_fmcount(FMCount* dst)
@@ -53,9 +55,7 @@ __global__ void kl_count_fmflags(FMCount* dst, const uchar4* flagp, int width, i
   int y = threadIdx.y + blockIdx.y * FM_COUNT_TH_H;
   int tid = threadIdx.x + threadIdx.y * FM_COUNT_TH_W;
 
-  __shared__ int sbuf[FM_COUNT_THREADS];
-
-  FMCount cnt = { 0 };
+  int cnt[3] = { 0 };
 
   if (x < width && y < height) {
     uchar4 flags = flagp[x + y * pitch];
@@ -65,17 +65,13 @@ __global__ void kl_count_fmflags(FMCount* dst, const uchar4* flagp, int width, i
     CountFlag(cnt, flags.w);
   }
 
-  dev_reduce<int, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt.move, sbuf);
-  __syncthreads();
-  dev_reduce<int, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt.shima, sbuf);
-  __syncthreads();
-  dev_reduce<int, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt.lshima, sbuf);
-  __syncthreads();
+  __shared__ int sbuf[FM_COUNT_THREADS * 3];
+  dev_reduceN<int, 3, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt, sbuf);
 
   if (tid == 0) {
-    atomicAdd(&dst->move, cnt.move);
-    atomicAdd(&dst->shima, cnt.shima);
-    atomicAdd(&dst->lshima, cnt.lshima);
+    atomicAdd(&dst->move, cnt[0]);
+    atomicAdd(&dst->shima, cnt[1]);
+    atomicAdd(&dst->lshima, cnt[2]);
   }
 }
 
@@ -1126,7 +1122,7 @@ class KRemoveCombe : public KFMFilterBase
   {
     typedef uint8_t pixel_t;
 
-    int frame_align = env->GetProperty(AEP_FRAME_ALIGN);
+    int frame_align = (int)env->GetProperty(AEP_FRAME_ALIGN);
 
     PVideoFrame src = child->GetFrame(n, env);
     PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);

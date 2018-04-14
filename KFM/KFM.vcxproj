@@ -144,6 +144,8 @@
     <CudaCompile>
       <CodeGeneration>compute_61,sm_61;compute_35,sm_35</CodeGeneration>
       <AdditionalOptions>-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
+      <Keep>true</Keep>
+      <PtxAsOptionV>true</PtxAsOptionV>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -166,6 +168,8 @@
     <CudaCompile>
       <AdditionalOptions>-Xcompiler "/wd 4819" %(AdditionalOptions)</AdditionalOptions>
       <CodeGeneration>compute_61,sm_61;compute_35,sm_35</CodeGeneration>
+      <Keep>true</Keep>
+      <PtxAsOptionV>true</PtxAsOptionV>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>

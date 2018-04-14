@@ -78,3 +78,15 @@ __host__ __device__ T clamp(T n, T minv, T maxv)
 
 void OnCudaError(cudaError_t err);
 #endif
+
+#ifndef NDEBUG
+//#if 1
+#define DEBUG_SYNC \
+			CUDA_CHECK(cudaGetLastError()); \
+      CUDA_CHECK(cudaDeviceSynchronize())
+#else
+#define DEBUG_SYNC
+#endif
+
+#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
+
