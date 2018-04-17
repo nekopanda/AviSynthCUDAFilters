@@ -174,9 +174,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="KFM.cpp" />
-    <ClCompile Include="TextOut.cpp" />
+    <CudaCompile Include="TextOut.cu">
+      <FileType>CppCode</FileType>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Frame.h" />
     <ClInclude Include="KFM.h" />
     <ClInclude Include="KFMFilterBase.cuh" />
     <ClInclude Include="TextOut.h" />

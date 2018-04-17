@@ -164,6 +164,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AvsCUDATest.cpp" />
+    <ClCompile Include="KFMTest.cpp" />
     <ClCompile Include="KTGMCTest.cpp" />
     <ClCompile Include="MaskToolsTest.cpp" />
     <ClCompile Include="MiscTest.cpp" />

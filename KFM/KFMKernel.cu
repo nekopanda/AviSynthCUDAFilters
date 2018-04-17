@@ -181,11 +181,11 @@ class KFMSwitch : public KFMFilterBase
 
 	PulldownPatterns patterns;
 
-	bool ContainsDurtyBlock(PVideoFrame& flag, PVideoFrame& work, int thpatch, PNeoEnv env)
+	bool ContainsDurtyBlock(Frame& flag, Frame& work, int thpatch, PNeoEnv env)
 	{
-		const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
-		int* pwork = reinterpret_cast<int*>(work->GetWritePtr());
-		int pitch = flag->GetPitch();
+		const uint8_t* flagp = flag.GetReadPtr<uint8_t>();
+		int* pwork = work.GetWritePtr<int>();
+		int pitch = flag.GetPitch<uint8_t>();
 
 		if (IS_CUDA) {
 			dim3 threads(32, 16);
@@ -201,12 +201,12 @@ class KFMSwitch : public KFMFilterBase
 		}
 	}
 
-	void MakeMergeFlag(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& dsttmp, PVideoFrame& srctmp, int thpatch, PNeoEnv env)
+	void MakeMergeFlag(Frame& dst, Frame& src, Frame& dsttmp, Frame& srctmp, int thpatch, PNeoEnv env)
 	{
-		const uint8_t* srcp = reinterpret_cast<const uint8_t*>(src->GetReadPtr());
-		uint8_t* dstp = reinterpret_cast<uint8_t*>(dst->GetWritePtr());
-		uint8_t* dsttmpp = reinterpret_cast<uint8_t*>(dsttmp->GetWritePtr()) + dsttmp->GetPitch();
-		uint8_t* srctmpp = reinterpret_cast<uint8_t*>(srctmp->GetWritePtr());
+		const uint8_t* srcp = src.GetReadPtr<uint8_t>();
+		uint8_t* dstp = dst.GetWritePtr<uint8_t>();
+		uint8_t* dsttmpp = dsttmp.GetWritePtr<uint8_t>() + dsttmp.GetPitch<uint8_t>();
+		uint8_t* srctmpp = srctmp.GetWritePtr<uint8_t>();
 
 		// 0と128の2値にした後、線形補間で画像サイズまで拡大 //
 
@@ -214,61 +214,61 @@ class KFMSwitch : public KFMFilterBase
 			dim3 threads(32, 8);
 			dim3 binary_blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
 			kl_binary_flag << <binary_blocks, threads >> >(
-				srctmpp, srctmp->GetPitch(), srcp, src->GetPitch(), nBlkX, nBlkY, thpatch);
+				srctmpp, srctmp.GetPitch<uint8_t>(), srcp, src.GetPitch<uint8_t>(), nBlkX, nBlkY, thpatch);
 			DEBUG_SYNC;
 			{
 				dim3 threads(32, 1);
 				dim3 blocks(nblocks(nBlkX, threads.x));
-				kl_padv << <blocks, threads >> > (srctmpp, nBlkX, nBlkY, srctmp->GetPitch(), 1);
+				kl_padv << <blocks, threads >> > (srctmpp, nBlkX, nBlkY, srctmp.GetPitch<uint8_t>(), 1);
 				DEBUG_SYNC;
 			}
 			{
 				dim3 threads(1, 32);
 				dim3 blocks(1, nblocks(nBlkY, threads.y));
-				kl_padh << <blocks, threads >> > (srctmpp, nBlkX, nBlkY + 1 * 2, srctmp->GetPitch(), 1);
+				kl_padh << <blocks, threads >> > (srctmpp, nBlkX, nBlkY + 1 * 2, srctmp.GetPitch<uint8_t>(), 1);
 				DEBUG_SYNC;
 			}
 			dim3 h_blocks(nblocks(vi.width, threads.x), nblocks(nBlkY, threads.y));
 			kl_bilinear_x8_h << <h_blocks, threads >> >(
-				dsttmpp, vi.width, nBlkY + 2, dsttmp->GetPitch(), srctmpp - srctmp->GetPitch(), srctmp->GetPitch());
+				dsttmpp, vi.width, nBlkY + 2, dsttmp.GetPitch<uint8_t>(), srctmpp - srctmp.GetPitch<uint8_t>(), srctmp.GetPitch<uint8_t>());
 			DEBUG_SYNC;
 			dim3 v_blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
 			kl_bilinear_x8_v << <v_blocks, threads >> >(
-				dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp + dsttmp->GetPitch(), dsttmp->GetPitch());
+				dstp, vi.width, vi.height, dst.GetPitch<uint8_t>(), dsttmpp + dsttmp.GetPitch<uint8_t>(), dsttmp.GetPitch<uint8_t>());
 			DEBUG_SYNC;
 		}
 		else {
-			cpu_binary_flag(srctmpp, srctmp->GetPitch(), srcp, src->GetPitch(), nBlkX, nBlkY, thpatch);
-			cpu_padv(srctmpp, nBlkX, nBlkY, srctmp->GetPitch(), 1);
-			cpu_padh(srctmpp, nBlkX, nBlkY + 1 * 2, srctmp->GetPitch(), 1);
+			cpu_binary_flag(srctmpp, srctmp.GetPitch<uint8_t>(), srcp, src.GetPitch<uint8_t>(), nBlkX, nBlkY, thpatch);
+			cpu_padv(srctmpp, nBlkX, nBlkY, srctmp.GetPitch<uint8_t>(), 1);
+			cpu_padh(srctmpp, nBlkX, nBlkY + 1 * 2, srctmp.GetPitch<uint8_t>(), 1);
 			// 上下パディング1行分も含めて処理
-			cpu_bilinear_x8_h(dsttmpp, vi.width, nBlkY + 2, dsttmp->GetPitch(), srctmpp - srctmp->GetPitch(), srctmp->GetPitch());
+			cpu_bilinear_x8_h(dsttmpp, vi.width, nBlkY + 2, dsttmp.GetPitch<uint8_t>(), srctmpp - srctmp.GetPitch<uint8_t>(), srctmp.GetPitch<uint8_t>());
 			// ソースはパディング1行分をスキップして渡す
-			cpu_bilinear_x8_v(dstp, vi.width, vi.height, dst->GetPitch(), dsttmpp + dsttmp->GetPitch(), dsttmp->GetPitch());
+			cpu_bilinear_x8_v(dstp, vi.width, vi.height, dst.GetPitch<uint8_t>(), dsttmpp + dsttmp.GetPitch<uint8_t>(), dsttmp.GetPitch<uint8_t>());
 		}
 	}
 
 	template <typename pixel_t>
-	void MergeBlock(PVideoFrame& src24, PVideoFrame& src60, PVideoFrame& flag, PVideoFrame& dst, PNeoEnv env)
+	void MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
-		const vpixel_t* src24Y = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_Y));
-		const vpixel_t* src24U = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_U));
-		const vpixel_t* src24V = reinterpret_cast<const vpixel_t*>(src24->GetReadPtr(PLANAR_V));
-		const vpixel_t* src60Y = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_Y));
-		const vpixel_t* src60U = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_U));
-		const vpixel_t* src60V = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_V));
-		vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
-		const uchar4* flagp = reinterpret_cast<const uchar4*>(flag->GetReadPtr());
+		const vpixel_t* src24Y = src24.GetReadPtr<vpixel_t>(PLANAR_Y);
+		const vpixel_t* src24U = src24.GetReadPtr<vpixel_t>(PLANAR_U);
+		const vpixel_t* src24V = src24.GetReadPtr<vpixel_t>(PLANAR_V);
+		const vpixel_t* src60Y = src60.GetReadPtr<vpixel_t>(PLANAR_Y);
+		const vpixel_t* src60U = src60.GetReadPtr<vpixel_t>(PLANAR_U);
+		const vpixel_t* src60V = src60.GetReadPtr<vpixel_t>(PLANAR_V);
+		vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+		vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+		vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
+		const uchar4* flagp = flag.GetReadPtr<uchar4>();
 
-		int pitchY = src24->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-		int pitchUV = src24->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int pitchY = src24.GetPitch<vpixel_t>(PLANAR_Y);
+		int pitchUV = src24.GetPitch<vpixel_t>(PLANAR_U);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
-		int fpitch4 = flag->GetPitch() / sizeof(uchar4);
+		int fpitch4 = flag.GetPitch<uchar4>();
 
 		if (IS_CUDA) {
 			dim3 threads(32, 16);
@@ -292,19 +292,19 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	void VisualizeFlag(PVideoFrame& dst, PVideoFrame& mf, PNeoEnv env)
+	void VisualizeFlag(Frame& dst, Frame& mf, PNeoEnv env)
 	{
 		// 判定結果を表示
 		int blue[] = { 73, 230, 111 };
 
-		const uint8_t* mfp = reinterpret_cast<const uint8_t*>(mf->GetReadPtr());
-		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+		const uint8_t* mfp = mf.GetReadPtr<uint8_t>();
+		pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+		pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+		pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-		int mfpitch = mf->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-		int dstPitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int dstPitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int mfpitch = mf.GetPitch<uint8_t>(PLANAR_Y);
+		int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+		int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
 
 		// 色を付ける
 		for (int y = 0; y < vi.height; ++y) {
@@ -320,15 +320,15 @@ class KFMSwitch : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame InternalGetFrame(int n60, PVideoFrame& fmframe, int& type, PNeoEnv env)
+	Frame InternalGetFrame(int n60, Frame& fmframe, int& type, PNeoEnv env)
 	{
 		int cycleIndex = n60 / 10;
-		int kfmPattern = (int)fmframe->GetProperty("KFM_Pattern")->GetInt();
-		float kfmCost = (float)fmframe->GetProperty("KFM_Cost")->GetFloat();
+		int kfmPattern = (int)fmframe.GetProperty("KFM_Pattern")->GetInt();
+		float kfmCost = (float)fmframe.GetProperty("KFM_Cost")->GetFloat();
 
 		if (kfmCost > thswitch || PulldownPatterns::Is30p(kfmPattern)) {
 			// コストが高いので60pと判断 or 30pの場合
-			PVideoFrame frame60 = child->GetFrame(n60, env);
+			Frame frame60 = child->GetFrame(n60, env);
 			type = FRAME_60;
 			return frame60;
 		}
@@ -345,8 +345,8 @@ class KFMSwitch : public KFMFilterBase
 		}
 		else if (frameInfo.frameIndex >= 4) {
 			// 後ろのサイクルのパターンを取得
-			PVideoFrame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-			int nextPattern = (int)nextfmframe->GetProperty("KFM_Pattern")->GetInt();
+			Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
+			int nextPattern = (int)nextfmframe.GetProperty("KFM_Pattern")->GetInt();
 			int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
 			if (fstart > 0) {
 				// 前に空きがあるので前のサイクル
@@ -358,49 +358,63 @@ class KFMSwitch : public KFMFilterBase
 			}
 		}
 
-		PVideoFrame frame24 = clip24->GetFrame(n24, env);
-		PVideoFrame flag = combeclip->GetFrame(n24, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
+		Frame frame24 = clip24->GetFrame(n24, env);
+    Frame flag = WrapSwitchFragFrame(
+      combeclip->GetFrame(n24, env)->GetProperty(COMBE_FLAG_STR)->GetFrame());
 
 		{
-			PVideoFrame work = env->NewVideoFrame(workvi);
+			Frame work = env->NewVideoFrame(workvi);
 			if (ContainsDurtyBlock(flag, work, (int)thpatch, env) == false) {
 				// ダメなブロックはないのでそのまま返す
 				return frame24;
 			}
 		}
 
-		PVideoFrame frame60 = child->GetFrame(n60, env);
+		Frame frame60 = child->GetFrame(n60, env);
 
 		VideoInfo mfvi = vi;
 		mfvi.pixel_type = VideoInfo::CS_Y8;
-		PVideoFrame mflag = env->NewVideoFrame(mfvi);
+		Frame mflag = env->NewVideoFrame(mfvi);
 
 		{
 			// マージ用フラグ作成
-			PVideoFrame mflagtmp = env->NewVideoFrame(mfvi);
-			PVideoFrame flagtmp = NewSwitchFlagFrame(vi, env->GetProperty(AEP_FRAME_ALIGN), 2, env);
+			Frame mflagtmp = env->NewVideoFrame(mfvi);
+			Frame flagtmp = NewSwitchFlagFrame(vi, env);
 			MakeMergeFlag(mflag, flag, mflagtmp, flagtmp, (int)thpatch, env);
 		}
 
 		if (!IS_CUDA && vi.ComponentSize() == 1 && showflag) {
-			env->MakeWritable(&frame24);
+			env->MakeWritable(&frame24.frame);
 			VisualizeFlag<pixel_t>(frame24, mflag, env);
 			return frame24;
 		}
 
 		// ダメなブロックは60pフレームからコピー
-		PVideoFrame dst = env->NewVideoFrame(vi);
+		Frame dst = env->NewVideoFrame(vi);
 		MergeBlock<pixel_t>(frame24, frame60, mflag, dst, env);
 
 		return dst;
 	}
 
-	void DrawInfo(PVideoFrame& dst, const char* fps, int pattern, float score, IScriptEnvironment* env) {
-		env->MakeWritable(&dst);
+  template <typename pixel_t>
+  PVideoFrame GetFrameTop(int n60, PNeoEnv env)
+  {
+    int cycleIndex = n60 / 10;
+    Frame fmframe = env->GetFrame(fmclip, cycleIndex, env->GetDevice(DEV_TYPE_CPU, 0));
+    int frameType;
 
-		char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.1f", fps, pattern, score);
-		DrawText(dst, true, 0, 0, buf);
-	}
+    Frame dst = InternalGetFrame<pixel_t>(n60, fmframe, frameType, env);
+
+    if (show) {
+      const std::pair<int, float>* pfm = fmframe.GetReadPtr<std::pair<int, float>>();
+      const char* fps = (frameType == FRAME_60) ? "60p" : "24p";
+      char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.1f", fps, pfm->first, pfm->second);
+      DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
+      return dst.frame;
+    }
+
+    return dst.frame;
+  }
 
 public:
 	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip,
@@ -432,31 +446,18 @@ public:
 	{
 		PNeoEnv env = env_;
 
-		int cycleIndex = n60 / 10;
-		PVideoFrame fmframe = fmclip->GetFrame(cycleIndex, env);
-		int frameType;
-
-		PVideoFrame dst;
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
 		case 1:
-			dst = InternalGetFrame<uint8_t>(n60, fmframe, frameType, env);
-			break;
+			return GetFrameTop<uint8_t>(n60, env);
 		case 2:
-			dst = InternalGetFrame<uint16_t>(n60, fmframe, frameType, env);
-			break;
+      return GetFrameTop<uint16_t>(n60, env);
 		default:
 			env->ThrowError("[KFMSwitch] Unsupported pixel format");
 			break;
 		}
 
-		if (!IS_CUDA && pixelSize == 1 && show) {
-			const std::pair<int, float>* pfm = (std::pair<int, float>*)fmframe->GetReadPtr();
-			const char* fps = (frameType == FRAME_60) ? "60p" : "24p";
-			DrawInfo(dst, fps, pfm->first, pfm->second, env);
-		}
-
-		return dst;
+		return PVideoFrame();
 	}
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -475,6 +476,60 @@ public:
 			);
 	}
 };
+
+class KFMSuper : public KFMFilterBase
+{
+  VideoInfo srcvi;
+
+  template <typename pixel_t>
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
+  {
+    Frame src = child->GetFrame(n, env);
+    Frame dst = Frame(env->NewVideoFrame(vi), VPAD);
+
+    CopyFrame<pixel_t>(src, dst, env);
+    PadFrame<pixel_t>(dst, env);
+
+    return dst.frame;
+  }
+public:
+  KFMSuper(PClip src, IScriptEnvironment* env)
+    : KFMFilterBase(src)
+    , srcvi(vi)
+  {
+    if (srcvi.width & 3) env->ThrowError("[KFMSuper]: width must be multiple of 4");
+    if (srcvi.height & 3) env->ThrowError("[KFMSuper]: height must be multiple of 4");
+
+    vi.height += VPAD * 2;
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return GetFrameT<uint8_t>(n, env);
+    case 2:
+      return GetFrameT<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KFMSuper] Unsupported pixel format");
+      break;
+    }
+
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KFMSuper(
+      args[0].AsClip(),       // src
+      env
+    );
+  }
+};
+
 
 class AssertOnCUDA : public GenericVideoFilter
 {
@@ -496,6 +551,7 @@ public:
 
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
-	env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSuper", "c", KFMSuper::Create, 0);
 	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }

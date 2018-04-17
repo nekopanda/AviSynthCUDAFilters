@@ -9,18 +9,9 @@
 #include "CommonFunctions.h"
 #include "VectorFunctions.cuh"
 
+#include "Frame.h"
+
 #include "DeviceLocalData.cpp"
-
-#ifndef NDEBUG
-//#if 1
-#define DEBUG_SYNC \
-			CUDA_CHECK(cudaGetLastError()); \
-      CUDA_CHECK(cudaDeviceSynchronize())
-#else
-#define DEBUG_SYNC
-#endif
-
-#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
 
 int GetDeviceTypes(const PClip& clip);
 
@@ -176,7 +167,7 @@ class KTemporalNR : public KDebandBase
 	int dist;
 	int thresh;
 
-	PVideoFrame cacheframes[BATCH];
+	Frame cacheframes[BATCH];
 	int cached_cycle;
 
 	template <typename pixel_t>
@@ -185,7 +176,7 @@ class KTemporalNR : public KDebandBase
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		int nframes = dist * 2 + 1;
 		int batchframes = nframes + BATCH - 1;
-		auto frames = std::unique_ptr<PVideoFrame[]>(new PVideoFrame[batchframes]);
+		auto frames = std::unique_ptr<Frame[]>(new Frame[batchframes]);
 		for (int i = 0; i < batchframes; ++i) {
 			frames[i] = child->GetFrame(clamp(cycle * BATCH - dist + i, 0, vi.num_frames - 1), env);
 		}
@@ -197,19 +188,19 @@ class KTemporalNR : public KDebandBase
 
 		for (int i = 0; i < BATCH; ++i) {
 			cacheframes[i] = env->NewVideoFrame(vi);
-			PVideoFrame& dst = cacheframes[i];
-			ptrsY.out[i] = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-			ptrsU.out[i] = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-			ptrsV.out[i] = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+			Frame& dst = cacheframes[i];
+			ptrsY.out[i] = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+			ptrsU.out[i] = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+			ptrsV.out[i] = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 		}
 		for (int i = 0; i < batchframes; ++i) {
-			ptrsY.in[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
-			ptrsU.in[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
-			ptrsV.in[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
+			ptrsY.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_Y);
+			ptrsU.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_U);
+			ptrsV.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_V);
 		}
 
-		int pitchY = cacheframes[0]->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-		int pitchUV = cacheframes[0]->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int pitchY = cacheframes[0].GetPitch<vpixel_t>(PLANAR_Y);
+		int pitchUV = cacheframes[0].GetPitch<vpixel_t>(PLANAR_U);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
@@ -221,10 +212,10 @@ class KTemporalNR : public KDebandBase
 			workvi.pixel_type = VideoInfo::CS_BGR32;
 			workvi.width = 16;
 			workvi.height = nblocks(work_bytes, workvi.width * 4);
-			PVideoFrame work = env->NewVideoFrame(workvi);
+			Frame work = env->NewVideoFrame(workvi);
 
 			TemporalNRPtrs<vpixel_t>* dptrs = 
-				reinterpret_cast<TemporalNRPtrs<vpixel_t>*>(work->GetWritePtr());
+				work.GetWritePtr<TemporalNRPtrs<vpixel_t>>();
 			CUDA_CHECK(cudaMemcpyAsync(dptrs, ptrs, work_bytes, cudaMemcpyHostToDevice));
 
 			dim3 threads(32, TEMPORAL_NR_BATCH);
@@ -271,7 +262,7 @@ public:
 		PNeoEnv env = env_;
 		int cycle = n / BATCH;
 		if (cached_cycle == cycle) {
-			return cacheframes[n % BATCH];
+			return cacheframes[n % BATCH].frame;
 		}
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
@@ -286,7 +277,7 @@ public:
 			break;
 		}
 		cached_cycle = cycle;
-		return cacheframes[n % BATCH];
+		return cacheframes[n % BATCH].frame;
 	}
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
@@ -493,20 +484,20 @@ class KDeband : public KDebandBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame GetFrameT(int n, PNeoEnv env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
-		PVideoFrame src = child->GetFrame(n, env);
-		PVideoFrame dst = env->NewVideoFrame(vi);
+		Frame src = child->GetFrame(n, env);
+		Frame dst = env->NewVideoFrame(vi);
 
-		const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
-		const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
-		const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
-		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+		const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+		const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+		const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+		pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+		pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+		pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+		int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
 		int widthUV = vi.width >> logUVx;
 		int heightUV = vi.height >> logUVy;
 
@@ -550,7 +541,7 @@ class KDeband : public KDebandBase
 			table[0][table_idx](dstV, srcV, prand, widthUV, heightUV, pitchUV, range, thresh);
 		}
 
-		return dst;
+		return dst.frame;
 	}
 
 public:
@@ -997,15 +988,15 @@ class KEdgeLevel : public KDebandBase
 	int logUVy;
 
 	template <typename pixel_t>
-	void CopyUV(PVideoFrame& dst, PVideoFrame& src, PNeoEnv env)
+	void CopyUV(Frame& dst, Frame& src, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
-		const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
-		const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_V));
-		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+		const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
+		const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
+		vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+		vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int pitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
@@ -1025,13 +1016,13 @@ class KEdgeLevel : public KDebandBase
 	}
 
 	template <typename pixel_t>
-	void ClearUV(PVideoFrame& dst, PNeoEnv env)
+	void ClearUV(Frame& dst, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
-		vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-		vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+		vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+		vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-		int pitchUV = dst->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+		int pitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
@@ -1053,27 +1044,27 @@ class KEdgeLevel : public KDebandBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame GetFrameT(int n, PNeoEnv env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
-		PVideoFrame src = child->GetFrame(n, env);
-		PVideoFrame dst = env->NewVideoFrame(vi);
-		PVideoFrame el = (repair > 0) ? env->NewVideoFrame(vi) : PVideoFrame();
-		PVideoFrame tmp = (repair > 0) ? env->NewVideoFrame(vi) : PVideoFrame();
+		Frame src = child->GetFrame(n, env);
+		Frame dst = env->NewVideoFrame(vi);
+		Frame el = (repair > 0) ? env->NewVideoFrame(vi) : Frame();
+		Frame tmp = (repair > 0) ? env->NewVideoFrame(vi) : Frame();
 
-		const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
-		const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
-		const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
-		pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-		pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-		pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
-		pixel_t* elY = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_Y)) : nullptr;
-		pixel_t* elU = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_U)) : nullptr;
-		pixel_t* elV = (repair > 0) ? reinterpret_cast<pixel_t*>(el->GetWritePtr(PLANAR_V)) : nullptr;
-		pixel_t* tmpY = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_Y)) : nullptr;
-		pixel_t* tmpU = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_U)) : nullptr;
-		pixel_t* tmpV = (repair > 0) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(PLANAR_V)) : nullptr;
-		int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-		int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+		const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+		const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+		const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+		pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+		pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+		pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+		pixel_t* elY = (repair > 0) ? el.GetWritePtr<pixel_t>(PLANAR_Y) : nullptr;
+		pixel_t* elU = (repair > 0) ? el.GetWritePtr<pixel_t>(PLANAR_U) : nullptr;
+		pixel_t* elV = (repair > 0) ? el.GetWritePtr<pixel_t>(PLANAR_V) : nullptr;
+		pixel_t* tmpY = (repair > 0) ? tmp.GetWritePtr<pixel_t>(PLANAR_Y) : nullptr;
+		pixel_t* tmpU = (repair > 0) ? tmp.GetWritePtr<pixel_t>(PLANAR_U) : nullptr;
+		pixel_t* tmpV = (repair > 0) ? tmp.GetWritePtr<pixel_t>(PLANAR_V) : nullptr;
+		int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+		int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
 		int widthUV = vi.width >> logUVx;
 		int heightUV = vi.height >> logUVy;
 
@@ -1193,7 +1184,7 @@ class KEdgeLevel : public KDebandBase
 			}
 		}
 
-		return dst;
+		return dst.frame;
 	}
 
 public:

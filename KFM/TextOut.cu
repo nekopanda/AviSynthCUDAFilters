@@ -5,8 +5,20 @@
 //      could not determine. Modified for YV12 by Donald Graft.
 #include "avisynth.h"
 #include <string>
+#include <vector>
+#include <algorithm>
+#include <numeric>
 
-static const unsigned short font[][20] =
+#include "CommonFunctions.h"
+#include "Frame.h"
+
+#ifdef __CUDA_ARCH__
+#define CONSTANT __constant__
+#else
+#define CONSTANT
+#endif
+
+static const CONSTANT unsigned short font[][20] =
 {
   //STARTCHAR space
   {
@@ -738,6 +750,165 @@ static const unsigned short font[][20] =
   }
 };
 
+template <typename pixel_t>
+void cpu_draw_text(
+  pixel_t* dst, int width, int height, int pitch,
+  const char* __restrict__ charmap, int mapw, int maph, int mappitch,
+  int logx, int logy, int pixelshift, bool isUV)
+{
+  for (int by = 0; by < maph; ++by) {
+    for (int bx = 0; bx < mapw; ++bx) {
+      for (int ty = 0; ty < 20; ty += (1 << logy)) {
+        for (int tx = 0; tx < 10; tx += (1 << logx)) {
+          int x = (tx + bx * 10) >> logx;
+          int y = (ty + by * 20) >> logy;
+
+          if (x < width && y < height) {
+            int c = charmap[bx + by * mappitch] - ' ';
+            if (c >= 0 && c <= 'z' - ' ') {
+              if (font[c][ty] & (1 << (15 - tx))) {
+                dst[x + y * pitch] = isUV ? (128 << pixelshift) : (235 << pixelshift);
+              }
+              else {
+                dst[x + y * pitch] = (dst[x + y * pitch] + (isUV ? (128 << pixelshift) : 0)) >> 1;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// threads: (10 >> logx, 20 >> logy)
+template <typename pixel_t>
+__global__ void kl_draw_text(
+  pixel_t* dst, int width, int height, int pitch,
+  const char* __restrict__ charmap, int mapw, int maph, int mappitch,
+  int logx, int logy, int pixelshift, bool isUV)
+{
+  int bx = blockIdx.x;
+  int by = blockIdx.y;
+  int tx = threadIdx.x << logx;
+  int ty = threadIdx.y << logy;
+  int x = (tx + bx * 10) >> logx;
+  int y = (ty + by * 20) >> logy;
+
+  if (x < width && y < height) {
+    int c = charmap[bx + by * mappitch] - ' ';
+    if (c >= 0 && c <= 'z' - ' ') {
+      if (font[c][ty] & (1 << (15 - tx))) {
+        dst[x + y * pitch] = isUV ? (128 << pixelshift) : (235 << pixelshift);
+      }
+      else {
+        dst[x + y * pitch] = (dst[x + y * pitch] + (isUV ? (128 << pixelshift) : 0)) >> 1;
+      }
+    }
+  }
+}
+
+static std::vector<std::string> split_string(const std::string& str,
+  const std::string& delimiter)
+{
+  std::vector<std::string> strings;
+
+  std::string::size_type pos = 0;
+  std::string::size_type prev = 0;
+  while ((pos = str.find(delimiter, prev)) != std::string::npos)
+  {
+    strings.push_back(str.substr(prev, pos - prev));
+    prev = pos + 1;
+  }
+
+  // To get the last substring (or only, if delimiter is not found)
+  strings.push_back(str.substr(prev));
+
+  return strings;
+}
+
+template <typename pixel_t>
+void DrawText(PVideoFrame &dst_, int bitsPerComponent, int x1, int y1, const std::string& s, PNeoEnv env)
+{
+  // YUV planar しか対応しない
+  Frame dst = Frame(dst_, x1, y1, 0, 0, sizeof(pixel_t));
+  dst_ = nullptr; // move
+
+  env->MakeWritable(&dst.frame);
+
+  // 文字列を２次元に展開したデータを作ってGPUに転送
+  auto lines = split_string(s, "\n");
+  int maxlen = (int)std::max_element(lines.begin(), lines.end(),
+    [](const std::string& s0, const std::string& s1) {
+    return s0.size() < s1.size();
+  })->size();
+  char* charmap = new char[maxlen * lines.size()]();
+  for (int i = 0; i < (int)lines.size(); ++i) {
+    const std::string& str = lines[i];
+    std::copy(str.begin(), str.end(), &charmap[i * maxlen]);
+  }
+
+  pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+
+  int pitch = dst.GetPitch<pixel_t>(PLANAR_Y);
+  int pitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
+  int width = std::min(dst.GetWidth<pixel_t>(PLANAR_Y), maxlen * 10);
+  int height = std::min(dst.GetHeight(PLANAR_Y), (int)lines.size() * 20);
+  int logx = (dst.GetWidth<pixel_t>(PLANAR_U) < dst.GetWidth<pixel_t>(PLANAR_Y)) ? 1 : 0;
+  int logy = (dst.GetHeight(PLANAR_U) < dst.GetHeight(PLANAR_Y)) ? 1 : 0;
+  int widthUV = width >> logx;
+  int heightUV = height >> logy;
+  int shift = bitsPerComponent - 8;
+
+  if (IS_CUDA) {
+    int work_bytes = sizeof(char) * maxlen * (int)lines.size();
+    VideoInfo workvi = VideoInfo();
+    workvi.pixel_type = VideoInfo::CS_BGR32;
+    workvi.width = 64;
+    workvi.height = nblocks(work_bytes, workvi.width * 4);
+    PVideoFrame work = env->NewVideoFrame(workvi);
+    char* dev_charmap = (char*)work->GetWritePtr();
+    CUDA_CHECK(cudaMemcpyAsync(dev_charmap, charmap, work_bytes, cudaMemcpyHostToDevice));
+
+    dim3 threads(10, 20);
+    dim3 threadsUV(threads.x >> logx, threads.y >> logy);
+    dim3 blocks(maxlen, (int)lines.size());
+    DEBUG_SYNC;
+    kl_draw_text<<<blocks, threads>>>(dstY, width, height, pitch,
+      dev_charmap, maxlen, (int)lines.size(), maxlen, 0, 0, shift, false);
+    DEBUG_SYNC;
+    kl_draw_text<<<blocks, threadsUV>>>(dstU, widthUV, heightUV, pitchUV,
+      dev_charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+    DEBUG_SYNC;
+    kl_draw_text<<<blocks, threadsUV>>>(dstV, widthUV, heightUV, pitchUV,
+      dev_charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+    DEBUG_SYNC;
+
+    // 終わったら解放するコールバックを追加
+    env->DeviceAddCallback([](void* arg) {
+      delete[]((char*)arg);
+    }, charmap);
+  }
+  else {
+    cpu_draw_text(dstY, width, height, pitch,
+      charmap, maxlen, (int)lines.size(), maxlen, 0, 0, shift, false);
+    cpu_draw_text(dstU, widthUV, heightUV, pitchUV,
+      charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+    cpu_draw_text(dstV, widthUV, heightUV, pitchUV,
+      charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+    delete[] charmap;
+  }
+
+  dst_ = dst.frame;
+}
+
+template void DrawText<uint8_t>(PVideoFrame &dst_,
+  int bitsPerComponent, int x1, int y1, const std::string& s, PNeoEnv env);
+template void DrawText<uint16_t>(PVideoFrame &dst_,
+  int bitsPerComponent, int x1, int y1, const std::string& s, PNeoEnv env);
+
+
 static void DrawYV12(const PVideoFrame &dst, int x1, int y1, const char *s)
 {
   int x, y = y1 * 20, num, tx, ty;
@@ -833,7 +1004,7 @@ static void DrawYUY2(const PVideoFrame &dst, int x1, int y1, const char *s)
   }
 }
 
-void DrawText(const PVideoFrame &dst, bool isYV12, int x1, int y1, const std::string& s)
+void DrawText_old(const PVideoFrame &dst, bool isYV12, int x1, int y1, const std::string& s, PNeoEnv env)
 {
   if (isYV12) DrawYV12(dst, x1, y1, s.c_str());
   else DrawYUY2(dst, x1, y1, s.c_str());

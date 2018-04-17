@@ -9,6 +9,7 @@
 
 #include "CommonFunctions.h"
 #include "TextOut.h"
+#include "Frame.h"
 #include "KMV.h"
 #include "KFM.h"
 
@@ -46,17 +47,17 @@ class KShowStatic : public GenericVideoFilter
   int logUVx;
   int logUVy;
 
-  void CopyFrame(PVideoFrame& src, PVideoFrame& dst)
+  void CopyFrame(Frame& src, Frame& dst)
   {
-    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
-    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
-    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+    const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+    const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+    int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
     int widthUV = vi.width >> logUVx;
     int heightUV = vi.height >> logUVy;
 
@@ -77,19 +78,19 @@ class KShowStatic : public GenericVideoFilter
     }
   }
 
-  void VisualizeBlock(PVideoFrame& flag, PVideoFrame& dst)
+  void VisualizeBlock(Frame& flag, Frame& dst)
   {
-    const pixel_t* flagY = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_Y));
-    const pixel_t* flagU = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_U));
-    const pixel_t* flagV = reinterpret_cast<const pixel_t*>(flag->GetReadPtr(PLANAR_V));
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const pixel_t* flagY = flag.GetReadPtr<pixel_t>(PLANAR_Y);
+    const pixel_t* flagU = flag.GetReadPtr<pixel_t>(PLANAR_U);
+    const pixel_t* flagV = flag.GetReadPtr<pixel_t>(PLANAR_V);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-    int flagPitchY = flag->GetPitch(PLANAR_Y);
-    int flagPitchUV = flag->GetPitch(PLANAR_U);
-    int dstPitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-    int dstPitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int flagPitchY = flag.GetPitch<uint8_t>(PLANAR_Y);
+    int flagPitchUV = flag.GetPitch<uint8_t>(PLANAR_U);
+    int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+    int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
     int widthUV = vi.width >> logUVx;
     int heightUV = vi.height >> logUVy;
 
@@ -113,14 +114,14 @@ public:
   {
     PNeoEnv env = env_;
 
-    PVideoFrame flag = sttclip->GetFrame(n, env);
-    PVideoFrame frame30 = child->GetFrame(n, env);
-    PVideoFrame dst = env->NewVideoFrame(vi);
+    Frame flag = sttclip->GetFrame(n, env);
+    Frame frame30 = child->GetFrame(n, env);
+    Frame dst = env->NewVideoFrame(vi);
 
     CopyFrame(frame30, dst);
     VisualizeBlock(flag, dst);
 
-    return dst;
+    return dst.frame;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
@@ -333,12 +334,12 @@ public:
     vi.height = nblocks(out_bytes, vi.width * 4);
   }
 
-	PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
+  PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
 	{
 		FMCount fmcnt[18];
 		for (int i = -2; i <= 6; ++i) {
-			PVideoFrame frame = child->GetFrame(cycle * 5 + i, env);
-			memcpy(fmcnt + (i + 2) * 2, frame->GetReadPtr(), sizeof(fmcnt[0]) * 2);
+			Frame frame = child->GetFrame(cycle * 5 + i, env);
+			memcpy(fmcnt + (i + 2) * 2, frame.GetReadPtr<uint8_t>(), sizeof(fmcnt[0]) * 2);
 		}
 
 		// shima, lshima, moveの画素数がマチマチなので大きさの違いによる重みの違いが出る
@@ -360,16 +361,16 @@ public:
 
 		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth);
 
-    PVideoFrame dst = env->NewVideoFrame(vi);
-    uint8_t* dstp = dst->GetWritePtr();
+    Frame dst = env->NewVideoFrame(vi);
+    uint8_t* dstp = dst.GetWritePtr<uint8_t>();
     memcpy(dstp, &result, sizeof(result));
 
 		// フレームをCUDAに持っていった後、
     // CPUからも取得できるようにプロパティにも入れておく
-    dst->SetProperty("KFM_Pattern", result.first);
-    dst->SetProperty("KFM_Cost", result.second);
+    dst.SetProperty("KFM_Pattern", result.first);
+    dst.SetProperty("KFM_Cost", result.second);
 
-    return dst;
+    return dst.frame;
 	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -392,18 +393,18 @@ class KShowCombe : public GenericVideoFilter
   int logUVy;
   int nBlkX, nBlkY;
 
-  void ShowCombe(PVideoFrame& src, PVideoFrame& flag, PVideoFrame& dst)
+  void ShowCombe(Frame& src, Frame& flag, Frame& dst)
   {
-    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
-    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
-    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
-    const uint8_t* flagp = reinterpret_cast<const uint8_t*>(flag->GetReadPtr());
+    const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+    const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+    const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+    const uint8_t* flagp = flag.GetReadPtr<uint8_t>();
 
-    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+    int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
     int widthUV = vi.width >> logUVx;
     int heightUV = vi.height >> logUVy;
     int overlapUVx = OVERLAP >> logUVx;
@@ -451,13 +452,14 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
   {
-    PVideoFrame src = child->GetFrame(n, env);
-    PVideoFrame flag = src->GetProperty(COMBE_FLAG_STR)->GetFrame();
-    PVideoFrame dst = env->NewVideoFrame(vi);
+    Frame src = child->GetFrame(n, env);
+    Frame flag = WrapSwitchFragFrame(
+      src.GetProperty(COMBE_FLAG_STR)->GetFrame());
+    Frame dst = env->NewVideoFrame(vi);
 
     ShowCombe(src, flag, dst);
 
-    return dst;
+    return dst.frame;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)

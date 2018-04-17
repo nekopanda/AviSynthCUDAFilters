@@ -70,14 +70,14 @@ class KTemporalDiff : public KFMFilterBase
     N_REFS = DIST * 2 + 1,
   };
 
-  PVideoFrame GetRefFrame(int ref, PNeoEnv env)
+  Frame GetRefFrame(int ref, PNeoEnv env)
   {
     ref = clamp(ref, 0, vi.num_frames);
     return child->GetFrame(ref, env);
   }
 
   template <typename pixel_t>
-  void CompareFrames(PVideoFrame* frames, PVideoFrame& flag, PNeoEnv env)
+  void CompareFrames(Frame* frames, Frame& flag, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -86,17 +86,17 @@ class KTemporalDiff : public KFMFilterBase
     const vpixel_t* srcV[N_REFS];
 
     for (int i = 0; i < N_REFS; ++i) {
-      srcY[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
-      srcU[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
-      srcV[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
+      srcY[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_Y);
+      srcU[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_U);
+      srcV[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_V);
     }
 
-    vpixel_t* dstY = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_Y));
-    vpixel_t* dstU = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_U));
-    vpixel_t* dstV = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_V));
+    vpixel_t* dstY = flag.GetWritePtr<vpixel_t>(PLANAR_Y);
+    vpixel_t* dstU = flag.GetWritePtr<vpixel_t>(PLANAR_U);
+    vpixel_t* dstV = flag.GetWritePtr<vpixel_t>(PLANAR_V);
 
-    int pitchY = frames[0]->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = frames[0]->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int pitchY = frames[0].GetPitch<vpixel_t>(PLANAR_Y);
+    int pitchUV = frames[0].GetPitch<vpixel_t>(PLANAR_U);
     int width4 = vi.width >> 2;
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
@@ -125,15 +125,15 @@ class KTemporalDiff : public KFMFilterBase
   template <typename pixel_t>
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
-    PVideoFrame frames[N_REFS];
+    Frame frames[N_REFS];
     for (int i = 0; i < N_REFS; ++i) {
       frames[i] = GetRefFrame(i + n - DIST, env);
     }
-    PVideoFrame diff = env->NewVideoFrame(vi);
+    Frame diff = env->NewVideoFrame(vi);
 
     CompareFrames<pixel_t>(frames, diff, env);
 
-    return diff;
+    return diff.frame;
   }
 
 public:
@@ -233,20 +233,21 @@ class KAnalyzeStatic : public KFMFilterBase
   };
 
   PClip diffclip;
+  PClip superclip;
 
   VideoInfo padvi;
 
   float thcombe;
   float thdiff;
 
-  PVideoFrame GetDiffFrame(int ref, PNeoEnv env)
+  Frame GetDiffFrame(int ref, PNeoEnv env)
   {
     ref = clamp(ref, 0, vi.num_frames);
     return diffclip->GetFrame(ref, env);
   }
 
   template <typename pixel_t>
-  void GetTemporalDiff(PVideoFrame* frames, PVideoFrame& flag, PNeoEnv env)
+  void GetTemporalDiff(Frame* frames, Frame& flag, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -255,17 +256,17 @@ class KAnalyzeStatic : public KFMFilterBase
     const vpixel_t* srcV[N_DIFFS];
 
     for (int i = 0; i < N_DIFFS; ++i) {
-      srcY[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_Y));
-      srcU[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_U));
-      srcV[i] = reinterpret_cast<const vpixel_t*>(frames[i]->GetReadPtr(PLANAR_V));
+      srcY[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_Y);
+      srcU[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_U);
+      srcV[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_V);
     }
 
-    vpixel_t* dstY = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_Y));
-    vpixel_t* dstU = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_U));
-    vpixel_t* dstV = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_V));
+    vpixel_t* dstY = flag.GetWritePtr<vpixel_t>(PLANAR_Y);
+    vpixel_t* dstU = flag.GetWritePtr<vpixel_t>(PLANAR_U);
+    vpixel_t* dstV = flag.GetWritePtr<vpixel_t>(PLANAR_V);
 
-    int pitchY = frames[0]->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = frames[0]->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int pitchY = frames[0].GetPitch<vpixel_t>(PLANAR_Y);
+    int pitchUV = frames[0].GetPitch<vpixel_t>(PLANAR_U);
     int width4 = vi.width >> 2;
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
@@ -292,12 +293,12 @@ class KAnalyzeStatic : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  void AndCoefs(PVideoFrame& dst, PVideoFrame& flagd, PNeoEnv env)
+  void AndCoefs(Frame& dst, Frame& flagd, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
-    const vpixel_t* diffp = reinterpret_cast<const vpixel_t*>(flagd->GetReadPtr());
-    vpixel_t* dstp = reinterpret_cast<vpixel_t*>(dst->GetWritePtr());
-    int pitch = dst->GetPitch() / sizeof(vpixel_t);
+    const vpixel_t* diffp = flagd.GetReadPtr<vpixel_t>();
+    vpixel_t* dstp = dst.GetWritePtr<vpixel_t>();
+    int pitch = dst.GetPitch<vpixel_t>();
 
     // dst: combeありフラグ
     // flagd: diffありフラグ
@@ -320,18 +321,26 @@ class KAnalyzeStatic : public KFMFilterBase
   template <typename pixel_t>
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
-    PVideoFrame diffframes[N_DIFFS];
+    Frame diffframes[N_DIFFS];
     for (int i = 0; i < N_DIFFS; ++i) {
       diffframes[i] = GetDiffFrame(i + n - DIST, env);
     }
-    PVideoFrame src = child->GetFrame(n, env);
-    PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-    PVideoFrame flagtmp = env->NewVideoFrame(vi);
-    PVideoFrame flagc = env->NewVideoFrame(vi);
-    PVideoFrame flagd = env->NewVideoFrame(vi);
 
-    CopyFrame<pixel_t>(src, padded, env);
-    PadFrame<pixel_t>(padded, env);
+    Frame padded;
+    if (superclip) {
+      padded = Frame(superclip->GetFrame(n, env), VPAD);
+    }
+    else {
+      Frame f0 = child->GetFrame(n, env);
+      padded = Frame(env->NewVideoFrame(padvi), VPAD);
+      CopyFrame<pixel_t>(f0, padded, env);
+      PadFrame<pixel_t>(padded, env);
+    }
+
+    Frame flagtmp = env->NewVideoFrame(vi);
+    Frame flagc = env->NewVideoFrame(vi);
+    Frame flagd = env->NewVideoFrame(vi);
+
     CompareFields<pixel_t>(padded, flagtmp, env);
     MergeUVCoefs<pixel_t>(flagtmp, env);
     ExtendCoefs<pixel_t>(flagtmp, flagc, env);
@@ -343,16 +352,17 @@ class KAnalyzeStatic : public KFMFilterBase
     AndCoefs<pixel_t>(flagc, flagd, env); // combeありdiffなし -> flagc
     ApplyUVCoefs<pixel_t>(flagc, env);
 
-    return flagc;
+    return flagc.frame;
   }
 
 public:
-  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, PNeoEnv env)
+  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, PClip super, PNeoEnv env)
     : KFMFilterBase(clip30)
     , diffclip(diffclip)
     , thcombe(thcombe)
     , thdiff(thdiff)
     , padvi(vi)
+    , superclip(super)
   {
     if (logUVx != 1 || logUVy != 1) env->ThrowError("[KAnalyzeStatic] Unsupported format (only supports YV12)");
 
@@ -386,6 +396,7 @@ public:
       diffclip,     // 
       (float)args[1].AsFloat(30),     // thcombe
       (float)args[2].AsFloat(15),     // thdiff
+      args[3].AsClip(),        // super
       env);
   }
 };
@@ -429,24 +440,24 @@ class KMergeStatic : public KFMFilterBase
   PClip sttclip;
 
   template <typename pixel_t>
-  void MergeStatic(PVideoFrame& src60, PVideoFrame& src30, PVideoFrame& flag, PVideoFrame& dst, PNeoEnv env)
+  void MergeStatic(Frame& src60, Frame& src30, Frame& flag, Frame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
-    const vpixel_t* src60Y = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_Y));
-    const vpixel_t* src60U = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_U));
-    const vpixel_t* src60V = reinterpret_cast<const vpixel_t*>(src60->GetReadPtr(PLANAR_V));
-    const vpixel_t* src30Y = reinterpret_cast<const vpixel_t*>(src30->GetReadPtr(PLANAR_Y));
-    const vpixel_t* src30U = reinterpret_cast<const vpixel_t*>(src30->GetReadPtr(PLANAR_U));
-    const vpixel_t* src30V = reinterpret_cast<const vpixel_t*>(src30->GetReadPtr(PLANAR_V));
-    const vpixel_t* flagY = reinterpret_cast<const vpixel_t*>(flag->GetReadPtr(PLANAR_Y));
-    const vpixel_t* flagU = reinterpret_cast<const vpixel_t*>(flag->GetReadPtr(PLANAR_U));
-    const vpixel_t* flagV = reinterpret_cast<const vpixel_t*>(flag->GetReadPtr(PLANAR_V));
-    vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-    vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const vpixel_t* src60Y = src60.GetReadPtr<vpixel_t>(PLANAR_Y);
+    const vpixel_t* src60U = src60.GetReadPtr<vpixel_t>(PLANAR_U);
+    const vpixel_t* src60V = src60.GetReadPtr<vpixel_t>(PLANAR_V);
+    const vpixel_t* src30Y = src30.GetReadPtr<vpixel_t>(PLANAR_Y);
+    const vpixel_t* src30U = src30.GetReadPtr<vpixel_t>(PLANAR_U);
+    const vpixel_t* src30V = src30.GetReadPtr<vpixel_t>(PLANAR_V);
+    const vpixel_t* flagY = flag.GetReadPtr<vpixel_t>(PLANAR_Y);
+    const vpixel_t* flagU = flag.GetReadPtr<vpixel_t>(PLANAR_U);
+    const vpixel_t* flagV = flag.GetReadPtr<vpixel_t>(PLANAR_V);
+    vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+    vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+    vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-    int pitchY = src60->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = src60->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int pitchY = src60.GetPitch<vpixel_t>(PLANAR_Y);
+    int pitchUV = src60.GetPitch<vpixel_t>(PLANAR_U);
     int width4 = vi.width >> 2;
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
@@ -476,15 +487,15 @@ class KMergeStatic : public KFMFilterBase
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     int n30 = n >> 1;
-    PVideoFrame flag = sttclip->GetFrame(n30, env);
-    PVideoFrame frame60 = child->GetFrame(n, env);
-    PVideoFrame frame30 = clip30->GetFrame(n30, env);
-    PVideoFrame dst = env->NewVideoFrame(vi);
+    Frame flag = sttclip->GetFrame(n30, env);
+    Frame frame60 = child->GetFrame(n, env);
+    Frame frame30 = clip30->GetFrame(n30, env);
+    Frame dst = env->NewVideoFrame(vi);
 
     CopyFrame<pixel_t>(frame60, dst, env);
     MergeStatic<pixel_t>(frame60, frame30, flag, dst, env);
 
-    return dst;
+    return dst.frame;
   }
 
 public:
@@ -531,6 +542,6 @@ void AddFuncMergeStatic(IScriptEnvironment* env)
 {
   env->AddFunction("KTemporalDiff", "c", KTemporalDiff::Create, 0);
 
-  env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f", KAnalyzeStatic::Create, 0);
+  env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f[super]c", KAnalyzeStatic::Create, 0);
   env->AddFunction("KMergeStatic", "ccc", KMergeStatic::Create, 0);
 }

@@ -22,20 +22,20 @@ int Get8BitType(VideoInfo& vi) {
   return VideoInfo::CS_BGR24;
 }
 
-PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, PNeoEnv env)
+Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
 {
   typedef typename VectorType<uint8_t>::type vpixel_t;
 
   VideoInfo blockpadvi = vi;
-  blockpadvi.width = nblocks(vi.width, OVERLAP) + hpad * 2;
-  blockpadvi.height = nblocks(vi.height, OVERLAP) + vpad * 2;
+  blockpadvi.width = nblocks(vi.width, OVERLAP) + COMBE_FLAG_PAD_H * 2;
+  blockpadvi.height = nblocks(vi.height, OVERLAP) + COMBE_FLAG_PAD_W * 2;
   blockpadvi.pixel_type = VideoInfo::CS_Y8;
-  PVideoFrame frame = env->NewVideoFrame(blockpadvi);
+  Frame frame = env->NewVideoFrame(blockpadvi);
 
   // É[Éçèâä˙âª
-  vpixel_t* flagp = reinterpret_cast<vpixel_t*>(frame->GetWritePtr());
-  int pitch = frame->GetPitch() / sizeof(vpixel_t);
-  int width = frame->GetPitch() / sizeof(vpixel_t);
+  vpixel_t* flagp = frame.GetWritePtr<vpixel_t>();
+  int pitch = frame.GetPitch<vpixel_t>();
+  int width = frame.GetPitch<vpixel_t>();
   if (IS_CUDA) {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(width, threads.x), nblocks(blockpadvi.height, threads.y));
@@ -45,12 +45,8 @@ PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, PNeoEnv env)
     cpu_fill<vpixel_t, 0>(flagp, width, blockpadvi.height, pitch);
   }
 
-  return env->SubframePlanar(frame,
-    hpad * sizeof(uint8_t) + frame->GetPitch(PLANAR_Y) * vpad,
-    frame->GetPitch(PLANAR_Y),
-    frame->GetRowSize(PLANAR_Y) - hpad * 2 * sizeof(uint8_t),
-    frame->GetHeight(PLANAR_Y) - vpad * 2,
-    0, 0, 0);
+  frame.Crop(COMBE_FLAG_PAD_H, COMBE_FLAG_PAD_W, sizeof(uint8_t));
+  return frame;
 }
 
 template <typename pixel_t, int fill_v>
@@ -436,18 +432,18 @@ __global__ void kl_calc_combe(vpixel_t* dst, const vpixel_t* __restrict__ src, i
 
 
 template <typename pixel_t>
-void KFMFilterBase::CopyFrame(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env)
+void KFMFilterBase::CopyFrame(Frame& src, Frame& dst, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
-  const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
-  const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
-  const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_V));
-  vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-  vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-  vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+  const vpixel_t* srcY = src.GetReadPtr<vpixel_t>(PLANAR_Y);
+  const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
+  const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
+  vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+  vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+  vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-  int pitchY = src->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-  int pitchUV = src->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+  int pitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
+  int pitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
   int width4 = srcvi.width >> 2;
   int width4UV = width4 >> logUVx;
   int heightUV = srcvi.height >> logUVy;
@@ -470,20 +466,20 @@ void KFMFilterBase::CopyFrame(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env)
   }
 }
 
-template void KFMFilterBase::CopyFrame<uint8_t>(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env);
-template void KFMFilterBase::CopyFrame<uint16_t>(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env);
+template void KFMFilterBase::CopyFrame<uint8_t>(Frame& src, Frame& dst, PNeoEnv env);
+template void KFMFilterBase::CopyFrame<uint16_t>(Frame& src, Frame& dst, PNeoEnv env);
 
 
 template <typename pixel_t>
-void KFMFilterBase::PadFrame(PVideoFrame& dst, PNeoEnv env)
+void KFMFilterBase::PadFrame(Frame& dst, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
-  vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-  vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-  vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+  vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+  vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+  vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-  int pitchY = dst->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-  int pitchUV = dst->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+  int pitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
+  int pitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
   int width4 = srcvi.width >> 2;
   int width4UV = width4 >> logUVx;
   int heightUV = srcvi.height >> logUVy;
@@ -508,8 +504,8 @@ void KFMFilterBase::PadFrame(PVideoFrame& dst, PNeoEnv env)
   }
 }
 
-template void KFMFilterBase::PadFrame<uint8_t>(PVideoFrame& dst, PNeoEnv env);
-template void KFMFilterBase::PadFrame<uint16_t>(PVideoFrame& dst, PNeoEnv env);
+template void KFMFilterBase::PadFrame<uint8_t>(Frame& dst, PNeoEnv env);
+template void KFMFilterBase::PadFrame<uint16_t>(Frame& dst, PNeoEnv env);
 
 template <typename vpixel_t>
 void KFMFilterBase::LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
@@ -539,7 +535,7 @@ template void KFMFilterBase::LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
   PNeoEnv env);
 
 template <typename pixel_t>
-void KFMFilterBase::AnalyzeFrame(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& flag,
+void KFMFilterBase::AnalyzeFrame(Frame& f0, Frame& f1, Frame& flag,
   const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -550,11 +546,11 @@ void KFMFilterBase::AnalyzeFrame(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& 
   for (int pi = 0; pi < 3; ++pi) {
     int p = planes[pi];
 
-    const vpixel_t* f0p = reinterpret_cast<const vpixel_t*>(f0->GetReadPtr(p));
-    const vpixel_t* f1p = reinterpret_cast<const vpixel_t*>(f1->GetReadPtr(p));
-    uchar4* flagp = reinterpret_cast<uchar4*>(flag->GetWritePtr(p));
-    int pitch = f0->GetPitch(p) / sizeof(vpixel_t);
-    int dstPitch = flag->GetPitch(p) / sizeof(uchar4);
+    const vpixel_t* f0p = f0.GetReadPtr<vpixel_t>(p);
+    const vpixel_t* f1p = f1.GetReadPtr<vpixel_t>(p);
+    uchar4* flagp = flag.GetWritePtr<uchar4>(p);
+    int pitch = f0.GetPitch<vpixel_t>(p);
+    int dstPitch = flag.GetPitch<uchar4>(p);
 
     int width4 = srcvi.width >> 2;
     int height = srcvi.height;
@@ -585,18 +581,18 @@ void KFMFilterBase::AnalyzeFrame(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& 
   }
 }
 
-template void KFMFilterBase::AnalyzeFrame<uint8_t>(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& flag,
+template void KFMFilterBase::AnalyzeFrame<uint8_t>(Frame& f0, Frame& f1, Frame& flag,
   const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env);
-template void KFMFilterBase::AnalyzeFrame<uint16_t>(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& flag,
+template void KFMFilterBase::AnalyzeFrame<uint16_t>(Frame& f0, Frame& f1, Frame& flag,
   const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env);
 
-void KFMFilterBase::MergeUVFlags(PVideoFrame& flag, PNeoEnv env)
+void KFMFilterBase::MergeUVFlags(Frame& flag, PNeoEnv env)
 {
-  uint8_t* fY = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_Y));
-  uint8_t* fU = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_U));
-  uint8_t* fV = reinterpret_cast<uint8_t*>(flag->GetWritePtr(PLANAR_V));
-  int pitchY = flag->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-  int pitchUV = flag->GetPitch(PLANAR_U) / sizeof(uint8_t);
+  uint8_t* fY = flag.GetWritePtr<uint8_t>(PLANAR_Y);
+  uint8_t* fU = flag.GetWritePtr<uint8_t>(PLANAR_U);
+  uint8_t* fV = flag.GetWritePtr<uint8_t>(PLANAR_V);
+  int pitchY = flag.GetPitch<uint8_t>(PLANAR_Y);
+  int pitchUV = flag.GetPitch<uint8_t>(PLANAR_U);
 
   if (IS_CUDA) {
     dim3 threads(32, 16);
@@ -612,13 +608,13 @@ void KFMFilterBase::MergeUVFlags(PVideoFrame& flag, PNeoEnv env)
 }
 
 template <typename pixel_t>
-void KFMFilterBase::MergeUVCoefs(PVideoFrame& flag, PNeoEnv env)
+void KFMFilterBase::MergeUVCoefs(Frame& flag, PNeoEnv env)
 {
-  pixel_t* fY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
-  pixel_t* fU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
-  pixel_t* fV = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_V));
-  int pitchY = flag->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-  int pitchUV = flag->GetPitch(PLANAR_U) / sizeof(pixel_t);
+  pixel_t* fY = flag.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* fU = flag.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* fV = flag.GetWritePtr<pixel_t>(PLANAR_V);
+  int pitchY = flag.GetPitch<pixel_t>(PLANAR_Y);
+  int pitchUV = flag.GetPitch<pixel_t>(PLANAR_U);
 
   if (IS_CUDA) {
     dim3 threads(32, 16);
@@ -633,17 +629,17 @@ void KFMFilterBase::MergeUVCoefs(PVideoFrame& flag, PNeoEnv env)
   }
 }
 
-template void KFMFilterBase::MergeUVCoefs<uint8_t>(PVideoFrame& flag, PNeoEnv env);
-template void KFMFilterBase::MergeUVCoefs<uint16_t>(PVideoFrame& flag, PNeoEnv env);
+template void KFMFilterBase::MergeUVCoefs<uint8_t>(Frame& flag, PNeoEnv env);
+template void KFMFilterBase::MergeUVCoefs<uint16_t>(Frame& flag, PNeoEnv env);
 
 template <typename pixel_t>
-void KFMFilterBase::ApplyUVCoefs(PVideoFrame& flag, PNeoEnv env)
+void KFMFilterBase::ApplyUVCoefs(Frame& flag, PNeoEnv env)
 {
-  pixel_t* fY = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_Y));
-  pixel_t* fU = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_U));
-  pixel_t* fV = reinterpret_cast<pixel_t*>(flag->GetWritePtr(PLANAR_V));
-  int pitchY = flag->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-  int pitchUV = flag->GetPitch(PLANAR_U) / sizeof(pixel_t);
+  pixel_t* fY = flag.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* fU = flag.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* fV = flag.GetWritePtr<pixel_t>(PLANAR_V);
+  int pitchY = flag.GetPitch<pixel_t>(PLANAR_Y);
+  int pitchUV = flag.GetPitch<pixel_t>(PLANAR_U);
   int widthUV = vi.width >> logUVx;
   int heightUV = vi.height >> logUVy;
 
@@ -659,17 +655,17 @@ void KFMFilterBase::ApplyUVCoefs(PVideoFrame& flag, PNeoEnv env)
   }
 }
 
-template void KFMFilterBase::ApplyUVCoefs<uint8_t>(PVideoFrame& flag, PNeoEnv env);
-template void KFMFilterBase::ApplyUVCoefs<uint16_t>(PVideoFrame& flag, PNeoEnv env);
+template void KFMFilterBase::ApplyUVCoefs<uint8_t>(Frame& flag, PNeoEnv env);
+template void KFMFilterBase::ApplyUVCoefs<uint16_t>(Frame& flag, PNeoEnv env);
 
 template <typename pixel_t>
-void KFMFilterBase::ExtendCoefs(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env)
+void KFMFilterBase::ExtendCoefs(Frame& src, Frame& dst, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
-  const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
-  vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
+  const vpixel_t* srcY = src.GetReadPtr<vpixel_t>(PLANAR_Y);
+  vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
 
-  int pitchY = src->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
+  int pitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
   int width4 = vi.width >> 2;
 
   if (IS_CUDA) {
@@ -690,22 +686,22 @@ void KFMFilterBase::ExtendCoefs(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env)
   }
 }
 
-template void KFMFilterBase::ExtendCoefs<uint8_t>(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env);
-template void KFMFilterBase::ExtendCoefs<uint16_t>(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env);
+template void KFMFilterBase::ExtendCoefs<uint8_t>(Frame& src, Frame& dst, PNeoEnv env);
+template void KFMFilterBase::ExtendCoefs<uint16_t>(Frame& src, Frame& dst, PNeoEnv env);
 
 template <typename pixel_t>
-void KFMFilterBase::CompareFields(PVideoFrame& src, PVideoFrame& flag, PNeoEnv env)
+void KFMFilterBase::CompareFields(Frame& src, Frame& flag, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
-  const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
-  const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
-  const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_V));
-  vpixel_t* dstY = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_Y));
-  vpixel_t* dstU = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_U));
-  vpixel_t* dstV = reinterpret_cast<vpixel_t*>(flag->GetWritePtr(PLANAR_V));
+  const vpixel_t* srcY = src.GetReadPtr<vpixel_t>(PLANAR_Y);
+  const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
+  const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
+  vpixel_t* dstY = flag.GetWritePtr<vpixel_t>(PLANAR_Y);
+  vpixel_t* dstU = flag.GetWritePtr<vpixel_t>(PLANAR_U);
+  vpixel_t* dstV = flag.GetWritePtr<vpixel_t>(PLANAR_V);
 
-  int pitchY = src->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-  int pitchUV = src->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+  int pitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
+  int pitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
   int width4 = vi.width >> 2;
   int width4UV = width4 >> logUVx;
   int heightUV = vi.height >> logUVy;
@@ -728,18 +724,8 @@ void KFMFilterBase::CompareFields(PVideoFrame& src, PVideoFrame& flag, PNeoEnv e
   }
 }
 
-template void KFMFilterBase::CompareFields<uint8_t>(PVideoFrame& src, PVideoFrame& flag, PNeoEnv env);
-template void KFMFilterBase::CompareFields<uint16_t>(PVideoFrame& src, PVideoFrame& flag, PNeoEnv env);
-
-PVideoFrame KFMFilterBase::OffsetPadFrame(const PVideoFrame& frame, PNeoEnv env)
-{
-  int vpad = VPAD;
-  int vpadUV = VPAD >> logUVy;
-
-  return env->SubframePlanar(frame,
-    frame->GetPitch(PLANAR_Y) * vpad, frame->GetPitch(PLANAR_Y), frame->GetRowSize(PLANAR_Y), frame->GetHeight(PLANAR_Y) - vpad * 2,
-    frame->GetPitch(PLANAR_U) * vpadUV, frame->GetPitch(PLANAR_U) * vpadUV, frame->GetPitch(PLANAR_U));
-}
+template void KFMFilterBase::CompareFields<uint8_t>(Frame& src, Frame& flag, PNeoEnv env);
+template void KFMFilterBase::CompareFields<uint16_t>(Frame& src, Frame& flag, PNeoEnv env);
 
 KFMFilterBase::KFMFilterBase(PClip _child)
   : GenericVideoFilter(_child)

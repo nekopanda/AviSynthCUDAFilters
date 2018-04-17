@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-  ::testing::GTEST_FLAG(filter) = "*.AnalyzeFrameTest";
+  ::testing::GTEST_FLAG(filter) = "*.UCF2Perf*";
   ::testing::InitGoogleTest(&argc, argv);
 
   //_crtBreakAlloc = 7978;

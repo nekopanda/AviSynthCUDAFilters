@@ -1660,10 +1660,10 @@ public:
 
   virtual char* __stdcall SaveString(const char* s, int length = -1) = 0;
   virtual char* __stdcall SaveString(const char* s, int length, bool escape) = 0;
-  virtual char* __stdcall Sprintf(const char* fmt, ...) = 0;
+  virtual char* Sprintf(const char* fmt, ...) = 0;
   virtual char* __stdcall VSprintf(const char* fmt, void* val) = 0;
 
-  __declspec(noreturn) virtual void __stdcall ThrowError(const char* fmt, ...) = 0;
+  __declspec(noreturn) virtual void ThrowError(const char* fmt, ...) = 0;
 
   virtual void __stdcall ApplyMessage(PVideoFrame* frame, const VideoInfo& vi, const char* message, int size,
     int textcolor, int halocolor, int bgcolor) = 0;
@@ -1693,6 +1693,7 @@ public:
   virtual void* __stdcall GetDeviceStream() const = 0;
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
+  virtual PVideoFrame __stdcall GetFrame(PClip c, int n, const PDevice& device) = 0;
 };
 
 // support inteface conversion

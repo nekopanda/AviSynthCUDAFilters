@@ -83,12 +83,14 @@ class KFMFrameAnalyze : public KFMFilterBase
   FrameAnalyzeParam prmY;
   FrameAnalyzeParam prmC;
 
-  void CountFlags(PVideoFrame& flag, PVideoFrame& dst, int parity, PNeoEnv env)
+  PClip superclip;
+
+  void CountFlags(Frame& flag, Frame& dst, int parity, PNeoEnv env)
   {
-    const uchar4* flagp = reinterpret_cast<const uchar4*>(flag->GetReadPtr(PLANAR_Y));
-    FMCount* fmcnt = reinterpret_cast<FMCount*>(dst->GetWritePtr());
+    const uchar4* flagp = flag.GetReadPtr<uchar4>(PLANAR_Y);
+    FMCount* fmcnt = dst.GetWritePtr<FMCount>();
     int width4 = srcvi.width >> 2;
-    int flagPitch = flag->GetPitch(PLANAR_Y) / sizeof(uchar4);
+    int flagPitch = flag.GetPitch<uchar4>(PLANAR_Y);
 
     FMCount* fmcnt0 = &fmcnt[0];
     FMCount* fmcnt1 = &fmcnt[1];
@@ -118,33 +120,43 @@ class KFMFrameAnalyze : public KFMFilterBase
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     int parity = child->GetParity(n);
-    PVideoFrame f0 = child->GetFrame(n, env);
-    PVideoFrame f1 = child->GetFrame(n + 1, env);
-    PVideoFrame f0padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-    PVideoFrame f1padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-    PVideoFrame fflag = env->NewVideoFrame(flagvi);
-    PVideoFrame dst = env->NewVideoFrame(vi);
 
-    // TODO: 切り出し
-    CopyFrame<pixel_t>(f0, f0padded, env);
-    PadFrame<pixel_t>(f0padded, env);
-    CopyFrame<pixel_t>(f1, f1padded, env);
-    PadFrame<pixel_t>(f1padded, env);
+    Frame f0padded;
+    Frame f1padded;
+
+    if (superclip) {
+      f0padded = Frame(superclip->GetFrame(n, env), VPAD);
+      f1padded = Frame(superclip->GetFrame(n + 1, env), VPAD);
+    }
+    else {
+      Frame f0 = child->GetFrame(n, env);
+      Frame f1 = child->GetFrame(n + 1, env);
+      f0padded = Frame(env->NewVideoFrame(padvi), VPAD);
+      f1padded = Frame(env->NewVideoFrame(padvi), VPAD);
+      CopyFrame<pixel_t>(f0, f0padded, env);
+      PadFrame<pixel_t>(f0padded, env);
+      CopyFrame<pixel_t>(f1, f1padded, env);
+      PadFrame<pixel_t>(f1padded, env);
+    }
+
+    Frame fflag = env->NewVideoFrame(flagvi);
+    Frame dst = env->NewVideoFrame(vi);
 
     AnalyzeFrame<pixel_t>(f0padded, f1padded, fflag, &prmY, &prmC, env);
     MergeUVFlags(fflag, env); // UV判定結果をYにマージ
     CountFlags(fflag, dst, parity, env);
 
-    return dst;
+    return dst.frame;
   }
 
 public:
-  KFMFrameAnalyze(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, IScriptEnvironment* env)
+  KFMFrameAnalyze(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, PClip super, IScriptEnvironment* env)
     : KFMFilterBase(clip)
     , prmY(threshMY, threshSY, threshSY * 3)
     , prmC(threshMC, threshSC, threshSC * 3)
     , padvi(vi)
     , flagvi()
+    , superclip(super)
   {
     padvi.height += VPAD * 2;
 
@@ -183,6 +195,7 @@ public:
       args[2].AsInt(7),       // threshSY
       args[3].AsInt(20),      // threshMC
       args[4].AsInt(8),       // threshSC
+      args[5].AsClip(),       // super
       env
     );
   }
@@ -201,17 +214,17 @@ public:
   {
     PNeoEnv env = env_;
 
-    PVideoFrame frameA = child->GetFrame(n, env);
-    PVideoFrame frameB = clipB->GetFrame(n, env);
+    Frame frameA = child->GetFrame(n, env);
+    Frame frameB = clipB->GetFrame(n, env);
 
-    const FMCount* fmcntA = reinterpret_cast<const FMCount*>(frameA->GetReadPtr());
-    const FMCount* fmcntB = reinterpret_cast<const FMCount*>(frameB->GetReadPtr());
+    const FMCount* fmcntA = frameA.GetReadPtr<FMCount>();
+    const FMCount* fmcntB = frameB.GetReadPtr<FMCount>();
 
     if (memcmp(fmcntA, fmcntB, sizeof(FMCount) * 2)) {
       env->ThrowError("[KFMFrameAnalyzeCheck] Unmatch !!!");
     }
 
-    return frameA;
+    return frameA.frame;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -234,6 +247,8 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
   FrameAnalyzeParam prmY;
   FrameAnalyzeParam prmC;
 
+  PClip superclip;
+
   int threshMY;
   int threshSY;
   int threshLSY;
@@ -244,7 +259,7 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
   int logUVx;
   int logUVy;
 
-  void VisualizeFlags(PVideoFrame& dst, PVideoFrame& fflag, PNeoEnv env)
+  void VisualizeFlags(Frame& dst, Frame& fflag, PNeoEnv env)
   {
     // 判定結果を表示
     int black[] = { 0, 128, 128 };
@@ -252,14 +267,14 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
     int gray[] = { 140, 128, 128 };
     int purple[] = { 197, 160, 122 };
 
-    const pixel_t* fflagp = reinterpret_cast<const pixel_t*>(fflag->GetReadPtr(PLANAR_Y));
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const pixel_t* fflagp = fflag.GetReadPtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-    int flagPitch = fflag->GetPitch(PLANAR_Y);
-    int dstPitchY = dst->GetPitch(PLANAR_Y);
-    int dstPitchUV = dst->GetPitch(PLANAR_U);
+    int flagPitch = fflag.GetPitch<pixel_t>(PLANAR_Y);
+    int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+    int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
 
     // 黒で初期化しておく
     for (int y = 0; y < vi.height; ++y) {
@@ -303,27 +318,36 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
   template <typename pixel_t>
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
-    PVideoFrame f0 = child->GetFrame(n, env);
-    PVideoFrame f1 = child->GetFrame(n + 1, env);
-    PVideoFrame f0padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-    PVideoFrame f1padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-    PVideoFrame fflag = env->NewVideoFrame(flagvi);
-    PVideoFrame dst = env->NewVideoFrame(vi);
+    Frame f0padded;
+    Frame f1padded;
 
-    CopyFrame<pixel_t>(f0, f0padded, env);
-    PadFrame<pixel_t>(f0padded, env);
-    CopyFrame<pixel_t>(f1, f1padded, env);
-    PadFrame<pixel_t>(f1padded, env);
+    if (superclip) {
+      f0padded = Frame(superclip->GetFrame(n, env), VPAD);
+      f1padded = Frame(superclip->GetFrame(n + 1, env), VPAD);
+    }
+    else {
+      Frame f0 = child->GetFrame(n, env);
+      Frame f1 = child->GetFrame(n + 1, env);
+      f0padded = Frame(env->NewVideoFrame(padvi), VPAD);
+      f1padded = Frame(env->NewVideoFrame(padvi), VPAD);
+      CopyFrame<pixel_t>(f0, f0padded, env);
+      PadFrame<pixel_t>(f0padded, env);
+      CopyFrame<pixel_t>(f1, f1padded, env);
+      PadFrame<pixel_t>(f1padded, env);
+    }
+
+    Frame fflag = env->NewVideoFrame(flagvi);
+    Frame dst = env->NewVideoFrame(vi);
 
     AnalyzeFrame<pixel_t>(f0padded, f1padded, fflag, &prmY, &prmC, env);
     MergeUVFlags(fflag, env); // UV判定結果をYにマージ
     VisualizeFlags(dst, fflag, env);
 
-    return dst;
+    return dst.frame;
   }
 
 public:
-  KFMFrameAnalyzeShow(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, IScriptEnvironment* env)
+  KFMFrameAnalyzeShow(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, PClip super, IScriptEnvironment* env)
     : KFMFilterBase(clip)
     , prmY(threshMY, threshSY, threshSY * 3)
     , prmC(threshMC, threshSC, threshSC * 3)
@@ -331,6 +355,7 @@ public:
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
     , padvi(vi)
     , flagvi()
+    , superclip(super)
   {
     padvi.height += VPAD * 2;
 
@@ -364,6 +389,7 @@ public:
       args[2].AsInt(10),       // threshSY
       args[3].AsInt(10),       // threshMC
       args[4].AsInt(10),       // threshSC
+      args[5].AsClip(),        // super
       env
     );
   }
@@ -377,19 +403,19 @@ class KTelecine : public KFMFilterBase
   PulldownPatterns patterns;
 
   template <typename pixel_t>
-  void CopyField(bool top, PVideoFrame* const * frames, const PVideoFrame& dst, PNeoEnv env)
+  void CopyField(bool top, Frame* const * frames, Frame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
-    PVideoFrame& frame0 = *frames[0];
-    const vpixel_t* src0Y = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_Y));
-    const vpixel_t* src0U = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_U));
-    const vpixel_t* src0V = reinterpret_cast<const vpixel_t*>(frame0->GetReadPtr(PLANAR_V));
-    vpixel_t* dstY = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    vpixel_t* dstU = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_U));
-    vpixel_t* dstV = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(PLANAR_V));
+    Frame& frame0 = *frames[0];
+    const vpixel_t* src0Y = frame0.GetReadPtr<vpixel_t>(PLANAR_Y);
+    const vpixel_t* src0U = frame0.GetReadPtr<vpixel_t>(PLANAR_U);
+    const vpixel_t* src0V = frame0.GetReadPtr<vpixel_t>(PLANAR_V);
+    vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+    vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+    vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-    int pitchY = frame0->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = frame0->GetPitch(PLANAR_U) / sizeof(vpixel_t);
+    int pitchY = frame0.GetPitch<vpixel_t>(PLANAR_Y);
+    int pitchUV = frame0.GetPitch<vpixel_t>(PLANAR_U);
     int width4 = vi.width >> 2;
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
@@ -422,10 +448,10 @@ class KTelecine : public KFMFilterBase
       }
     }
     else {
-      PVideoFrame& frame1 = *frames[1];
-      const vpixel_t* src1Y = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_Y));
-      const vpixel_t* src1U = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_U));
-      const vpixel_t* src1V = reinterpret_cast<const vpixel_t*>(frame1->GetReadPtr(PLANAR_V));
+      Frame& frame1 = *frames[1];
+      const vpixel_t* src1Y = frame1.GetReadPtr<vpixel_t>(PLANAR_Y);
+      const vpixel_t* src1U = frame1.GetReadPtr<vpixel_t>(PLANAR_U);
+      const vpixel_t* src1V = frame1.GetReadPtr<vpixel_t>(PLANAR_V);
 
       if (!top) {
         src1Y += pitchY;
@@ -454,7 +480,7 @@ class KTelecine : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  PVideoFrame CreateWeaveFrame(PClip clip, int n, int fstart, int fnum, int parity, PNeoEnv env)
+  Frame CreateWeaveFrame(PClip clip, int n, int fstart, int fnum, int parity, PNeoEnv env)
   {
     // fstartは0or1にする
     if (fstart < 0 || fstart >= 2) {
@@ -469,14 +495,14 @@ class KTelecine : public KFMFilterBase
       return clip->GetFrame(n, env);
     }
     else {
-      PVideoFrame cur = clip->GetFrame(n, env);
-      PVideoFrame nxt = clip->GetFrame(n + 1, env);
-      PVideoFrame dst = env->NewVideoFrame(vi);
+      Frame cur = clip->GetFrame(n, env);
+      Frame nxt = clip->GetFrame(n + 1, env);
+      Frame dst = env->NewVideoFrame(vi);
 
       // 3フィールドのときは重複フィールドを平均化する
 
-      PVideoFrame* srct[2] = { 0 };
-      PVideoFrame* srcb[2] = { 0 };
+      Frame* srct[2] = { 0 };
+      Frame* srcb[2] = { 0 };
 
       if (parity) {
         srct[0] = &nxt;
@@ -510,11 +536,10 @@ class KTelecine : public KFMFilterBase
     }
   }
 
-  void DrawInfo(PVideoFrame& dst, int pattern, float cost, int fnum, PNeoEnv env) {
-    env->MakeWritable(&dst);
-
+  template <typename pixel_t>
+  void DrawInfo(Frame& dst, int pattern, float cost, int fnum, PNeoEnv env) {
     char buf[100]; sprintf(buf, "KFM: %d (%.1f) - %d", pattern, cost, fnum);
-    DrawText(dst, true, 0, 0, buf);
+    DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
   }
 
   template <typename pixel_t>
@@ -522,20 +547,19 @@ class KTelecine : public KFMFilterBase
   {
     int cycleIndex = n / 4;
     int parity = child->GetParity(cycleIndex * 5);
-    PVideoFrame fm = fmclip->GetFrame(cycleIndex, env);
-    int pattern = (int)fm->GetProperty("KFM_Pattern")->GetInt();
-    float cost = (float)fm->GetProperty("KFM_Cost")->GetFloat();
+    Frame fm = fmclip->GetFrame(cycleIndex, env);
+    int pattern = (int)fm.GetProperty("KFM_Pattern")->GetInt();
+    float cost = (float)fm.GetProperty("KFM_Cost")->GetFloat();
     Frame24Info frameInfo = patterns.GetFrame24(pattern, n);
 
     int fstart = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex;
-    PVideoFrame out = CreateWeaveFrame<pixel_t>(child, 0, fstart, frameInfo.numFields, parity, env);
+    Frame out = CreateWeaveFrame<pixel_t>(child, 0, fstart, frameInfo.numFields, parity, env);
 
-    if (sizeof(pixel_t) == 1 && !IS_CUDA && show) {
-      // 8bit CPUにしか対応していない
-      DrawInfo(out, pattern, cost, frameInfo.numFields, env);
+    if (show) {
+      DrawInfo<pixel_t>(out, pattern, cost, frameInfo.numFields, env);
     }
 
-    return out;
+    return out.frame;
   }
 
 public:
@@ -850,11 +874,13 @@ public:
   {
     PNeoEnv env = env_;
 
-    PVideoFrame frameA = child->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
-    PVideoFrame frameB = clipB->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame();
+    Frame frameA = WrapSwitchFragFrame(
+      child->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame());
+    Frame frameB = WrapSwitchFragFrame(
+      clipB->GetFrame(n, env)->GetProperty(COMBE_FLAG_STR)->GetFrame());
 
-    const uint8_t* fmcntA = reinterpret_cast<const uint8_t*>(frameA->GetReadPtr());
-    const uint8_t* fmcntB = reinterpret_cast<const uint8_t*>(frameB->GetReadPtr());
+    const uint8_t* fmcntA = frameA.GetReadPtr<uint8_t>();
+    const uint8_t* fmcntB = frameB.GetReadPtr<uint8_t>();
 
     for (int by = 0; by < nBlkY; ++by) {
       for (int bx = 0; bx < nBlkX; ++bx) {
@@ -864,7 +890,7 @@ public:
       }
     }
 
-    return frameA;
+    return frameA.frame;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -890,20 +916,20 @@ class KRemoveCombe : public KFMFilterBase
   float thcombe;
 
   template <typename pixel_t>
-  void DetectCombe(PVideoFrame& src, PVideoFrame& combe, PNeoEnv env)
+  void DetectCombe(Frame& src, Frame& combe, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
-    const vpixel_t* srcY = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_Y));
-    const vpixel_t* srcU = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_U));
-    const vpixel_t* srcV = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(PLANAR_V));
-    uint8_t* combeY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
-    uint8_t* combeU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
-    uint8_t* combeV = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_V));
+    const vpixel_t* srcY = src.GetReadPtr<vpixel_t>(PLANAR_Y);
+    const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
+    const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
+    uint8_t* combeY = combe.GetWritePtr<uint8_t>(PLANAR_Y);
+    uint8_t* combeU = combe.GetWritePtr<uint8_t>(PLANAR_U);
+    uint8_t* combeV = combe.GetWritePtr<uint8_t>(PLANAR_V);
 
-    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(vpixel_t);
-    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(vpixel_t);
-    int fpitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-    int fpitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
+    int pitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
+    int pitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
+    int fpitchY = combe.GetPitch<uint8_t>(PLANAR_Y);
+    int fpitchUV = combe.GetPitch<uint8_t>(PLANAR_U);
     int widthUV = combvi.width >> logUVx;
     int heightUV = combvi.height >> logUVy;
 
@@ -931,17 +957,17 @@ class KRemoveCombe : public KFMFilterBase
     }
   }
 
-  void ExtendBlocks(PVideoFrame& dst, PVideoFrame& tmp, PNeoEnv env)
+  void ExtendBlocks(Frame& dst, Frame& tmp, PNeoEnv env)
   {
-    uint8_t* tmpY = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_Y));
-    uint8_t* tmpU = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_U));
-    uint8_t* tmpV = reinterpret_cast<uint8_t*>(tmp->GetWritePtr(PLANAR_V));
-    uint8_t* dstY = reinterpret_cast<uint8_t*>(dst->GetWritePtr(PLANAR_Y));
-    uint8_t* dstU = reinterpret_cast<uint8_t*>(dst->GetWritePtr(PLANAR_U));
-    uint8_t* dstV = reinterpret_cast<uint8_t*>(dst->GetWritePtr(PLANAR_V));
+    uint8_t* tmpY = tmp.GetWritePtr<uint8_t>(PLANAR_Y);
+    uint8_t* tmpU = tmp.GetWritePtr<uint8_t>(PLANAR_U);
+    uint8_t* tmpV = tmp.GetWritePtr<uint8_t>(PLANAR_V);
+    uint8_t* dstY = dst.GetWritePtr<uint8_t>(PLANAR_Y);
+    uint8_t* dstU = dst.GetWritePtr<uint8_t>(PLANAR_U);
+    uint8_t* dstV = dst.GetWritePtr<uint8_t>(PLANAR_V);
 
-    int pitchY = tmp->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-    int pitchUV = tmp->GetPitch(PLANAR_U) / sizeof(uint8_t);
+    int pitchY = tmp.GetPitch<uint8_t>(PLANAR_Y);
+    int pitchUV = tmp.GetPitch<uint8_t>(PLANAR_U);
     int widthUV = combvi.width >> logUVx;
     int heightUV = combvi.height >> logUVy;
 
@@ -970,13 +996,13 @@ class KRemoveCombe : public KFMFilterBase
     }
   }
 
-  void MergeUVCoefs(PVideoFrame& combe, PNeoEnv env)
+  void MergeUVCoefs(Frame& combe, PNeoEnv env)
   {
-    uint8_t* fY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
-    uint8_t* fU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
-    uint8_t* fV = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_V));
-    int pitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-    int pitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
+    uint8_t* fY = combe.GetWritePtr<uint8_t>(PLANAR_Y);
+    uint8_t* fU = combe.GetWritePtr<uint8_t>(PLANAR_U);
+    uint8_t* fV = combe.GetWritePtr<uint8_t>(PLANAR_V);
+    int pitchY = combe.GetPitch<uint8_t>(PLANAR_Y);
+    int pitchUV = combe.GetPitch<uint8_t>(PLANAR_U);
 
     if (IS_CUDA) {
       dim3 threads(32, 16);
@@ -991,13 +1017,13 @@ class KRemoveCombe : public KFMFilterBase
     }
   }
 
-  void ApplyUVCoefs(PVideoFrame& combe, PNeoEnv env)
+  void ApplyUVCoefs(Frame& combe, PNeoEnv env)
   {
-    uint8_t* fY = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_Y));
-    uint8_t* fU = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_U));
-    uint8_t* fV = reinterpret_cast<uint8_t*>(combe->GetWritePtr(PLANAR_V));
-    int pitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-    int pitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
+    uint8_t* fY = combe.GetWritePtr<uint8_t>(PLANAR_Y);
+    uint8_t* fU = combe.GetWritePtr<uint8_t>(PLANAR_U);
+    uint8_t* fV = combe.GetWritePtr<uint8_t>(PLANAR_V);
+    int pitchY = combe.GetPitch<uint8_t>(PLANAR_Y);
+    int pitchUV = combe.GetPitch<uint8_t>(PLANAR_U);
     int widthUV = combvi.width >> logUVx;
     int heightUV = combvi.height >> logUVy;
 
@@ -1014,22 +1040,22 @@ class KRemoveCombe : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  void RemoveCombe(PVideoFrame& dst, PVideoFrame& src, PVideoFrame& combe, int thcombe, int thdiff, PNeoEnv env)
+  void RemoveCombe(Frame& dst, Frame& src, Frame& combe, int thcombe, int thdiff, PNeoEnv env)
   {
-    const uint8_t* combeY = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
-    const uint8_t* combeU = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_U));
-    const uint8_t* combeV = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_V));
-    const pixel_t* srcY = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_Y));
-    const pixel_t* srcU = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_U));
-    const pixel_t* srcV = reinterpret_cast<const pixel_t*>(src->GetReadPtr(PLANAR_V));
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const uint8_t* combeY = combe.GetReadPtr<uint8_t>(PLANAR_Y);
+    const uint8_t* combeU = combe.GetReadPtr<uint8_t>(PLANAR_U);
+    const uint8_t* combeV = combe.GetReadPtr<uint8_t>(PLANAR_V);
+    const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+    const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+    const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-    int pitchY = src->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-    int pitchUV = src->GetPitch(PLANAR_U) / sizeof(pixel_t);
-    int fpitchY = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-    int fpitchUV = combe->GetPitch(PLANAR_U) / sizeof(uint8_t);
+    int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+    int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
+    int fpitchY = combe.GetPitch<uint8_t>(PLANAR_Y);
+    int fpitchUV = combe.GetPitch<uint8_t>(PLANAR_U);
     int widthUV = vi.width >> logUVx;
     int heightUV = vi.height >> logUVy;
 
@@ -1052,19 +1078,19 @@ class KRemoveCombe : public KFMFilterBase
   }
 
   template <typename pixel_t>
-  void VisualizeCombe(PVideoFrame& dst, PVideoFrame& combe, int thresh, PNeoEnv env)
+  void VisualizeCombe(Frame& dst, Frame& combe, int thresh, PNeoEnv env)
   {
     // 判定結果を表示
     int blue[] = { 73, 230, 111 };
 
-    const uint8_t* combep = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
-    pixel_t* dstY = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_Y));
-    pixel_t* dstU = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_U));
-    pixel_t* dstV = reinterpret_cast<pixel_t*>(dst->GetWritePtr(PLANAR_V));
+    const uint8_t* combep = combe.GetReadPtr<uint8_t>(PLANAR_Y);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-    int combePitch = combe->GetPitch(PLANAR_Y) / sizeof(uint8_t);
-    int dstPitchY = dst->GetPitch(PLANAR_Y) / sizeof(pixel_t);
-    int dstPitchUV = dst->GetPitch(PLANAR_U) / sizeof(pixel_t);
+    int combePitch = combe.GetPitch<uint8_t>(PLANAR_Y);
+    int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+    int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
 
     // 色を付ける
     for (int y = 0; y < vi.height; ++y) {
@@ -1087,16 +1113,16 @@ class KRemoveCombe : public KFMFilterBase
     }
   }
 
-  void MakeSwitchFlag(PVideoFrame& flag, PVideoFrame& flagtmp, PVideoFrame& combe, PNeoEnv env)
+  void MakeSwitchFlag(Frame& flag, Frame& flagtmp, Frame& combe, PNeoEnv env)
   {
-    const uint8_t* srcp = reinterpret_cast<const uint8_t*>(combe->GetReadPtr(PLANAR_Y));
-    uint8_t* flagp = reinterpret_cast<uint8_t*>(flag->GetWritePtr());
-    uint8_t* flagtmpp = reinterpret_cast<uint8_t*>(flagtmp->GetWritePtr());
+    const uint8_t* srcp = combe.GetReadPtr<uint8_t>(PLANAR_Y);
+    uint8_t* flagp = flag.GetWritePtr<uint8_t>();
+    uint8_t* flagtmpp = flagtmp.GetWritePtr<uint8_t>();
 
-    int height = flag->GetHeight();
-    int width = flag->GetRowSize();
-    int fpitch = flag->GetPitch();
-    int cpitch = combe->GetPitch();
+    int height = flag.GetHeight();
+    int width = flag.GetWidth<uint8_t>();
+    int fpitch = flag.GetPitch<uint8_t>();
+    int cpitch = combe.GetPitch<uint8_t>();
 
     if (IS_CUDA) {
       dim3 threads(16, 8);
@@ -1122,15 +1148,13 @@ class KRemoveCombe : public KFMFilterBase
   {
     typedef uint8_t pixel_t;
 
-    int frame_align = (int)env->GetProperty(AEP_FRAME_ALIGN);
-
-    PVideoFrame src = child->GetFrame(n, env);
-    PVideoFrame padded = OffsetPadFrame(env->NewVideoFrame(padvi), env);
-    PVideoFrame dst = env->NewVideoFrame(vi);
-    PVideoFrame combe = env->NewVideoFrame(combvi);
-    PVideoFrame combetmp = env->NewVideoFrame(combvi);
-    PVideoFrame flag = NewSwitchFlagFrame(vi, frame_align, 2, env);
-    PVideoFrame flagtmp = NewSwitchFlagFrame(vi, frame_align, 2, env);
+    Frame src = child->GetFrame(n, env);
+    Frame padded = Frame(env->NewVideoFrame(padvi), VPAD);
+    Frame dst = env->NewVideoFrame(vi);
+    Frame combe = env->NewVideoFrame(combvi);
+    Frame combetmp = env->NewVideoFrame(combvi);
+    Frame flag = NewSwitchFlagFrame(vi, env);
+    Frame flagtmp = NewSwitchFlagFrame(vi, env);
 
     CopyFrame<pixel_t>(src, padded, env);
     PadFrame<pixel_t>(padded, env);
@@ -1147,14 +1171,14 @@ class KRemoveCombe : public KFMFilterBase
       MergeUVCoefs(combe, env);
     }
     MakeSwitchFlag(flag, flagtmp, combe, env);
-    dst->SetProperty(COMBE_FLAG_STR, flag);
+    dst.SetProperty(COMBE_FLAG_STR, flag.frame);
 
     if (!IS_CUDA && show) {
       VisualizeCombe<pixel_t>(dst, combe, (int)thcombe, env);
-      return dst;
+      return dst.frame;
     }
 
-    return dst;
+    return dst.frame;
   }
 
 public:
@@ -1215,8 +1239,8 @@ public:
 
 void AddFuncCombingAnalyze(IScriptEnvironment* env)
 {
-  env->AddFunction("KFMFrameAnalyzeShow", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMFrameAnalyzeShow::Create, 0);
-  env->AddFunction("KFMFrameAnalyze", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMFrameAnalyze::Create, 0);
+  env->AddFunction("KFMFrameAnalyzeShow", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i[super]c", KFMFrameAnalyzeShow::Create, 0);
+  env->AddFunction("KFMFrameAnalyze", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i[super]c", KFMFrameAnalyze::Create, 0);
 
   env->AddFunction("KFMFrameAnalyzeCheck", "cc", KFMFrameAnalyzeCheck::Create, 0);
 

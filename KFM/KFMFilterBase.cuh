@@ -1,6 +1,7 @@
 
 #include <stdint.h>
 #include <avisynth.h>
+#include "Frame.h"
 
 struct FrameAnalyzeParam {
   int threshM;
@@ -21,10 +22,10 @@ protected:
   int logUVy;
 
   template <typename pixel_t>
-  void CopyFrame(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env);
+  void CopyFrame(Frame& src, Frame& dst, PNeoEnv env);
 
   template <typename pixel_t>
-  void PadFrame(PVideoFrame& dst, PNeoEnv env);
+  void PadFrame(Frame& dst, PNeoEnv env);
 
   template <typename vpixel_t>
   void LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
@@ -33,24 +34,22 @@ protected:
     PNeoEnv env);
 
   template <typename pixel_t>
-  void AnalyzeFrame(PVideoFrame& f0, PVideoFrame& f1, PVideoFrame& flag,
+  void AnalyzeFrame(Frame& f0, Frame& f1, Frame& flag,
     const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env);
 
-  void MergeUVFlags(PVideoFrame& flag, PNeoEnv env);
+  void MergeUVFlags(Frame& flag, PNeoEnv env);
 
   template <typename pixel_t>
-  void MergeUVCoefs(PVideoFrame& flag, PNeoEnv env);
+  void MergeUVCoefs(Frame& flag, PNeoEnv env);
 
   template <typename pixel_t>
-  void ApplyUVCoefs(PVideoFrame& flag, PNeoEnv env);
+  void ApplyUVCoefs(Frame& flag, PNeoEnv env);
 
   template <typename pixel_t>
-  void ExtendCoefs(PVideoFrame& src, PVideoFrame& dst, PNeoEnv env);
+  void ExtendCoefs(Frame& src, Frame& dst, PNeoEnv env);
 
   template <typename pixel_t>
-  void CompareFields(PVideoFrame& src, PVideoFrame& flag, PNeoEnv env);
-
-  PVideoFrame OffsetPadFrame(const PVideoFrame& frame, PNeoEnv env);
+  void CompareFields(Frame& src, Frame& flag, PNeoEnv env);
 
 public:
   KFMFilterBase(PClip _child);
@@ -66,7 +65,7 @@ int scaleParam(float thresh, int pixelBits);
 
 int Get8BitType(VideoInfo& vi);
 
-PVideoFrame NewSwitchFlagFrame(VideoInfo vi, int hpad, int vpad, PNeoEnv env);
+Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env);
 
 template <typename pixel_t, int fill_v>
 void cpu_fill(pixel_t* dst, int width, int height, int pitch);

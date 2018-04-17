@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Frame.h"
+
 enum {
   OVERLAP = 8,
   BLOCK_SIZE = OVERLAP * 2,
@@ -64,5 +66,14 @@ public:
 };
 
 #define COMBE_FLAG_STR "KRemoveCombe_Flag"
+
+enum {
+  COMBE_FLAG_PAD_H = 4,
+  COMBE_FLAG_PAD_W = 2,
+};
+
+static Frame WrapSwitchFragFrame(const PVideoFrame& frame) {
+  return Frame(frame, COMBE_FLAG_PAD_H, COMBE_FLAG_PAD_W, 1);
+}
 
 int GetDeviceTypes(const PClip& clip);
