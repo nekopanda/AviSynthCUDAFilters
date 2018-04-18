@@ -1329,7 +1329,7 @@ DECOMBE_UCF_RESULT CalcDecombeUCF(
   return (field_diff < param->fd_thresh) ? DECOMBE_UCF_CLEAN_1 : result;
 }
 
-
+// 60iソースを分析して24pクリップに適用するフィルタ
 class KDecombeUCF : public KFMFilterBase
 {
   PClip fmclip;
@@ -1428,6 +1428,7 @@ public:
   }
 };
 
+// 24pクリップを分析して24pクリップに適用するフィルタ（オリジナルと同等）
 class KDecombeUCF24 : public KFMFilterBase
 {
   PClip bobclip;
@@ -1495,13 +1496,181 @@ public:
   }
 };
 
+// 60iソースを分析して60pクリップにNRだけ適用するフィルタ
+class KDecombeUCFNR60 : public KFMFilterBase
+{
+  PClip noiseclip;
+  PClip nrclip;
+
+  const UCFNoiseMeta* meta;
+  DecombeUCFParam param;
+
+public:
+  KDecombeUCFNR60(PClip clip60, PClip noiseclip, PClip nrclip, DecombeUCFParam param, IScriptEnvironment* env)
+    : KFMFilterBase(clip60)
+    , noiseclip(noiseclip)
+    , nrclip(nrclip)
+    , meta(UCFNoiseMeta::GetParam(noiseclip->GetVideoInfo(), env))
+    , param(param)
+  {
+    if (srcvi.width & 3) env->ThrowError("[KDecombeUCFNR60]: width must be multiple of 4");
+    if (srcvi.height & 3) env->ThrowError("[KDecombeUCFNR60]: height must be multiple of 4");
+  }
+
+  PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+    PDevice cpu_device = env->GetDevice(DEV_TYPE_CPU, 0);
+
+    Frame f0 = env->GetFrame(noiseclip, n60 / 2, cpu_device);
+    const NoiseResult* result0 = f0.GetReadPtr<NoiseResult>();
+
+    std::string message;
+    auto result = CalcDecombeUCF(meta, &param,
+      result0, nullptr, false, param.show ? &message : nullptr);
+
+    if (param.show) {
+      // messageを書いて返す
+      Frame frame = child->GetFrame(n60, env);
+      DrawText<uint8_t>(frame.frame, vi.BitsPerComponent(), 0, 0, message, env);
+      return frame.frame;
+    }
+
+    if (result == DECOMBE_UCF_NOISY) {
+      return nrclip->GetFrame(n60, env);
+    }
+    return child->GetFrame(n60, env);
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KDecombeUCFNR60(
+      args[0].AsClip(),       // clip24
+      args[1].AsClip(),       // noiseclip
+      args[2].AsClip(),       // nrclip
+      MakeParam(args, 3, env), // param
+      env
+    );
+  }
+};
+
+// 60iソースを分析して60pクリップにフレーム置換を適用するフィルタ
+class KDecombeUCF60 : public KFMFilterBase
+{
+  PClip noiseclip;
+  PClip nrclip;
+
+  const UCFNoiseMeta* meta;
+  DecombeUCFParam param;
+
+  void GetFieldDiff(int nstart, double* diff, PNeoEnv env)
+  {
+    PDevice cpu_device = env->GetDevice(DEV_TYPE_CPU, 0);
+    double pixels = meta->srcw * meta->srch;
+    for (int i = 0; i < 4; ++i) {
+      int n = nstart + i;
+      Frame f0 = env->GetFrame(noiseclip, n / 2, cpu_device);
+      const NoiseResult* result = f0.GetReadPtr<NoiseResult>();
+      diff[i] = ((n & 1) ? result->diff1 : result->diff0) / (6 * pixels) * 100;
+    }
+  }
+
+public:
+  KDecombeUCF60(PClip clip60, PClip noiseclip, PClip nrclip, DecombeUCFParam param, IScriptEnvironment* env)
+    : KFMFilterBase(clip60)
+    , noiseclip(noiseclip)
+    , nrclip(nrclip)
+    , meta(UCFNoiseMeta::GetParam(noiseclip->GetVideoInfo(), env))
+    , param(param)
+  {
+    if (srcvi.width & 3) env->ThrowError("[KDecombeUCF60]: width must be multiple of 4");
+    if (srcvi.height & 3) env->ThrowError("[KDecombeUCF60]: height must be multiple of 4");
+  }
+
+  PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+    PDevice cpu_device = env->GetDevice(DEV_TYPE_CPU, 0);
+
+    DECOMBE_UCF_RESULT replace_resluts[] = {
+      DECOMBE_UCF_USE_0,
+      DECOMBE_UCF_USE_1
+    };
+
+    int useFrame = n60;
+    std::string message;
+
+    for (int i = 0; i < 2; ++i) {
+      int n = n60 + i - 1;
+      Frame f0 = env->GetFrame(noiseclip, n / 2 + 0, cpu_device);
+      Frame f1 = env->GetFrame(noiseclip, n / 2 + 1, cpu_device);
+      const NoiseResult* result0 = f0.GetReadPtr<NoiseResult>();
+      const NoiseResult* result1 = f1.GetReadPtr<NoiseResult>();
+
+      auto result = CalcDecombeUCF(meta, &param, result0, result1, (n & 1) != 0, nullptr);
+
+      if (result == replace_resluts[i]) {
+        double diff[4];
+        if (i == 0) {
+          // 前のフレームを使った方がいいと判定された
+          GetFieldDiff(n - 3, diff, env);
+          if (diff[0] < 256 && diff[1] < 256 && diff[3] > 256 * 8) {
+            // 前が静止
+            useFrame = n60 - 1;
+          }
+          if (param.show) {
+            char buf[200];
+            sprintf_s(buf, "[%c] 後SC: %5.2f <= %5.2f, %5.2f\n", 
+              useFrame == n60 ? '-' : 'O', diff[3], diff[1], diff[0]);
+            message += buf;
+          }
+        }
+        else {
+          // 後のフレームを使った方がいいと判定された
+          GetFieldDiff(n - 1, diff, env);
+          if (diff[2] < 256 && diff[3] < 256 && diff[0] > 256 * 8) {
+            // 後が静止
+            useFrame = n60 + 1;
+          }
+          if (param.show) {
+            char buf[200];
+            sprintf_s(buf, "[%c] 前SC: %5.2f <= %5.2f, %5.2f\n", 
+              useFrame == n60 ? '-' : 'O', diff[0], diff[2], diff[3]);
+            message += buf;
+          }
+        }
+      }
+    }
+
+    if (param.show) {
+      // messageを書いて返す
+      Frame frame = child->GetFrame(n60, env);
+      DrawText<uint8_t>(frame.frame, vi.BitsPerComponent(), 0, 0, message, env);
+      return frame.frame;
+    }
+
+    return child->GetFrame(useFrame, env);
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KDecombeUCFNR60(
+      args[0].AsClip(),       // clip24
+      args[1].AsClip(),       // noiseclip
+      args[2].Defined() ? args[3].AsClip() : nullptr,       // nrclip
+      MakeParam(args, 3, env), // param
+      env
+    );
+  }
+};
+
 void AddFuncUCF(IScriptEnvironment* env)
 {
   env->AddFunction("KCFieldDiff", "c[nt]f[chroma]b", KFieldDiff::CFunc, 0);
   env->AddFunction("KCFrameDiffDup", "c[chroma]b[blksize]i", KFrameDiffDup::CFunc, 0);
 
   env->AddFunction("KNoiseClip", "cc[nmin_y]i[range_y]i[nmin_uv]i[range_uv]i", KNoiseClip::Create, 0);
-  env->AddFunction("KAnalyzeNoise", "cc[super]c", KAnalyzeNoise::Create, 0);
+  env->AddFunction("KAnalyzeNoise", "cc[s4uper]c", KAnalyzeNoise::Create, 0);
   env->AddFunction("KDecombeUCF", "cccc[nr]c" DecombeUCF_PARAM_STR, KDecombeUCF::Create, 0);
   env->AddFunction("KDecombeUCF24", "ccc[nr]c" DecombeUCF_PARAM_STR, KDecombeUCF24::Create, 0);
 }
