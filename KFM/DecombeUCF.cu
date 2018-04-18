@@ -1197,7 +1197,7 @@ DECOMBE_UCF_RESULT CalcDecombeUCF(
 
   // 1次判定フィールド差分
   double field_diff = (second 
-    ? (result0[0].diff1 + result0[1].diff1) / 6
+    ? (result0[0].diff1 + result0[1].diff1)
     : (result0[0].diff0 + result0[1].diff0)) / (6 * pixels) * 100;
 
   // 絶対ノイズ量

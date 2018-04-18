@@ -67,18 +67,32 @@ struct Frame {
   template <typename T> const T* GetReadPtr(int plane = 0) {
     const BYTE* ptr = frame->GetReadPtr(plane);
     if (ptr) {
-      ptr += (plane & (PLANAR_U | PLANAR_V))
-        ? (offsetUVx + offsetUVy * widthUV)
-        : (offsetX + offsetY * width);
+      if (plane & (PLANAR_U | PLANAR_V)) {
+        if (offsetUVx > 0 || offsetUVy > 0) {
+          ptr += offsetUVx + offsetUVy * frame->GetPitch(plane);
+        }
+      }
+      else {
+        if (offsetX > 0 || offsetY > 0) {
+          ptr += offsetX + offsetY * frame->GetPitch(plane);
+        }
+      }
     }
     return reinterpret_cast<const T*>(ptr);
   }
   template <typename T> T* GetWritePtr(int plane = 0) {
     BYTE* ptr = frame->GetWritePtr(plane);
     if (ptr) {
-      ptr += (plane & (PLANAR_U | PLANAR_V))
-        ? (offsetUVx + offsetUVy * widthUV)
-        : (offsetX + offsetY * width);
+      if (plane & (PLANAR_U | PLANAR_V)) {
+        if (offsetUVx > 0 || offsetUVy > 0) {
+          ptr += offsetUVx + offsetUVy * frame->GetPitch(plane);
+        }
+      }
+      else {
+        if (offsetX > 0 || offsetY > 0) {
+          ptr += offsetX + offsetY * frame->GetPitch(plane);
+        }
+      }
     }
     return reinterpret_cast<T*>(ptr);
   }
