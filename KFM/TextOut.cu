@@ -841,63 +841,66 @@ void DrawText(PVideoFrame &dst_, int bitsPerComponent, int x1, int y1, const std
     [](const std::string& s0, const std::string& s1) {
     return s0.size() < s1.size();
   })->size();
-  char* charmap = new char[maxlen * lines.size()]();
-  for (int i = 0; i < (int)lines.size(); ++i) {
-    const std::string& str = lines[i];
-    std::copy(str.begin(), str.end(), &charmap[i * maxlen]);
-  }
 
-  pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
-  pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
-  pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+  if (maxlen > 0) {
+    char* charmap = new char[maxlen * lines.size()]();
+    for (int i = 0; i < (int)lines.size(); ++i) {
+      const std::string& str = lines[i];
+      std::copy(str.begin(), str.end(), &charmap[i * maxlen]);
+    }
 
-  int pitch = dst.GetPitch<pixel_t>(PLANAR_Y);
-  int pitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
-  int width = std::min(dst.GetWidth<pixel_t>(PLANAR_Y), maxlen * 10);
-  int height = std::min(dst.GetHeight(PLANAR_Y), (int)lines.size() * 20);
-  int logx = (dst.GetWidth<pixel_t>(PLANAR_U) < dst.GetWidth<pixel_t>(PLANAR_Y)) ? 1 : 0;
-  int logy = (dst.GetHeight(PLANAR_U) < dst.GetHeight(PLANAR_Y)) ? 1 : 0;
-  int widthUV = width >> logx;
-  int heightUV = height >> logy;
-  int shift = bitsPerComponent - 8;
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-  if (IS_CUDA) {
-    int work_bytes = sizeof(char) * maxlen * (int)lines.size();
-    VideoInfo workvi = VideoInfo();
-    workvi.pixel_type = VideoInfo::CS_BGR32;
-    workvi.width = 64;
-    workvi.height = nblocks(work_bytes, workvi.width * 4);
-    PVideoFrame work = env->NewVideoFrame(workvi);
-    char* dev_charmap = (char*)work->GetWritePtr();
-    CUDA_CHECK(cudaMemcpyAsync(dev_charmap, charmap, work_bytes, cudaMemcpyHostToDevice));
+    int pitch = dst.GetPitch<pixel_t>(PLANAR_Y);
+    int pitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
+    int width = std::min(dst.GetWidth<pixel_t>(PLANAR_Y), maxlen * 10);
+    int height = std::min(dst.GetHeight(PLANAR_Y), (int)lines.size() * 20);
+    int logx = (dst.GetWidth<pixel_t>(PLANAR_U) < dst.GetWidth<pixel_t>(PLANAR_Y)) ? 1 : 0;
+    int logy = (dst.GetHeight(PLANAR_U) < dst.GetHeight(PLANAR_Y)) ? 1 : 0;
+    int widthUV = width >> logx;
+    int heightUV = height >> logy;
+    int shift = bitsPerComponent - 8;
 
-    dim3 threads(10, 20);
-    dim3 threadsUV(threads.x >> logx, threads.y >> logy);
-    dim3 blocks(maxlen, (int)lines.size());
-    DEBUG_SYNC;
-    kl_draw_text<<<blocks, threads>>>(dstY, width, height, pitch,
-      dev_charmap, maxlen, (int)lines.size(), maxlen, 0, 0, shift, false);
-    DEBUG_SYNC;
-    kl_draw_text<<<blocks, threadsUV>>>(dstU, widthUV, heightUV, pitchUV,
-      dev_charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
-    DEBUG_SYNC;
-    kl_draw_text<<<blocks, threadsUV>>>(dstV, widthUV, heightUV, pitchUV,
-      dev_charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
-    DEBUG_SYNC;
+    if (IS_CUDA) {
+      int work_bytes = sizeof(char) * maxlen * (int)lines.size();
+      VideoInfo workvi = VideoInfo();
+      workvi.pixel_type = VideoInfo::CS_BGR32;
+      workvi.width = 64;
+      workvi.height = nblocks(work_bytes, workvi.width * 4);
+      PVideoFrame work = env->NewVideoFrame(workvi);
+      char* dev_charmap = (char*)work->GetWritePtr();
+      CUDA_CHECK(cudaMemcpyAsync(dev_charmap, charmap, work_bytes, cudaMemcpyHostToDevice));
 
-    // 終わったら解放するコールバックを追加
-    env->DeviceAddCallback([](void* arg) {
-      delete[]((char*)arg);
-    }, charmap);
-  }
-  else {
-    cpu_draw_text(dstY, width, height, pitch,
-      charmap, maxlen, (int)lines.size(), maxlen, 0, 0, shift, false);
-    cpu_draw_text(dstU, widthUV, heightUV, pitchUV,
-      charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
-    cpu_draw_text(dstV, widthUV, heightUV, pitchUV,
-      charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
-    delete[] charmap;
+      dim3 threads(10, 20);
+      dim3 threadsUV(threads.x >> logx, threads.y >> logy);
+      dim3 blocks(maxlen, (int)lines.size());
+      DEBUG_SYNC;
+      kl_draw_text << <blocks, threads >> > (dstY, width, height, pitch,
+        dev_charmap, maxlen, (int)lines.size(), maxlen, 0, 0, shift, false);
+      DEBUG_SYNC;
+      kl_draw_text << <blocks, threadsUV >> > (dstU, widthUV, heightUV, pitchUV,
+        dev_charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+      DEBUG_SYNC;
+      kl_draw_text << <blocks, threadsUV >> > (dstV, widthUV, heightUV, pitchUV,
+        dev_charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+      DEBUG_SYNC;
+
+      // 終わったら解放するコールバックを追加
+      env->DeviceAddCallback([](void* arg) {
+        delete[]((char*)arg);
+      }, charmap);
+    }
+    else {
+      cpu_draw_text(dstY, width, height, pitch,
+        charmap, maxlen, (int)lines.size(), maxlen, 0, 0, shift, false);
+      cpu_draw_text(dstU, widthUV, heightUV, pitchUV,
+        charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+      cpu_draw_text(dstV, widthUV, heightUV, pitchUV,
+        charmap, maxlen, (int)lines.size(), maxlen, logx, logy, shift, true);
+      delete[] charmap;
+    }
   }
 
   dst_ = dst.frame;

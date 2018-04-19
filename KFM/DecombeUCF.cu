@@ -1052,7 +1052,7 @@ public:
     return new KAnalyzeNoise(
       args[0].AsClip(),       // src
       args[1].AsClip(),       // noise
-      args[2].AsClip(),       // super
+      args[2].Defined() ? args[2].AsClip() : nullptr,       // super
       env
     );
   }
@@ -1565,11 +1565,15 @@ public:
           return dweaveclip->GetFrame(n60, env);
         }
       }
-      for (int i = 0; i < frameInfo.numFields; ++i) {
-        if (cleanField[i]) {
-          // 1枚のきれいなフィールドがある -> きれいなフィールドのbobを返す
-          int n60 = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex + i;
-          return bobclip->GetFrame(n60, env);
+      // 3フィールド以上あるのに2枚連続の綺麗なフィールドがない場合は、
+      // そもそも全フィールドが汚い可能性が高いのでbobで更に汚くなるのを防ぐ
+      if (frameInfo.numFields <= 2) {
+        for (int i = 0; i < frameInfo.numFields; ++i) {
+          if (cleanField[i]) {
+            // 1枚のきれいなフィールドがある -> きれいなフィールドのbobを返す
+            int n60 = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex + i;
+            return bobclip->GetFrame(n60, env);
+          }
         }
       }
       // きれいなフィールドがなかった -> NRを返す
@@ -1597,7 +1601,7 @@ public:
 };
 
 // 60iクリップを分析して60pフラグを出力
-class KDecombUCF60Flag : public KFMFilterBase
+class KDecombUCF60Flag : public GenericVideoFilter
 {
   PClip showclip;
   float sc_thresh;
@@ -1622,7 +1626,7 @@ class KDecombUCF60Flag : public KFMFilterBase
 
 public:
   KDecombUCF60Flag(PClip noiseclip, PClip showclip, float sc_thresh, float dup_thresh, DecombUCFParam param, IScriptEnvironment* env)
-    : KFMFilterBase(noiseclip)
+    : GenericVideoFilter(noiseclip)
     , showclip(showclip)
     , sc_thresh(sc_thresh)
     , dup_thresh(dup_thresh)
@@ -1740,13 +1744,21 @@ public:
     return res;
   }
 
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceTypes(child) &
+        (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    return 0;
+  }
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KDecombUCF60Flag(
       args[0].AsClip(),       // clip60
       args[1].AsClip(),       // showclip
-      (float)args[2].AsFloat(),       // sc_thresh
-      (float)args[3].AsFloat(),       // dup_factor
+      (float)args[2].AsFloat(256),       // sc_thresh
+      (float)args[3].AsFloat(2.5),       // dup_factor
       MakeParam(args, 4, env), // param
       env
     );
@@ -1872,7 +1884,7 @@ public:
       args2[i + 2] = args[i + 4];
     }
     PClip flagclip = env->Invoke("KDecombUCF60Flag", AVSValue(args2.data(), (int)args2.size())).AsClip();
-    DecombUCFParam param = MakeParam(args, 4, env);
+    DecombUCFParam param = MakeParam(args, 6, env);
     if (param.show) {
       return flagclip;
     }

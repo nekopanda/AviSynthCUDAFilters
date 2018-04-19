@@ -45,17 +45,20 @@ TEST_F(MiscTest, UCF2Perf)
     std::ofstream out(scriptpath);
 
     out << "LWLibavVideoSource(\"test.ts\").OnCPU(1)" << std::endl;
-    out << "fields = SeparateFields().Align()" << std::endl;
+    out << "fields = SeparateFields().Crop(4,4,-4,-4).Align()" << std::endl;
     out << "bob = KTGMC_Bob()" << std::endl;
-    out << "noise = fields.KGaussResize(p=2.5).Crop(4,4,-4,-4).Align()" << std::endl;
-    out << "noise = KAnalyzeNoise(fields.Crop(4,4,-4,-4).Align().KNoiseClip(noise), KFMSuper()).OnCUDA(1)" << std::endl;
-    out << "KDecombUCF24(noise, bob, chroma=1, show=true).OnCUDA(1)" << std::endl;
+    out << "noise = fields.KGaussResize(p=2.5)" << std::endl;
+    out << "noise = last.KAnalyzeNoise(fields.KNoiseClip(noise), KFMSuper()).OnCUDA(2)" << std::endl;
+    out << "bob.KDecombUCF60(noise, bob, bob).OnCUDA(0)" << std::endl;
 
     out.close();
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
+      for (int i = 100; i < 1100; ++i) {
+        clip->GetFrame(i, env.get());
+        printf("===== FRAME %d COMPLETE =====\n", i);
+      }
     }
   }
   catch (const AvisynthError& err) {
