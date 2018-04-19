@@ -157,8 +157,9 @@ __global__ void kl_merge(vpixel_t* dst,
 }
 
 enum KFMSWTICH_FLAG {
-	FRAME_60 = 1,
+  FRAME_60 = 1,
 	FRAME_24,
+  FRAME_UCF,
 };
 
 class KFMSwitch : public KFMFilterBase
@@ -168,6 +169,7 @@ class KFMSwitch : public KFMFilterBase
 	PClip clip24;
 	PClip fmclip;
 	PClip combeclip;
+  PClip ucfclip;
 	float thswitch;
 	float thpatch;
 	bool show;
@@ -323,17 +325,41 @@ class KFMSwitch : public KFMFilterBase
 	Frame InternalGetFrame(int n60, Frame& fmframe, int& type, PNeoEnv env)
 	{
 		int cycleIndex = n60 / 10;
-		int kfmPattern = (int)fmframe.GetProperty("KFM_Pattern")->GetInt();
-		float kfmCost = (float)fmframe.GetProperty("KFM_Cost")->GetFloat();
+		int kfmPattern = fmframe.GetProperty("KFM_Pattern", -1);
+    if (kfmPattern == -1) {
+      env->ThrowError("[KFMSwitch] Failed to get frame info. Check fmclip");
+    }
+		float kfmCost = (float)fmframe.GetProperty("KFM_Cost", 1.0);
+    Frame baseFrame;
 
 		if (kfmCost > thswitch || PulldownPatterns::Is30p(kfmPattern)) {
 			// コストが高いので60pと判断 or 30pの場合
-			Frame frame60 = child->GetFrame(n60, env);
-			type = FRAME_60;
-			return frame60;
-		}
+      type = FRAME_60;
 
-		type = FRAME_24;
+      if (ucfclip) {
+        baseFrame = ucfclip->GetFrame(n60, env);
+        auto prop = baseFrame.GetProperty(DECOMB_UCF_FLAG_STR);
+        if (prop == nullptr) {
+          env->ThrowError("Invalid UCF clip");
+        }
+        auto flag = (DECOMB_UCF_FLAG)prop->GetInt();
+        if (flag == DECOMB_UCF_NEXT || flag == DECOMB_UCF_PREV) {
+          // フレーム置換がされた場合は、60p部分マージ処理を実行する
+          type = FRAME_UCF;
+        }
+        else {
+          return baseFrame;
+        }
+      }
+      else {
+        return child->GetFrame(n60, env);
+      }
+		}
+    else {
+      type = FRAME_24;
+    }
+
+    // ここでのtypeは 24 or UCF
 
 		// 24pフレーム番号を取得
 		Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
@@ -346,7 +372,7 @@ class KFMSwitch : public KFMFilterBase
 		else if (frameInfo.frameIndex >= 4) {
 			// 後ろのサイクルのパターンを取得
 			Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-			int nextPattern = (int)nextfmframe.GetProperty("KFM_Pattern")->GetInt();
+			int nextPattern = nextfmframe.GetProperty("KFM_Pattern", -1);
 			int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
 			if (fstart > 0) {
 				// 前に空きがあるので前のサイクル
@@ -362,15 +388,19 @@ class KFMSwitch : public KFMFilterBase
     Frame flag = WrapSwitchFragFrame(
       combeclip->GetFrame(n24, env)->GetProperty(COMBE_FLAG_STR)->GetFrame());
 
+    if (type == FRAME_24) {
+      baseFrame = frame24;
+    }
+
 		{
 			Frame work = env->NewVideoFrame(workvi);
 			if (ContainsDurtyBlock(flag, work, (int)thpatch, env) == false) {
 				// ダメなブロックはないのでそのまま返す
-				return frame24;
+				return baseFrame;
 			}
 		}
 
-		Frame frame60 = child->GetFrame(n60, env);
+    Frame frame60 = child->GetFrame(n60, env);
 
 		VideoInfo mfvi = vi;
 		mfvi.pixel_type = VideoInfo::CS_Y8;
@@ -384,14 +414,14 @@ class KFMSwitch : public KFMFilterBase
 		}
 
 		if (!IS_CUDA && vi.ComponentSize() == 1 && showflag) {
-			env->MakeWritable(&frame24.frame);
-			VisualizeFlag<pixel_t>(frame24, mflag, env);
-			return frame24;
+			env->MakeWritable(&baseFrame.frame);
+			VisualizeFlag<pixel_t>(baseFrame, mflag, env);
+			return baseFrame;
 		}
 
-		// ダメなブロックは60pフレームからコピー
+		// ダメなブロックはbobフレームからコピー
 		Frame dst = env->NewVideoFrame(vi);
-		MergeBlock<pixel_t>(frame24, frame60, mflag, dst, env);
+		MergeBlock<pixel_t>(baseFrame, frame60, mflag, dst, env);
 
 		return dst;
 	}
@@ -407,7 +437,7 @@ class KFMSwitch : public KFMFilterBase
 
     if (show) {
       const std::pair<int, float>* pfm = fmframe.GetReadPtr<std::pair<int, float>>();
-      const char* fps = (frameType == FRAME_60) ? "60p" : "24p";
+      const char* fps = (frameType == FRAME_60) ? "60p" : (frameType == FRAME_24) ? "24p" : "UCF";
       char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.1f", fps, pfm->first, pfm->second);
       DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
       return dst.frame;
@@ -417,12 +447,13 @@ class KFMSwitch : public KFMFilterBase
   }
 
 public:
-	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip,
+	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combeclip, PClip ucfclip,
 		float thswitch, float thpatch, bool show, bool showflag, IScriptEnvironment* env)
 		: KFMFilterBase(clip60)
 		, clip24(clip24)
 		, fmclip(fmclip)
 		, combeclip(combeclip)
+    , ucfclip(ucfclip)
 		, thswitch(thswitch)
 		, thpatch(thpatch)
 		, show(show)
@@ -465,13 +496,13 @@ public:
 		return new KFMSwitch(
 			args[0].AsClip(),           // clip60
 			args[1].AsClip(),           // clip24
-
 			args[2].AsClip(),           // fmclip
-			args[3].AsClip(),           // combeclip
-			(float)args[4].AsFloat(0.8f),// thswitch
-			(float)args[5].AsFloat(40.0f),// thpatch
-			args[6].AsBool(false),      // show
-			args[7].AsBool(false),      // showflag
+      args[3].AsClip(),           // combeclip
+      args[4].AsClip(),           // ucfclip
+			(float)args[5].AsFloat(0.8f),// thswitch
+			(float)args[6].AsFloat(40.0f),// thpatch
+			args[7].AsBool(false),      // show
+			args[8].AsBool(false),      // showflag
 			env
 			);
 	}
@@ -551,7 +582,7 @@ public:
 
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
-  env->AddFunction("KFMSwitch", "cccc[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSwitch", "cccc[ucfclip]c[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMSuper", "c", KFMSuper::Create, 0);
 	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
 }

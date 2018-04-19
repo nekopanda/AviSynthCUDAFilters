@@ -76,4 +76,15 @@ static Frame WrapSwitchFragFrame(const PVideoFrame& frame) {
   return Frame(frame, COMBE_FLAG_PAD_H, COMBE_FLAG_PAD_W, 1);
 }
 
+#define DECOMB_UCF_FLAG_STR "KDecombUCF_Flag"
+
+enum DECOMB_UCF_FLAG {
+  DECOMB_UCF_NONE,  // 情報なし
+  DECOMB_UCF_PREV,  // 前のフレーム
+  DECOMB_UCF_NEXT,  // 次のフレーム
+  DECOMB_UCF_FIRST, // 1番目のフィールドでbob
+  DECOMB_UCF_SECOND,// 2番目のフィールドでbob
+  DECOMB_UCF_NR,    // 汚いフレーム
+};
+
 int GetDeviceTypes(const PClip& clip);

@@ -13,8 +13,8 @@ protected:
   void CFieldDiffTest(int nt, bool chroma);
   void CFrameDiffDupTest(int blocksize, bool chroma);
 
-  void DecombeUCFTest(TEST_FRAMES tf, int chroma, bool show);
-  void DecombeUCF24Test(TEST_FRAMES tf, int chroma, bool show);
+  void DecombUCFTest(TEST_FRAMES tf, int chroma, bool show);
+  void DecombUCF24Test(TEST_FRAMES tf, int chroma, bool show);
 };
 
 #pragma region MergeStatic
@@ -662,9 +662,9 @@ TEST_F(KFMTest, CFrameDiffDup_Blk8NoC)
 
 #pragma endregion
 
-#pragma region DecombeUCF
+#pragma region DecombUCF
 
-void KFMTest::DecombeUCF24Test(TEST_FRAMES tf, int chroma, bool show)
+void KFMTest::DecombUCF24Test(TEST_FRAMES tf, int chroma, bool show)
 {
   PEnv env;
   try {
@@ -686,8 +686,8 @@ void KFMTest::DecombeUCF24Test(TEST_FRAMES tf, int chroma, bool show)
     out << "noise = fields.GaussResize(1920,540,0,0,1920.0001,540.0001,p=2).Crop(4,4,-4,-4).Align().OnCPU(0)" << std::endl;
     out << "noise = src.KAnalyzeNoise(fields.Crop(4,4,-4,-4).Align().KNoiseClip(noise), src.KFMSuper())" << std::endl;
 
-    out << "ref = src.KDecombeUCF24(noise, bob, chroma=" << chroma << (show ? ", show=true" : "") << ")" << std::endl;
-    out << "cuda = src.KDecombeUCF24(noise" O_C(0) ", bob, chroma=" << chroma << (show ? ", show=true" : "") << ")" O_C(0) << std::endl;
+    out << "ref = src.KDecombUCF(noise, bob, chroma=" << chroma << (show ? ", show=true" : "") << ")" << std::endl;
+    out << "cuda = src.KDecombUCF(noise" O_C(0) ", bob, chroma=" << chroma << (show ? ", show=true" : "") << ")" O_C(0) << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
@@ -704,24 +704,24 @@ void KFMTest::DecombeUCF24Test(TEST_FRAMES tf, int chroma, bool show)
   }
 }
 
-TEST_F(KFMTest, DecombeUCF_C0NoShow)
+TEST_F(KFMTest, DecombUCF_C0NoShow)
 {
-  DecombeUCF24Test(TF_MID, 0, false);
+  DecombUCF24Test(TF_MID, 0, false);
 }
 
-TEST_F(KFMTest, DecombeUCF_C1NoShow)
+TEST_F(KFMTest, DecombUCF_C1NoShow)
 {
-  DecombeUCF24Test(TF_MID, 1, false);
+  DecombUCF24Test(TF_MID, 1, false);
 }
 
-TEST_F(KFMTest, DecombeUCF_C2NoShow)
+TEST_F(KFMTest, DecombUCF_C2NoShow)
 {
-  DecombeUCF24Test(TF_MID, 2, false);
+  DecombUCF24Test(TF_MID, 2, false);
 }
 
-TEST_F(KFMTest, DecombeUCF_C1Show)
+TEST_F(KFMTest, DecombUCF_C1Show)
 {
-  DecombeUCF24Test(TF_MID, 1, true);
+  DecombUCF24Test(TF_MID, 1, true);
 }
 
 #pragma endregion

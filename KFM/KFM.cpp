@@ -471,12 +471,68 @@ public:
   }
 };
 
+class Print : public GenericVideoFilter
+{
+  std::string str;
+  int x, y;
+public:
+  Print(PClip clip, const char* str, int x, int y, IScriptEnvironment* env)
+    : GenericVideoFilter(clip)
+    , str(str)
+    , x(x)
+    , y(y)
+  {
+    int cs = vi.ComponentSize();
+    if (cs != 1 && cs != 2)
+      env->ThrowError("[Print] Unsupported pixel format");
+    if(vi.IsRGB() || !vi.IsPlanar())
+      env->ThrowError("[Print] Unsupported pixel format");
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+    PVideoFrame src = child->GetFrame(n, env);
+
+    switch (vi.ComponentSize()) {
+    case 1:
+      DrawText<uint8_t>(src, vi.BitsPerComponent(), x, y, str, env);
+      break;
+    case 2:
+      DrawText<uint16_t>(src, vi.BitsPerComponent(), x, y, str, env);
+      break;
+    }
+
+    return src;
+  }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceTypes(child) &
+        (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    return 0;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new Print(
+      args[0].AsClip(),      // clip
+      args[1].AsString(),    // str
+      args[2].AsInt(0),       // x
+      args[3].AsInt(0),       // y
+      env
+    );
+  }
+};
+
 void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
   env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f", KFMCycleAnalyze::Create, 0);
   env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
+  env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 }
 
 #define NOMINMAX

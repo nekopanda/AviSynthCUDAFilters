@@ -99,6 +99,9 @@ struct Frame {
 
   void SetProperty(const char* key, const AVSMapValue& value) { frame->SetProperty(key, value); }
   const AVSMapValue* GetProperty(const char* key) const { return frame->GetProperty(key); }
+  PVideoFrame GetProperty(const char* key, const PVideoFrame& def) const { return frame->GetProperty(key, def); }
+  int GetProperty(const char* key, int def) const { return frame->GetProperty(key, def); }
+  double GetProperty(const char* key, double def) const { return frame->GetProperty(key, def); }
   PDevice GetDevice() const { return frame->GetDevice(); }
   int CheckMemory() const { return frame->CheckMemory(); }
 

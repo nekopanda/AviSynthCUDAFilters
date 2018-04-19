@@ -548,8 +548,11 @@ class KTelecine : public KFMFilterBase
     int cycleIndex = n / 4;
     int parity = child->GetParity(cycleIndex * 5);
     Frame fm = fmclip->GetFrame(cycleIndex, env);
-    int pattern = (int)fm.GetProperty("KFM_Pattern")->GetInt();
-    float cost = (float)fm.GetProperty("KFM_Cost")->GetFloat();
+    int pattern = fm.GetProperty("KFM_Pattern", -1);
+    if (pattern == -1) {
+      env->ThrowError("[KTelecine] Failed to get frame info. Check fmclip");
+    }
+    float cost = (float)fm.GetProperty("KFM_Cost", 1.0);
     Frame24Info frameInfo = patterns.GetFrame24(pattern, n);
 
     int fstart = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex;

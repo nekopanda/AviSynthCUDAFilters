@@ -49,7 +49,7 @@ TEST_F(MiscTest, UCF2Perf)
     out << "bob = KTGMC_Bob()" << std::endl;
     out << "noise = fields.KGaussResize(p=2.5).Crop(4,4,-4,-4).Align()" << std::endl;
     out << "noise = KAnalyzeNoise(fields.Crop(4,4,-4,-4).Align().KNoiseClip(noise), KFMSuper()).OnCUDA(1)" << std::endl;
-    out << "KDecombeUCF24(noise, bob, chroma=1, show=true).OnCUDA(1)" << std::endl;
+    out << "KDecombUCF24(noise, bob, chroma=1, show=true).OnCUDA(1)" << std::endl;
 
     out.close();
 
