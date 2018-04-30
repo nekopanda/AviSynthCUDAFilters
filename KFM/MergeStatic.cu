@@ -508,6 +508,9 @@ public:
     if (vi.num_frames != srcvi.num_frames * 2) {
       env->ThrowError("[KMergeStatic] Num frames don't match");
     }
+    if (!(GetDeviceTypes(clip60) & GetDeviceTypes(clip30))) {
+      env->ThrowError("[KMergeStatic] Device unmatch. Two source must be same device.");
+    }
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)

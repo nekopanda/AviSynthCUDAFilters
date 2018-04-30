@@ -627,6 +627,9 @@ public:
     if (vi.width != noisevi.width || vi.height != noisevi.height) {
       env->ThrowError("[KNoiseClip]: src and noiseclip must be same resoluction");
     }
+    if (!(GetDeviceTypes(src) & GetDeviceTypes(noise))) {
+      env->ThrowError("[KNoiseClip] Device unmatch. Two source must be same device.");
+    }
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -1026,6 +1029,10 @@ public:
     meta.noiseUVw = noisevi.width >> noisevi.GetPlaneWidthSubsampling(PLANAR_U);
     meta.noiseUVh = noisevi.height >> noisevi.GetPlaneHeightSubsampling(PLANAR_U);
     UCFNoiseMeta::SetParam(vi, &meta);
+
+    if (!(GetDeviceTypes(src) & GetDeviceTypes(noise) & GetDeviceTypes(super))) {
+      env->ThrowError("[KAnalyzeNoise] Device unmatch. Three sources must be same device.");
+    }
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -1377,6 +1384,17 @@ public:
       if (vi24.height != vinr.height)
         env->ThrowError("[KDecombUCF]: vi24.height != vinr.height");
     }
+
+    auto devs = GetDeviceTypes(clip24);
+    if (!(GetDeviceTypes(noiseclip) & devs)) {
+      env->ThrowError("[KDecombUCF]: noiseclip device unmatch");
+    }
+    if (!(GetDeviceTypes(bobclip) & devs)) {
+      env->ThrowError("[KDecombUCF]: bobclip device unmatch");
+    }
+    if (nrclip && !(GetDeviceTypes(nrclip) & devs)) {
+      env->ThrowError("[KDecombUCF]: nrclip device unmatch");
+    }
   }
 
   PVideoFrame __stdcall GetFrame(int n24, IScriptEnvironment* env_)
@@ -1500,6 +1518,30 @@ public:
       if (vi24.height != vinr.height)
         env->ThrowError("[KDecombUCF24]: vi24.num_frames != vinoise.num_frames");
     }
+
+    if (!(GetDeviceTypes(fmclip) & DEV_TYPE_CPU)) {
+      env->ThrowError("[KDecombUCF]: fmclip must be CPU device");
+    }
+    if (!(GetDeviceTypes(noiseclip) & DEV_TYPE_CPU)) {
+      env->ThrowError("[KDecombUCF]: noiseclip must be CPU device");
+    }
+
+    auto devs = GetDeviceTypes(clip24);
+    if (!(GetDeviceTypes(bobclip) & devs)) {
+      env->ThrowError("[KDecombUCF]: bobclip device unmatch");
+    }
+    if (!(GetDeviceTypes(dweaveclip) & devs)) {
+      env->ThrowError("[KDecombUCF]: dweaveclip device unmatch");
+    }
+    if (nrclip && !(GetDeviceTypes(nrclip) & devs)) {
+      env->ThrowError("[KDecombUCF]: nrclip device unmatch");
+    }
+  }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    // CPU‰¼’è‚ÌƒNƒŠƒbƒv‚ª‚ ‚é‚Ì‚Å
+    if (cachehints == CACHE_GET_CHILD_DEV_TYPE) return DEV_TYPE_ANY;
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
   }
 
   PVideoFrame __stdcall GetFrame(int n24, IScriptEnvironment* env_)
@@ -1593,7 +1635,7 @@ public:
       args[2].AsClip(),       // noise
       args[3].AsClip(),       // bobc
       args[4].AsClip(),       // dweave
-      args[5].AsClip(),       // nr
+      args[5].Defined() ? args[5].AsClip() : nullptr,       // nr
       MakeParam(args, 6, env), // param
       env
     );
@@ -1633,6 +1675,9 @@ public:
     , meta(UCFNoiseMeta::GetParam(noiseclip->GetVideoInfo(), env))
     , param(param)
   {
+    if (!(GetDeviceTypes(noiseclip) & DEV_TYPE_CPU)) {
+      env->ThrowError("[KDecombUCF60]: noiseclip must be CPU device");
+    }
     if (param.show) {
       vi = showclip->GetVideoInfo();
     }
@@ -1745,7 +1790,10 @@ public:
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
-    if (cachehints == CACHE_GET_DEV_TYPE) {
+    if (cachehints == CACHE_GET_CHILD_DEV_TYPE) {
+      return DEV_TYPE_ANY;
+    }
+    else if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
@@ -1821,6 +1869,14 @@ public:
         env->ThrowError("[KDecombUCF60]: vi60.num_frames != viflag.num_frames");
       if (vi60.height != vinr.height)
         env->ThrowError("[KDecombUCF60]: vi60.num_frames != viflag.num_frames");
+    }
+
+    auto devs = GetDeviceTypes(clip60);
+    if (!(GetDeviceTypes(bobclip) & devs)) {
+      env->ThrowError("[KDecombUCF60]: bobclip device unmatch");
+    }
+    if (nrclip && !(GetDeviceTypes(nrclip) & devs)) {
+      env->ThrowError("[KDecombUCF60]: nrclip device unmatch");
     }
   }
 

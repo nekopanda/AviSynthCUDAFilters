@@ -471,6 +471,25 @@ public:
 		workvi.pixel_type = VideoInfo::CS_BGR32;
 		workvi.width = 4;
 		workvi.height = nblocks(work_bytes, workvi.width * 4);
+
+    // check clip device
+    if (!(GetDeviceTypes(fmclip) & DEV_TYPE_CPU)) {
+      env->ThrowError("[KFMSwitch]: fmclip must be CPU device");
+    }
+
+    auto devs = GetDeviceTypes(clip60);
+    if (!(GetDeviceTypes(clip24) & devs)) {
+      env->ThrowError("[KFMSwitch]: clip24 device unmatch");
+    }
+    if (!(GetDeviceTypes(combeclip) & devs)) {
+      env->ThrowError("[KFMSwitch]: combeclip device unmatch");
+    }
+    if (!(GetDeviceTypes(clip24) & devs)) {
+      env->ThrowError("[KFMSwitch]: clip24 device unmatch");
+    }
+    if (ucfclip && !(GetDeviceTypes(ucfclip) & devs)) {
+      env->ThrowError("[KFMSwitch]: ucfclip device unmatch");
+    }
 	}
 
 	PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
@@ -498,7 +517,7 @@ public:
 			args[1].AsClip(),           // clip24
 			args[2].AsClip(),           // fmclip
       args[3].AsClip(),           // combeclip
-      args[4].AsClip(),           // ucfclip
+      args[4].Defined() ? args[4].AsClip() : nullptr,           // ucfclip
 			(float)args[5].AsFloat(0.8f),// thswitch
 			(float)args[6].AsFloat(40.0f),// thpatch
 			args[7].AsBool(false),      // show
@@ -562,21 +581,25 @@ public:
 };
 
 
-class AssertOnCUDA : public GenericVideoFilter
+class AssumeDevice : public GenericVideoFilter
 {
+  int devices;
 public:
-	AssertOnCUDA(PClip clip) : GenericVideoFilter(clip) { }
+  AssumeDevice(PClip clip, int devices)
+    : GenericVideoFilter(clip)
+    , devices(devices)
+  { }
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
 		if (cachehints == CACHE_GET_DEV_TYPE) {
-			return DEV_TYPE_CUDA;
+			return devices;
 		}
 		return 0;
 	}
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
 	{
-		return new AssertOnCUDA(args[0].AsClip());
+		return new AssumeDevice(args[0].AsClip(), args[1].AsInt());
 	}
 };
 
@@ -584,5 +607,5 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KFMSwitch", "cccc[ucfclip]c[thswitch]f[thpatch]f[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMSuper", "c", KFMSuper::Create, 0);
-	env->AddFunction("AssertOnCUDA", "c", AssertOnCUDA::Create, 0);
+	env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

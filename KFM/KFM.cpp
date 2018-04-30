@@ -28,6 +28,17 @@ int GetDeviceTypes(const PClip& clip)
   return devtypes;
 }
 
+int GetCommonDevices(const std::vector<PClip>& clips)
+{
+  int devs = DEV_TYPE_ANY;
+  for (const PClip& c : clips) {
+    if (c) {
+      devs &= GetDeviceTypes(c);
+    }
+  }
+  return devs;
+}
+
 template <typename pixel_t>
 void Copy(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height)
 {
@@ -176,9 +187,14 @@ float RSplitCost(const PulldownPatternField* pattern, const float* fv, const flo
 
 PulldownPattern::PulldownPattern(int nf0, int nf1, int nf2, int nf3)
   : fields()
+  , cycle(10)
 {
+  // 24p
   if (nf0 + nf1 + nf2 + nf3 != 10) {
     printf("Error: sum of nfields must be 10.\n");
+  }
+  if (nf0 == nf2 && nf1 == nf3) {
+    cycle = 5;
   }
   int nfields[] = { nf0, nf1, nf2, nf3 };
   for (int c = 0, fstart = 0; c < 4; ++c) {
@@ -195,7 +211,9 @@ PulldownPattern::PulldownPattern(int nf0, int nf1, int nf2, int nf3)
 
 PulldownPattern::PulldownPattern()
 	: fields()
+  , cycle(2)
 {
+  // 30p
 	for (int c = 0, fstart = 0; c < 4; ++c) {
 		for (int i = 0; i < 4; ++i) {
 			int nf = 2;
@@ -208,14 +226,21 @@ PulldownPattern::PulldownPattern()
 PulldownPatterns::PulldownPatterns()
   : p2323(2, 3, 2, 3)
   , p2233(2, 2, 3, 3)
+  , p2224(2, 2, 2, 4)
   , p30()
 {
-  const PulldownPattern* patterns[] = { &p2323, &p2233, &p30 };
+  const PulldownPattern* patterns[] = { &p2323, &p2224, &p2233, &p30 };
 
-  for (int p = 0; p < 3; ++p) {
-    for (int i = 0; i < 9; ++i) {
-      allpatterns[p * 9 + i] = patterns[p]->GetPattern(i);
+  int pi = 0;
+  for (int p = 0; p < 4; ++p) {
+    patternOffsets[p] = pi;
+    for (int i = 0; i < patterns[p]->GetCycleLength(); ++i) {
+      allpatterns[pi++] = patterns[p]->GetPattern(i);
     }
+  }
+
+  if (pi > NUM_PATTERNS) {
+    throw "Error !!!";
   }
 }
 
@@ -232,7 +257,7 @@ Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
 	// 前後のサイクルが24pで、サイクル境界の空きフレームとして30p部分も取得されることがある
 	// なので、5枚中、最初と最後のフレームだけは正しく60pに復元する必要がある
 	// 以下の処理がないと最後のフレーム(4枚目)がズレてしまう
-	if (patternIndex >= 18) {
+	if (patternIndex >= patternOffsets[3]) {
 		if (searchFrame >= 2) ++searchFrame;
 	}
 
@@ -288,17 +313,17 @@ Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
 
 std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth) const
 {
-  const PulldownPattern* patterns[] = { &p2323, &p2233, &p30 };
+  const PulldownPattern* patterns[] = { &p2323, &p2224, &p2233, &p30 };
 
-	std::vector<float> mtshima(9 * 3);
-	std::vector<float> mtshimacost(9 * 3);
+	std::vector<float> mtshima(NUM_PATTERNS);
+	std::vector<float> mtshimacost(NUM_PATTERNS);
 
   // 各スコアを計算
-  for (int p = 0; p < 3; ++p) {
-    for (int i = 0; i < 9; ++i) {
+  for (int p = 0, pi = 0; p < 4; ++p) {
+    for (int i = 0; i < patterns[p]->GetCycleLength(); ++i, ++pi) {
       auto pattern = patterns[p]->GetPattern(i);
-			mtshima[p * 9 + i] = RSplitScore(pattern, data->mftr);
-			mtshimacost[p * 9 + i] = RSplitCost(pattern, data->mftr, data->mftcost, costth);
+			mtshima[pi] = RSplitScore(pattern, data->mftr);
+			mtshimacost[pi] = RSplitCost(pattern, data->mftr, data->mftcost, costth);
     }
   }
 

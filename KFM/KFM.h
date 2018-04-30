@@ -23,12 +23,16 @@ struct PulldownPatternField {
 
 struct PulldownPattern {
   PulldownPatternField fields[10 * 4];
+  int cycle;
 
-	PulldownPattern(int nf0, int nf1, int nf2, int nf3);
-	PulldownPattern();
+	PulldownPattern(int nf0, int nf1, int nf2, int nf3); // 24p
+	PulldownPattern(); // 30p
 
   const PulldownPatternField* GetPattern(int n) const {
     return &fields[10 + n - 2];
+  }
+  int GetCycleLength() const {
+    return cycle;
   }
 };
 
@@ -37,14 +41,17 @@ struct Frame24Info {
   int frameIndex; // サイクル内のフレーム番号
   int fieldStartIndex; // ソースフィールド開始番号
   int numFields; // ソースフィールド数
+  int fieldShift; // 2224パターンを2323変換する場合のずらしが必要はフレーム
 };
 
 struct FMData;
 
 class PulldownPatterns
 {
-  PulldownPattern p2323, p2233, p30;
-  const PulldownPatternField* allpatterns[27];
+  enum { NUM_PATTERNS = 27 };
+  PulldownPattern p2323, p2224, p2233, p30;
+  int patternOffsets[4];
+  const PulldownPatternField* allpatterns[NUM_PATTERNS];
 public:
   PulldownPatterns();
 

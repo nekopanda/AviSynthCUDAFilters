@@ -69,14 +69,14 @@ public:
   Binding(char* _name, AVSValue _value) : name(_name), value(_value), next(NULL) {}
   ~Binding() { delete next; }
   Binding* Add(Binding* b) {  next = b; return b; }
-  void Activate(IScriptEnvironment* env);
+  void Activate(PNeoEnv env);
   AVSValue AsString(IScriptEnvironment* env);
 };
 
-void Binding::Activate(IScriptEnvironment* env) {
+void Binding::Activate(PNeoEnv env) {
   Binding* b = this;
   do {
-    env->SetVar(b->name, b->value);
+    env->SetGlobalVar(b->name, b->value);
     b = b->next;
   }
   while (b != NULL);
@@ -267,7 +267,11 @@ AVSValue RTWrapper::CreateConditionalFilter2(AVSValue args, IScriptEnvironment* 
     return Create("ConditionalFilter", 6, "show", AVSValue(newArgs, 9), env);
 }
 
-RTWrapper::RTWrapper(PClip _child, AVSValue args, IScriptEnvironment* env): GenericVideoFilter(_child) {
+RTWrapper::RTWrapper(PClip _child, AVSValue args, IScriptEnvironment* env_): GenericVideoFilter(_child) {
+    // check NeoEnv
+    PNeoEnv env = env_;
+    if (!env) env_->ThrowError("GRunT: This version of GRunT only support Avisynth Neo.");
+
     int i = args.ArraySize() - 2; // start of 'new' args
 
     binding = (args[i].Defined() ? BindVars(args[i].AsString(), env) : NULL);
@@ -279,30 +283,24 @@ Binding* RTWrapper::BindVars(const char* str, IScriptEnvironment* env) {
     return b.Parse(env);
 }
 
-PVideoFrame __stdcall RTWrapper::GetFrame(int n, IScriptEnvironment* env) {
-
-    AVSValue savedCurrFrame;
-
-    try {
-      savedCurrFrame = env->GetVar("current_frame");
+class GlobalVarFrame
+{
+    PNeoEnv env;
+    bool enable;
+public:
+    GlobalVarFrame(PNeoEnv env, bool enable) : env(env), enable(enable) {
+        if(enable) env->PushContextGlobal();
     }
-    catch (IScriptEnvironment::NotFound) {}
-    env->SetGlobalVar("current_frame", n);
+    ~GlobalVarFrame() {
+        if (enable) env->PopContextGlobal();
+    }
+};
 
-    if (local) env->PushContext();
-
+PVideoFrame __stdcall RTWrapper::GetFrame(int n, IScriptEnvironment* env_) {
+    PNeoEnv env = env_;
+    GlobalVarFrame var_frame(env, local);
     if (binding) binding->Activate(env);
-
-    PVideoFrame result = child->GetFrame(n, env);
-
-    if (local) env->PopContext();
-
-    if (savedCurrFrame.Defined()) {
-	env->SetVar("current_frame", savedCurrFrame);
-	env->SetGlobalVar("current_frame", savedCurrFrame);
-    }
-
-    return result;
+    return child->GetFrame(n, env);
 }
 
 AVSValue RTFunction(const char* name, AVSValue args, IScriptEnvironment* env) {
@@ -473,14 +471,19 @@ AVSValue __cdecl VPlaneMinMaxDifference(AVSValue args, void* user_data, IScriptE
     return RTFunction("VPlaneMinMaxDifference", args, env);
 }
 
-extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit2(IScriptEnvironment* env) {
+const AVS_Linkage *AVS_linkage = 0;
+
+extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors)
+{
+    AVS_linkage = vectors;
+
     // get Avisynth version number, for compatibility check:
-    float avsVersion = 0;
-    try {
-      AVSValue args[1];
-      avsVersion = (float)env->Invoke("VersionNumber", AVSValue(args, 0)).AsFloat();
-    }
-    catch (IScriptEnvironment::NotFound) { env->ThrowError("GRunT: internal error"); }
+    //float avsVersion = 0;
+    //try {
+    //  AVSValue args[1];
+    //  avsVersion = (float)env->Invoke("VersionNumber", AVSValue(args, 0)).AsFloat();
+    //}
+    //catch (IScriptEnvironment::NotFound) { env->ThrowError("GRunT: internal error"); }
 
     env->AddFunction("GRTConfig", "[local]b", RTConfig, 0);
 
@@ -491,7 +494,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit2(IScri
     env->AddFunction("GConditionalFilter","cccs[show]b[args]s[local]b", MakeConditionalFilter2, 0);
     env->AddFunction("GWriteFile",   "c[filename]ss+[append]b[flush]b[args]s[local]b", MakeWriteFile, 0);
     env->AddFunction("GWriteFileIf", "c[filename]ss+[append]b[flush]b[args]s[local]b", MakeWriteFileIf, 0);
-    if (avsVersion >= 2.58f) {
+    //if (avsVersion >= 2.58f) {
       // mechanism for same-name filters only works on 2.58 and later
       env->AddFunction("ScriptClip",    "cs[showx]b[after_frame]b[args]s[local]b", MakeScriptClip, 0);
       env->AddFunction("FrameEvaluate", "cs[showx]b[after_frame]b[args]s[local]b", MakeFrameEvaluate, 0);
@@ -499,38 +502,38 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit2(IScri
       env->AddFunction("ConditionalFilter","cccs[showx]b[args]s[local]b", MakeConditionalFilter2, 0);
       env->AddFunction("WriteFile",   "c[filenamex]ss+[append]b[flush]b[args]s[local]b", MakeWriteFile, 0);
       env->AddFunction("WriteFileIf", "c[filenamex]ss+[append]b[flush]b[args]s[local]b", MakeWriteFileIf, 0);
-    }
+    //}
 
     // Run-Time Functions:
-    env->AddFunction("AverageLuma","ci", AverageLuma, 0);
-    env->AddFunction("AverageChromaU","ci", AverageChromaU, 0);
-    env->AddFunction("AverageChromaV","ci", AverageChromaV, 0);
-    env->AddFunction("RGBDifference","cci", RGBDifference, 0);
-    env->AddFunction("LumaDifference","cci", LumaDifference, 0);
-    env->AddFunction("ChromaUDifference","cci", ChromaUDifference, 0);
-    env->AddFunction("ChromaVDifference","cci", ChromaVDifference, 0);
-    env->AddFunction("YDifferenceFromPrevious","ci", YDifferenceFromPrevious, 0);
-    env->AddFunction("UDifferenceFromPrevious","ci", UDifferenceFromPrevious, 0);
-    env->AddFunction("VDifferenceFromPrevious","ci", VDifferenceFromPrevious, 0);
-    env->AddFunction("RGBDifferenceFromPrevious","ci", RGBDifferenceFromPrevious, 0);
-    env->AddFunction("YDifferenceToNext","ci", YDifferenceToNext, 0);
-    env->AddFunction("UDifferenceToNext","ci", UDifferenceToNext, 0);
-    env->AddFunction("VDifferenceToNext","ci", VDifferenceToNext, 0);
-    env->AddFunction("RGBDifferenceToNext","ci", RGBDifferenceToNext, 0);
-    env->AddFunction("YPlaneMax","c[threshold]fi", YPlaneMax, 0);
-    env->AddFunction("YPlaneMin","c[threshold]fi", YPlaneMin, 0);
-    env->AddFunction("YPlaneMedian","ci", YPlaneMedian, 0);
-    env->AddFunction("YPlaneMinMaxDifference","c[threshold]fi", YPlaneMinMaxDifference, 0);
-    env->AddFunction("UPlaneMax","c[threshold]fi", UPlaneMax, 0);
-    env->AddFunction("UPlaneMin","c[threshold]fi", UPlaneMin, 0);
-    env->AddFunction("UPlaneMedian","ci", UPlaneMedian, 0);
-    env->AddFunction("UPlaneMinMaxDifference","c[threshold]fi", UPlaneMinMaxDifference, 0);
-    env->AddFunction("VPlaneMax","c[threshold]fi", VPlaneMax, 0);
-    env->AddFunction("VPlaneMin","c[threshold]fi", VPlaneMin, 0);
-    env->AddFunction("VPlaneMedian","ci", VPlaneMedian, 0);
-    env->AddFunction("VPlaneMinMaxDifference","c[threshold]fi", VPlaneMinMaxDifference, 0);
+    //env->AddFunction("AverageLuma","ci", AverageLuma, 0);
+    //env->AddFunction("AverageChromaU","ci", AverageChromaU, 0);
+    //env->AddFunction("AverageChromaV","ci", AverageChromaV, 0);
+    //env->AddFunction("RGBDifference","cci", RGBDifference, 0);
+    //env->AddFunction("LumaDifference","cci", LumaDifference, 0);
+    //env->AddFunction("ChromaUDifference","cci", ChromaUDifference, 0);
+    //env->AddFunction("ChromaVDifference","cci", ChromaVDifference, 0);
+    //env->AddFunction("YDifferenceFromPrevious","ci", YDifferenceFromPrevious, 0);
+    //env->AddFunction("UDifferenceFromPrevious","ci", UDifferenceFromPrevious, 0);
+    //env->AddFunction("VDifferenceFromPrevious","ci", VDifferenceFromPrevious, 0);
+    //env->AddFunction("RGBDifferenceFromPrevious","ci", RGBDifferenceFromPrevious, 0);
+    //env->AddFunction("YDifferenceToNext","ci", YDifferenceToNext, 0);
+    //env->AddFunction("UDifferenceToNext","ci", UDifferenceToNext, 0);
+    //env->AddFunction("VDifferenceToNext","ci", VDifferenceToNext, 0);
+    //env->AddFunction("RGBDifferenceToNext","ci", RGBDifferenceToNext, 0);
+    //env->AddFunction("YPlaneMax","c[threshold]fi", YPlaneMax, 0);
+    //env->AddFunction("YPlaneMin","c[threshold]fi", YPlaneMin, 0);
+    //env->AddFunction("YPlaneMedian","ci", YPlaneMedian, 0);
+    //env->AddFunction("YPlaneMinMaxDifference","c[threshold]fi", YPlaneMinMaxDifference, 0);
+    //env->AddFunction("UPlaneMax","c[threshold]fi", UPlaneMax, 0);
+    //env->AddFunction("UPlaneMin","c[threshold]fi", UPlaneMin, 0);
+    //env->AddFunction("UPlaneMedian","ci", UPlaneMedian, 0);
+    //env->AddFunction("UPlaneMinMaxDifference","c[threshold]fi", UPlaneMinMaxDifference, 0);
+    //env->AddFunction("VPlaneMax","c[threshold]fi", VPlaneMax, 0);
+    //env->AddFunction("VPlaneMin","c[threshold]fi", VPlaneMin, 0);
+    //env->AddFunction("VPlaneMedian","ci", VPlaneMedian, 0);
+    //env->AddFunction("VPlaneMinMaxDifference","c[threshold]fi", VPlaneMinMaxDifference, 0);
     // for testing:
-    env->AddFunction("BindStr","s", BindStr, 0);
+    //env->AddFunction("BindStr","s", BindStr, 0);
 
     return "'GRunT' Gavino's Run-Time plugin";
 }
