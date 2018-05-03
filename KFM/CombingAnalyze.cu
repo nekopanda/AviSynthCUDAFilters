@@ -381,6 +381,9 @@ public:
     return PVideoFrame();
   }
 
+  // CUDA”ñ‘Î‰ž
+  int __stdcall SetCacheHints(int cachehints, int frame_range) { return 0; }
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KFMFrameAnalyzeShow(
@@ -538,7 +541,9 @@ class KTelecine : public KFMFilterBase
 
   template <typename pixel_t>
   void DrawInfo(Frame& dst, int pattern, float cost, int fnum, PNeoEnv env) {
-    char buf[100]; sprintf(buf, "KFM: %d (%.1f) - %d", pattern, cost, fnum);
+    int number;
+    const char* patternName = patterns.PatternToString(pattern, number);
+    char buf[100]; sprintf(buf, "KFM: %s-%d (%d) (%.1f) - %d", patternName, number, pattern, cost, fnum);
     DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
   }
 

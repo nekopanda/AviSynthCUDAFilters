@@ -204,6 +204,14 @@ PulldownPattern::PulldownPattern(int nf0, int nf1, int nf2, int nf3)
         fields[fstart + f].merge = true;
       }
       fields[fstart + nf - 1].split = true;
+
+      // 縞なし24fps対応
+      if (nf0 == 4 && nf1 == 2 && nf2 == 2 && nf3 == 2) {
+        if (i < 2) {
+          fields[fstart + nf - 1].shift = true;
+        }
+      }
+
       fstart += nf;
     }
   }
@@ -226,26 +234,35 @@ PulldownPattern::PulldownPattern()
 PulldownPatterns::PulldownPatterns()
   : p2323(2, 3, 2, 3)
   , p2233(2, 2, 3, 3)
-  , p2224(2, 2, 2, 4)
+  , p2224(4, 2, 2, 2)
   , p30()
 {
   const PulldownPattern* patterns[] = { &p2323, &p2224, &p2233, &p30 };
+  int steps[] = { 1, 2, 1, 2 };
 
   int pi = 0;
   for (int p = 0; p < 4; ++p) {
     patternOffsets[p] = pi;
-    for (int i = 0; i < patterns[p]->GetCycleLength(); ++i) {
+    for (int i = 0; i < patterns[p]->GetCycleLength(); i += steps[p]) {
       allpatterns[pi++] = patterns[p]->GetPattern(i);
     }
   }
 
-  if (pi > NUM_PATTERNS) {
+  if (pi != NUM_PATTERNS) {
     throw "Error !!!";
   }
 }
 
+const char* PulldownPatterns::PatternToString(int patternIndex, int& index) const
+{
+  const char* names[] = { "2323", "2224", "2233", "30p" };
+  auto pattern = std::upper_bound(patternOffsets, patternOffsets + 4, patternIndex) - patternOffsets - 1;
+  index = patternIndex - patternOffsets[pattern];
+  return names[pattern];
+}
+
 Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
-  Frame24Info info;
+  Frame24Info info = { 0 };
   info.cycleIndex = n24 / 4;
   info.frameIndex = n24 % 4;
 
@@ -264,7 +281,7 @@ Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
   const PulldownPatternField* ptn = allpatterns[patternIndex];
   int fldstart = 0;
   int nframes = 0;
-  for (int i = 0; i < 14; ++i) {
+  for (int i = 0; i < 16; ++i) {
     if (ptn[i].split) {
       if (fldstart >= 1) {
         if (nframes++ == searchFrame) {
@@ -282,14 +299,22 @@ Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
 }
 
 Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
-  Frame24Info info;
+  Frame24Info info = { 0 };
   info.cycleIndex = n60 / 10;
+
+  // splitでフレームの切り替わりを見る
+  // splitは前のフレームの最後のフィールドとなるので
+  // -2フィールド目から見ると検出できる最初のフレームは
+  // 最も早くて-1フィールドスタート
+  // これを前提にアルゴリズムが組まれていることに注意
 
   const PulldownPatternField* ptn = allpatterns[patternIndex];
   int fldstart = 0;
   int nframes = -1;
   int findex = n60 % 10;
-  for (int i = 0; i < 14; ++i) {
+
+  // 最大4フィールドがあるので、2+10+4だけ回してる
+  for (int i = 0; i < 16; ++i) {
     if (ptn[i].split) {
       if (fldstart >= 1) {
         ++nframes;
@@ -299,32 +324,26 @@ Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
         info.frameIndex = nframes;
         info.fieldStartIndex = fldstart - 2;
         info.numFields = nextfldstart - fldstart;
+        info.fieldShift = ptn[findex + 2].shift ? 1 : 0;
         return info;
       }
       fldstart = i + 1;
     }
   }
 
-  info.frameIndex = ++nframes;
-  info.fieldStartIndex = fldstart - 2;
-  info.numFields = 14 - fldstart;
-  return info;
+  throw "Error !!!";
 }
 
-std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth) const
+std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth, bool enable30p) const
 {
-  const PulldownPattern* patterns[] = { &p2323, &p2224, &p2233, &p30 };
-
-	std::vector<float> mtshima(NUM_PATTERNS);
-	std::vector<float> mtshimacost(NUM_PATTERNS);
+  int numPatterns = enable30p ? NUM_PATTERNS : (NUM_PATTERNS - 1);
+	std::vector<float> mtshima(numPatterns);
+	std::vector<float> mtshimacost(numPatterns);
 
   // 各スコアを計算
-  for (int p = 0, pi = 0; p < 4; ++p) {
-    for (int i = 0; i < patterns[p]->GetCycleLength(); ++i, ++pi) {
-      auto pattern = patterns[p]->GetPattern(i);
-			mtshima[pi] = RSplitScore(pattern, data->mftr);
-			mtshimacost[pi] = RSplitCost(pattern, data->mftr, data->mftcost, costth);
-    }
+  for (int i = 0; i < numPatterns; ++i) {
+    mtshima[i] = RSplitScore(allpatterns[i], data->mftr);
+    mtshimacost[i] = RSplitCost(allpatterns[i], data->mftr, data->mftcost, costth);
   }
 
 	auto makeRet = [&](int n) {
@@ -345,13 +364,17 @@ class KFMCycleAnalyze : public GenericVideoFilter
 	PulldownPatterns patterns;
 	float lscale;
 	float costth;
+  float psplit;
+  bool enable30p;
 public:
-  KFMCycleAnalyze(PClip fmframe, PClip source, float lscale, float costth, IScriptEnvironment* env)
+  KFMCycleAnalyze(PClip fmframe, PClip source, float lscale, float costth, float psplit, bool enable30p, IScriptEnvironment* env)
 		: GenericVideoFilter(fmframe)
 		, source(source)
     , srcvi(source->GetVideoInfo())
 		, lscale(lscale)
 		, costth(costth)
+    , psplit(psplit)
+    , enable30p(enable30p)
 	{
     int out_bytes = sizeof(std::pair<int, float>);
     vi.pixel_type = VideoInfo::CS_BGR32;
@@ -384,7 +407,7 @@ public:
 			data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / vbase;
 		}
 
-		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth);
+		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth, enable30p);
 
     Frame dst = env->NewVideoFrame(vi);
     uint8_t* dstp = dst.GetWritePtr<uint8_t>();
@@ -404,7 +427,9 @@ public:
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
 			(float)args[2].AsFloat(5.0f), // lscale
-			(float)args[3].AsFloat(1.0f), // costth
+      (float)args[3].AsFloat(1.0f), // costth
+      (float)args[4].AsFloat(0.5f), // psplit
+      args[5].AsBool(true), // enable30p
       env
     );
   }
@@ -555,7 +580,7 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
-  env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f", KFMCycleAnalyze::Create, 0);
+  env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f[psplit]f[enable30p]b", KFMCycleAnalyze::Create, 0);
   env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 }

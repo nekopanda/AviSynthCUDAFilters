@@ -19,6 +19,7 @@ struct FMCount {
 struct PulldownPatternField {
 	bool split; // 次のフィールドとは別フレーム
 	bool merge; // 3フィールドの最初のフィールド
+  bool shift; // 後の24pフレームを参照するフィールド
 };
 
 struct PulldownPattern {
@@ -28,6 +29,8 @@ struct PulldownPattern {
 	PulldownPattern(int nf0, int nf1, int nf2, int nf3); // 24p
 	PulldownPattern(); // 30p
 
+  // パターンは10フィールド+前後2フィールドずつの合わせて
+  // 14フィールド分をみる想定。14フィールドの前頭へのポインタを返す
   const PulldownPatternField* GetPattern(int n) const {
     return &fields[10 + n - 2];
   }
@@ -48,7 +51,7 @@ struct FMData;
 
 class PulldownPatterns
 {
-  enum { NUM_PATTERNS = 27 };
+  enum { NUM_PATTERNS = 21 };
   PulldownPattern p2323, p2224, p2233, p30;
   int patternOffsets[4];
   const PulldownPatternField* allpatterns[NUM_PATTERNS];
@@ -59,6 +62,8 @@ public:
     return allpatterns[patternIndex];
   }
 
+  const char* PatternToString(int patternIndex, int& index) const;
+
   // パターンと24fpsのフレーム番号からフレーム情報を取得
   Frame24Info GetFrame24(int patternIndex, int n24) const;
 
@@ -67,7 +72,7 @@ public:
   // fieldStartIndexとnumFieldsは正しくない可能性があるので注意
   Frame24Info GetFrame60(int patternIndex, int n60) const;
 
-  std::pair<int, float> Matching(const FMData* data, int width, int height, float costth) const;
+  std::pair<int, float> Matching(const FMData* data, int width, int height, float costth, bool enable30p) const;
 
 	static bool Is30p(int patternIndex) { return patternIndex >= 18; }
 };
