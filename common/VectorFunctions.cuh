@@ -196,6 +196,18 @@ static __device__ __host__ int4 min(int4 a, int4 b) {
   return r;
 }
 
+// max(uchar4, uchar4)
+static __device__ __host__ uchar4 max(uchar4 a, uchar4 b) {
+  uchar4 r = { (unsigned char)max(a.x, b.x), (unsigned char)max(a.y, b.y), (unsigned char)max(a.z, b.z), (unsigned char)max(a.w, b.w) };
+  return r;
+}
+
+// max(ushort4, ushort4)
+static __device__ __host__ ushort4 max(ushort4 a, ushort4 b) {
+  ushort4 r = { (unsigned short)max(a.x, b.x), (unsigned short)max(a.y, b.y), (unsigned short)max(a.z, b.z), (unsigned short)max(a.w, b.w) };
+  return r;
+}
+
 // max(int4, int4)
 static __device__ __host__ int4 max(int4 a, int4 b) {
   int4 r = { max(a.x, b.x), max(a.y, b.y), max(a.z, b.z), max(a.w, b.w) };
@@ -228,6 +240,10 @@ static __device__ __host__ float4 abs(float4 a) {
 static __device__ __host__ int4 abs(int4 a) {
 	int4 r = { abs(a.x), abs(a.y), abs(a.z), abs(a.w) };
 	return r;
+}
+
+static __device__ __host__ int absdiff(int a, int b) {
+  return abs(a - b);
 }
 
 static __device__ __host__ int4 absdiff(uchar4 a, uchar4 b) {

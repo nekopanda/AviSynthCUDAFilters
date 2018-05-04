@@ -13,8 +13,9 @@ protected:
   void CFieldDiffTest(int nt, bool chroma);
   void CFrameDiffDupTest(int blocksize, bool chroma);
 
-  void DecombUCFTest(TEST_FRAMES tf, int chroma, bool show);
   void DecombUCF24Test(TEST_FRAMES tf, int chroma, bool show);
+
+  void FrameAnalyze2Test(TEST_FRAMES tf, int chroma);
 };
 
 #pragma region MergeStatic
@@ -726,3 +727,43 @@ TEST_F(KFMTest, DecombUCF_C1Show)
 
 #pragma endregion
 
+#pragma region FrameAnalyze2
+
+void KFMTest::FrameAnalyze2Test(TEST_FRAMES tf, int chroma)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KFM.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\").OnCPU(0)" << std::endl;
+    out << "src.KFMFrameAnalyze2Show(src.KFMSuper(), 5, 5, 5, 5)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, tf, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(KFMTest, FrameAnalyze2)
+{
+  FrameAnalyze2Test(TF_MID, 0);
+}
+
+#pragma endregion

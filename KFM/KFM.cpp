@@ -237,8 +237,8 @@ PulldownPatterns::PulldownPatterns()
   , p2224(4, 2, 2, 2)
   , p30()
 {
-  const PulldownPattern* patterns[] = { &p2323, &p2224, &p2233, &p30 };
-  int steps[] = { 1, 2, 1, 2 };
+  const PulldownPattern* patterns[] = { &p2323, &p2233, &p2224, &p30 };
+  int steps[] = { 1, 1, 2, 2 };
 
   int pi = 0;
   for (int p = 0; p < 4; ++p) {
@@ -255,7 +255,7 @@ PulldownPatterns::PulldownPatterns()
 
 const char* PulldownPatterns::PatternToString(int patternIndex, int& index) const
 {
-  const char* names[] = { "2323", "2224", "2233", "30p" };
+  const char* names[] = { "2323", "2233", "2224", "30p" };
   auto pattern = std::upper_bound(patternOffsets, patternOffsets + 4, patternIndex) - patternOffsets - 1;
   index = patternIndex - patternOffsets[pattern];
   return names[pattern];

@@ -302,11 +302,6 @@ static __device__ __host__ int random_range(uint8_t random, char range) {
 	return ((((range << 1) + 1) * (int)random) >> 8) - range;
 }
 
-static __device__ __host__ int absdiff(int a, int b) {
-	int r = a - b;
-	return (r >= 0) ? r : -r;
-}
-
 template <typename pixel_t, int sample_mode, bool blur_first>
 void cpu_reduce_banding(
 	pixel_t* dst, const pixel_t* src, const uint8_t* rand,

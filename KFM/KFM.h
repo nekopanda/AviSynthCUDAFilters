@@ -52,7 +52,7 @@ struct FMData;
 class PulldownPatterns
 {
   enum { NUM_PATTERNS = 21 };
-  PulldownPattern p2323, p2224, p2233, p30;
+  PulldownPattern p2323, p2233, p2224, p30;
   int patternOffsets[4];
   const PulldownPatternField* allpatterns[NUM_PATTERNS];
 public:
@@ -74,7 +74,7 @@ public:
 
   std::pair<int, float> Matching(const FMData* data, int width, int height, float costth, bool enable30p) const;
 
-	static bool Is30p(int patternIndex) { return patternIndex >= 18; }
+	static bool Is30p(int patternIndex) { return patternIndex == NUM_PATTERNS - 1; }
 };
 
 #define COMBE_FLAG_STR "KRemoveCombe_Flag"
