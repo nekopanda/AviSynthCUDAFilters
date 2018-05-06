@@ -435,92 +435,6 @@ public:
   }
 };
 
-class KShowCombe : public GenericVideoFilter
-{
-  typedef uint8_t pixel_t;
-
-  int logUVx;
-  int logUVy;
-  int nBlkX, nBlkY;
-
-  void ShowCombe(Frame& src, Frame& flag, Frame& dst)
-  {
-    const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
-    const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
-    const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
-    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
-    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
-    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
-    const uint8_t* flagp = flag.GetReadPtr<uint8_t>();
-
-    int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
-    int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
-    int widthUV = vi.width >> logUVx;
-    int heightUV = vi.height >> logUVy;
-    int overlapUVx = OVERLAP >> logUVx;
-    int overlapUVy = OVERLAP >> logUVy;
-
-    int blue[] = { 73, 230, 111 };
-
-    for (int by = 0; by < nBlkY; ++by) {
-      for (int bx = 0; bx < nBlkX; ++bx) {
-        int yStart = by * OVERLAP;
-        int yEnd = yStart + OVERLAP;
-        int xStart = bx * OVERLAP;
-        int xEnd = xStart + OVERLAP;
-        int yStartUV = by * overlapUVy;
-        int yEndUV = yStartUV + overlapUVy;
-        int xStartUV = bx * overlapUVx;
-        int xEndUV = xStartUV + overlapUVx;
-
-        bool isCombe = flagp[bx + by * nBlkX] != 0;
-
-        for (int y = yStart; y < yEnd; ++y) {
-          for (int x = xStart; x < xEnd; ++x) {
-            dstY[x + y * pitchY] = isCombe ? blue[0] : srcY[x + y * pitchY];
-          }
-        }
-
-        for (int y = yStartUV; y < yEndUV; ++y) {
-          for (int x = xStartUV; x < xEndUV; ++x) {
-            dstU[x + y * pitchUV] = isCombe ? blue[1] : srcU[x + y * pitchUV];
-            dstV[x + y * pitchUV] = isCombe ? blue[2] : srcV[x + y * pitchUV];
-          }
-        }
-      }
-    }
-  }
-public:
-  KShowCombe(PClip rc, IScriptEnvironment* env)
-    : GenericVideoFilter(rc)
-    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
-    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-  {
-    nBlkX = nblocks(vi.width, OVERLAP);
-    nBlkY = nblocks(vi.height, OVERLAP);
-  }
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
-  {
-    Frame src = child->GetFrame(n, env);
-    Frame flag = WrapSwitchFragFrame(
-      src.GetProperty(COMBE_FLAG_STR)->GetFrame());
-    Frame dst = env->NewVideoFrame(vi);
-
-    ShowCombe(src, flag, dst);
-
-    return dst.frame;
-  }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-  {
-    return new KShowCombe(
-      args[0].AsClip(),       // source
-      env
-    );
-  }
-};
-
 class Print : public GenericVideoFilter
 {
   std::string str;
@@ -581,7 +495,6 @@ void AddFuncFM(IScriptEnvironment* env)
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
   env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f[psplit]f[enable30p]b", KFMCycleAnalyze::Create, 0);
-  env->AddFunction("KShowCombe", "c", KShowCombe::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 }
 

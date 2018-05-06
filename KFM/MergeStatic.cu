@@ -356,13 +356,13 @@ class KAnalyzeStatic : public KFMFilterBase
   }
 
 public:
-  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, PClip super, PNeoEnv env)
+  KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, PClip pad, PNeoEnv env)
     : KFMFilterBase(clip30)
     , diffclip(diffclip)
     , thcombe(thcombe)
     , thdiff(thdiff)
     , padvi(vi)
-    , superclip(super)
+    , superclip(pad)
   {
     if (logUVx != 1 || logUVy != 1) env->ThrowError("[KAnalyzeStatic] Unsupported format (only supports YV12)");
 
@@ -396,7 +396,7 @@ public:
       diffclip,     // 
       (float)args[1].AsFloat(30),     // thcombe
       (float)args[2].AsFloat(15),     // thdiff
-      args[3].AsClip(),        // super
+      args[3].AsClip(),        // pad
       env);
   }
 };
@@ -545,6 +545,6 @@ void AddFuncMergeStatic(IScriptEnvironment* env)
 {
   env->AddFunction("KTemporalDiff", "c", KTemporalDiff::Create, 0);
 
-  env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f[super]c", KAnalyzeStatic::Create, 0);
+  env->AddFunction("KAnalyzeStatic", "c[thcombe]f[thdiff]f[pad]c", KAnalyzeStatic::Create, 0);
   env->AddFunction("KMergeStatic", "ccc", KMergeStatic::Create, 0);
 }

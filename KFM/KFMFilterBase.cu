@@ -121,6 +121,37 @@ template __global__ void kl_average(uchar4* dst, const uchar4* __restrict__ src0
 template __global__ void kl_average(ushort4* dst, const ushort4* __restrict__ src0, const ushort4* __restrict__ src1, int width, int height, int pitch);
 
 template <typename pixel_t>
+void cpu_max(pixel_t* dst, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch)
+{
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      auto tmp = max(to_int(src0[x + y * pitch]), to_int(src1[x + y * pitch]));
+      //dst[x + y * pitch] = VHelper<pixel_t>::cast_to(tmp);
+      dst[x + y * pitch] = tmp;
+    }
+  }
+}
+
+template void cpu_max(uint8_t* dst, const uint8_t* __restrict__ src0, const uint8_t* __restrict__ src1, int width, int height, int pitch);
+//template void cpu_max(uchar4* dst, const uchar4* __restrict__ src0, const uchar4* __restrict__ src1, int width, int height, int pitch);
+
+template <typename pixel_t>
+__global__ void kl_max(pixel_t* dst, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    auto tmp = max(to_int(src0[x + y * pitch]), to_int(src1[x + y * pitch]));
+    //dst[x + y * pitch] = VHelper<pixel_t>::cast_to(tmp);
+    dst[x + y * pitch] = tmp;
+  }
+}
+
+template __global__ void kl_max(uint8_t* dst, const uint8_t* __restrict__ src0, const uint8_t* __restrict__ src1, int width, int height, int pitch);
+//template __global__ void kl_max(uchar4* dst, const uchar4* __restrict__ src0, const uchar4* __restrict__ src1, int width, int height, int pitch);
+
+template <typename pixel_t>
 void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
 {
   for (int y = 0; y < vpad; ++y) {
@@ -536,7 +567,7 @@ template void KFMFilterBase::LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
 
 template <typename pixel_t>
 void KFMFilterBase::AnalyzeFrame(Frame& f0, Frame& f1, Frame& flag,
-  const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env)
+  const FrameOldAnalyzeParam* prmY, const FrameOldAnalyzeParam* prmC, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -582,9 +613,9 @@ void KFMFilterBase::AnalyzeFrame(Frame& f0, Frame& f1, Frame& flag,
 }
 
 template void KFMFilterBase::AnalyzeFrame<uint8_t>(Frame& f0, Frame& f1, Frame& flag,
-  const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env);
+  const FrameOldAnalyzeParam* prmY, const FrameOldAnalyzeParam* prmC, PNeoEnv env);
 template void KFMFilterBase::AnalyzeFrame<uint16_t>(Frame& f0, Frame& f1, Frame& flag,
-  const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env);
+  const FrameOldAnalyzeParam* prmY, const FrameOldAnalyzeParam* prmC, PNeoEnv env);
 
 void KFMFilterBase::MergeUVFlags(Frame& flag, PNeoEnv env)
 {
@@ -726,6 +757,195 @@ void KFMFilterBase::CompareFields(Frame& src, Frame& flag, PNeoEnv env)
 
 template void KFMFilterBase::CompareFields<uint8_t>(Frame& src, Frame& flag, PNeoEnv env);
 template void KFMFilterBase::CompareFields<uint16_t>(Frame& src, Frame& flag, PNeoEnv env);
+
+template <typename pixel_t>
+void cpu_max_extend_blocks(pixel_t* dstp, int pitch, int nBlkX, int nBlkY)
+{
+  for (int by = 1; by < nBlkY; ++by) {
+    dstp[0 + by * pitch] = dstp[0 + 1 + (by + 0) * pitch];
+    for (int bx = 1; bx < nBlkX - 1; ++bx) {
+      dstp[bx + by * pitch] = max(
+        dstp[bx + by * pitch], dstp[bx + 1 + (by + 0) * pitch]);
+    }
+  }
+  for (int bx = 0; bx < nBlkX; ++bx) {
+    dstp[bx] = dstp[bx + pitch];
+  }
+  for (int by = 1; by < nBlkY - 1; ++by) {
+    for (int bx = 0; bx < nBlkX; ++bx) {
+      dstp[bx + by * pitch] = max(
+        dstp[bx + by * pitch], dstp[bx + 0 + (by + 1) * pitch]);
+    }
+  }
+}
+
+template <typename pixel_t>
+__global__ void kl_max_extend_blocks_h(pixel_t* dstp, const pixel_t* srcp, int pitch, int nBlkX, int nBlkY)
+{
+  int bx = threadIdx.x + blockIdx.x * blockDim.x;
+  int by = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (bx < nBlkX && by < nBlkY) {
+    if (bx == nBlkX - 1) {
+      // 書き込む予定がないところにソースをコピーする
+      dstp[bx + by * pitch] = srcp[bx + by * pitch];
+    }
+    else if (bx == 0) {
+      dstp[bx + by * pitch] = srcp[bx + 1 + (by + 0) * pitch];
+    }
+    else {
+      dstp[bx + by * pitch] = max(
+        srcp[bx + 0 + (by + 0) * pitch], srcp[bx + 1 + (by + 0) * pitch]);
+    }
+  }
+}
+
+template <typename pixel_t>
+__global__ void kl_max_extend_blocks_v(pixel_t* dstp, const pixel_t* srcp, int pitch, int nBlkX, int nBlkY)
+{
+  int bx = threadIdx.x + blockIdx.x * blockDim.x;
+  int by = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (bx < nBlkX && by < nBlkY) {
+    if (by == nBlkY - 1) {
+      // 書き込む予定がないところにソースをコピーする
+      dstp[bx + by * pitch] = srcp[bx + by * pitch];
+    }
+    else if (by == 0) {
+      dstp[bx + by * pitch] = srcp[bx + 0 + (by + 1) * pitch];
+    }
+    else {
+      dstp[bx + by * pitch] = max(
+        srcp[bx + 0 + (by + 0) * pitch], srcp[bx + 0 + (by + 1) * pitch]);
+    }
+  }
+}
+
+template <typename pixel_t>
+void KFMFilterBase::ExtendBlocks(Frame& dst, Frame& tmp, bool uv, PNeoEnv env)
+{
+  pixel_t* tmpY = tmp.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* tmpU = tmp.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* tmpV = tmp.GetWritePtr<pixel_t>(PLANAR_V);
+  pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+
+  int pitchY = tmp.GetPitch<pixel_t>(PLANAR_Y);
+  int pitchUV = tmp.GetPitch<pixel_t>(PLANAR_U);
+  int width = tmp.GetWidth<pixel_t>(PLANAR_Y);
+  int widthUV = tmp.GetWidth<pixel_t>(PLANAR_U);
+  int height = tmp.GetHeight(PLANAR_Y);
+  int heightUV = tmp.GetHeight(PLANAR_U);
+
+  if (IS_CUDA) {
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+    dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
+    kl_max_extend_blocks_h << <blocks, threads >> >(tmpY, dstY, pitchY, width, height);
+    kl_max_extend_blocks_v << <blocks, threads >> >(dstY, tmpY, pitchY, width, height);
+    DEBUG_SYNC;
+    if (uv) {
+      kl_max_extend_blocks_h << <blocksUV, threads >> > (tmpU, dstU, pitchUV, widthUV, heightUV);
+      kl_max_extend_blocks_v << <blocksUV, threads >> > (dstU, tmpU, pitchUV, widthUV, heightUV);
+      DEBUG_SYNC;
+      kl_max_extend_blocks_h << <blocksUV, threads >> > (tmpV, dstV, pitchUV, widthUV, heightUV);
+      kl_max_extend_blocks_v << <blocksUV, threads >> > (dstV, tmpV, pitchUV, widthUV, heightUV);
+      DEBUG_SYNC;
+    }
+  }
+  else {
+    cpu_max_extend_blocks(dstY, pitchY, width, height);
+    if (uv) {
+      cpu_max_extend_blocks(dstU, pitchUV, widthUV, heightUV);
+      cpu_max_extend_blocks(dstV, pitchUV, widthUV, heightUV);
+    }
+  }
+}
+
+template void KFMFilterBase::ExtendBlocks<uint8_t>(Frame& dst, Frame& tmp, bool uv, PNeoEnv env);
+template void KFMFilterBase::ExtendBlocks<uchar4>(Frame& dst, Frame& tmp, bool uv, PNeoEnv env);
+
+template <typename vpixel_t, typename fpixel_t>
+void cpu_merge(vpixel_t* dst,
+  const vpixel_t* src24, const vpixel_t* src60,
+  int width, int height, int pitch,
+  const fpixel_t* flagp, int fpitch)
+{
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      int4 combe = to_int(flagp[x + y * fpitch]);
+      int4 invcombe = VHelper<int4>::make(128) - combe;
+      int4 tmp = (combe * to_int(src60[x + y * pitch]) + invcombe * to_int(src24[x + y * pitch]) + 64) >> 7;
+      dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(tmp);
+    }
+  }
+}
+
+template <typename vpixel_t, typename fpixel_t>
+__global__ void kl_merge(vpixel_t* dst,
+  const vpixel_t* src24, const vpixel_t* src60,
+  int width, int height, int pitch,
+  const fpixel_t* flagp, int fpitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    int4 combe = to_int(flagp[x + y * fpitch]);
+    int4 invcombe = VHelper<int4>::make(128) - combe;
+    int4 tmp = (combe * to_int(src60[x + y * pitch]) + invcombe * to_int(src24[x + y * pitch]) + 64) >> 7;
+    dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+template <typename pixel_t>
+void KFMFilterBase::MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env)
+{
+  typedef typename VectorType<pixel_t>::type vpixel_t;
+  const vpixel_t* src24Y = src24.GetReadPtr<vpixel_t>(PLANAR_Y);
+  const vpixel_t* src24U = src24.GetReadPtr<vpixel_t>(PLANAR_U);
+  const vpixel_t* src24V = src24.GetReadPtr<vpixel_t>(PLANAR_V);
+  const vpixel_t* src60Y = src60.GetReadPtr<vpixel_t>(PLANAR_Y);
+  const vpixel_t* src60U = src60.GetReadPtr<vpixel_t>(PLANAR_U);
+  const vpixel_t* src60V = src60.GetReadPtr<vpixel_t>(PLANAR_V);
+  vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+  vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+  vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
+  const uchar4* flagY = flag.GetReadPtr<uchar4>(PLANAR_Y);
+  const uchar4* flagC = flag.GetReadPtr<uchar4>(PLANAR_U);
+
+  int pitchY = src24.GetPitch<vpixel_t>(PLANAR_Y);
+  int pitchUV = src24.GetPitch<vpixel_t>(PLANAR_U);
+  int width4 = vi.width >> 2;
+  int width4UV = width4 >> logUVx;
+  int heightUV = vi.height >> logUVy;
+  int fpitchY = flag.GetPitch<uchar4>(PLANAR_Y);
+  int fpitchUV = flag.GetPitch<uchar4>(PLANAR_U);
+
+  if (IS_CUDA) {
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+    dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
+    kl_merge << <blocks, threads >> >(
+      dstY, src24Y, src60Y, width4, vi.height, pitchY, flagY, fpitchY);
+    DEBUG_SYNC;
+    kl_merge << <blocksUV, threads >> >(
+      dstU, src24U, src60U, width4UV, heightUV, pitchUV, flagC, fpitchUV);
+    DEBUG_SYNC;
+    kl_merge << <blocksUV, threads >> >(
+      dstV, src24V, src60V, width4UV, heightUV, pitchUV, flagC, fpitchUV);
+    DEBUG_SYNC;
+  }
+  else {
+    cpu_merge(dstY, src24Y, src60Y, width4, vi.height, pitchY, flagY, fpitchY);
+    cpu_merge(dstU, src24U, src60U, width4UV, heightUV, pitchUV, flagC, fpitchUV);
+    cpu_merge(dstV, src24V, src60V, width4UV, heightUV, pitchUV, flagC, fpitchUV);
+  }
+}
+
+template void KFMFilterBase::MergeBlock<uint8_t>(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env);
+template void KFMFilterBase::MergeBlock<uint16_t>(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env);
 
 KFMFilterBase::KFMFilterBase(PClip _child)
   : GenericVideoFilter(_child)

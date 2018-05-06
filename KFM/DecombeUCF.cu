@@ -1002,12 +1002,12 @@ class KAnalyzeNoise : public KFMFilterBase
     return dst.frame;
   }
 public:
-  KAnalyzeNoise(PClip src, PClip noise, PClip super, IScriptEnvironment* env)
+  KAnalyzeNoise(PClip src, PClip noise, PClip pad, IScriptEnvironment* env)
     : KFMFilterBase(src)
     , noiseclip(noise)
     , srcvi(vi)
     , padvi(vi)
-    , superclip(super)
+    , superclip(pad)
   {
     if (srcvi.width & 3) env->ThrowError("[KAnalyzeNoise]: width must be multiple of 4");
     if (srcvi.height & 3) env->ThrowError("[KAnalyzeNoise]: height must be multiple of 4");
@@ -1030,7 +1030,7 @@ public:
     meta.noiseUVh = noisevi.height >> noisevi.GetPlaneHeightSubsampling(PLANAR_U);
     UCFNoiseMeta::SetParam(vi, &meta);
 
-    if (!(GetDeviceTypes(src) & GetDeviceTypes(noise) & GetDeviceTypes(super))) {
+    if (!(GetDeviceTypes(src) & GetDeviceTypes(noise) & GetDeviceTypes(pad))) {
       env->ThrowError("[KAnalyzeNoise] Device unmatch. Three sources must be same device.");
     }
   }
@@ -1059,7 +1059,7 @@ public:
     return new KAnalyzeNoise(
       args[0].AsClip(),       // src
       args[1].AsClip(),       // noise
-      args[2].Defined() ? args[2].AsClip() : nullptr,       // super
+      args[2].Defined() ? args[2].AsClip() : nullptr,       // pad
       env
     );
   }

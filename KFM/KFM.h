@@ -4,7 +4,6 @@
 
 enum {
   OVERLAP = 8,
-  BLOCK_SIZE = OVERLAP * 2,
   VPAD = 4,
 
   MOVE = 1,
@@ -76,8 +75,6 @@ public:
 
 	static bool Is30p(int patternIndex) { return patternIndex == NUM_PATTERNS - 1; }
 };
-
-#define COMBE_FLAG_STR "KRemoveCombe_Flag"
 
 enum {
   COMBE_FLAG_PAD_H = 4,

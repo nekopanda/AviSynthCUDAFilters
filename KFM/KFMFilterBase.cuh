@@ -3,12 +3,12 @@
 #include <avisynth.h>
 #include "Frame.h"
 
-struct FrameAnalyzeParam {
+struct FrameOldAnalyzeParam {
   int threshM;
   int threshS;
   int threshLS;
 
-  FrameAnalyzeParam(int M, int S, int LS)
+  FrameOldAnalyzeParam(int M, int S, int LS)
     : threshM(M)
     , threshS(S * 6)
     , threshLS(LS * 6)
@@ -35,7 +35,7 @@ protected:
 
   template <typename pixel_t>
   void AnalyzeFrame(Frame& f0, Frame& f1, Frame& flag,
-    const FrameAnalyzeParam* prmY, const FrameAnalyzeParam* prmC, PNeoEnv env);
+    const FrameOldAnalyzeParam* prmY, const FrameOldAnalyzeParam* prmC, PNeoEnv env);
 
   void MergeUVFlags(Frame& flag, PNeoEnv env);
 
@@ -50,6 +50,12 @@ protected:
 
   template <typename pixel_t>
   void CompareFields(Frame& src, Frame& flag, PNeoEnv env);
+
+  template <typename pixel_t>
+  void ExtendBlocks(Frame& dst, Frame& tmp, bool uv, PNeoEnv env);
+
+  template <typename pixel_t>
+  void MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env);
 
 public:
   KFMFilterBase(PClip _child);
@@ -85,6 +91,14 @@ void cpu_average(pixel_t* dst, const pixel_t* __restrict__ src0,
 
 template <typename pixel_t>
 __global__ void kl_average(pixel_t* dst, const pixel_t* __restrict__ src0,
+  const pixel_t* __restrict__ src1, int width, int height, int pitch);
+
+template <typename pixel_t>
+void cpu_max(pixel_t* dst, const pixel_t* __restrict__ src0,
+  const pixel_t* __restrict__ src1, int width, int height, int pitch);
+
+template <typename pixel_t>
+__global__ void kl_max(pixel_t* dst, const pixel_t* __restrict__ src0,
   const pixel_t* __restrict__ src1, int width, int height, int pitch);
 
 template <typename pixel_t>
