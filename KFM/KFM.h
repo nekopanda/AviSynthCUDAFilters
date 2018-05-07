@@ -52,7 +52,7 @@ class PulldownPatterns
 {
   enum { NUM_PATTERNS = 21 };
   PulldownPattern p2323, p2233, p2224, p30;
-  int patternOffsets[4];
+  int patternOffsets[5];
   const PulldownPatternField* allpatterns[NUM_PATTERNS];
 public:
   PulldownPatterns();
@@ -71,7 +71,7 @@ public:
   // fieldStartIndex‚ÆnumFields‚Í³‚µ‚­‚È‚¢‰Â”\«‚ª‚ ‚é‚Ì‚Å’ˆÓ
   Frame24Info GetFrame60(int patternIndex, int n60) const;
 
-  std::pair<int, float> Matching(const FMData* data, int width, int height, float costth, bool enable30p) const;
+  std::pair<int, float> Matching(const FMData* data, int width, int height, float costth, float adj2224, float adj30) const;
 
 	static bool Is30p(int patternIndex) { return patternIndex == NUM_PATTERNS - 1; }
 };

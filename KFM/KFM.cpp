@@ -247,6 +247,7 @@ PulldownPatterns::PulldownPatterns()
       allpatterns[pi++] = patterns[p]->GetPattern(i);
     }
   }
+  patternOffsets[4] = pi;
 
   if (pi != NUM_PATTERNS) {
     throw "Error !!!";
@@ -334,16 +335,23 @@ Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
   throw "Error !!!";
 }
 
-std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth, bool enable30p) const
+std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth, float adj2224, float adj30) const
 {
-  int numPatterns = enable30p ? NUM_PATTERNS : (NUM_PATTERNS - 1);
-	std::vector<float> mtshima(numPatterns);
-	std::vector<float> mtshimacost(numPatterns);
+	std::vector<float> mtshima(NUM_PATTERNS);
+	std::vector<float> mtshimacost(NUM_PATTERNS);
 
   // 各スコアを計算
-  for (int i = 0; i < numPatterns; ++i) {
+  for (int i = 0; i < NUM_PATTERNS; ++i) {
     mtshima[i] = RSplitScore(allpatterns[i], data->mftr);
     mtshimacost[i] = RSplitCost(allpatterns[i], data->mftr, data->mftcost, costth);
+  }
+
+  // 調整
+  for (int i = patternOffsets[2]; i < patternOffsets[3]; ++i) {
+    mtshima[i] -= adj2224;
+  }
+  for (int i = patternOffsets[3]; i < patternOffsets[4]; ++i) {
+    mtshima[i] -= adj30;
   }
 
 	auto makeRet = [&](int n) {
@@ -364,17 +372,17 @@ class KFMCycleAnalyze : public GenericVideoFilter
 	PulldownPatterns patterns;
 	float lscale;
 	float costth;
-  float psplit;
-  bool enable30p;
+  float adj2224;
+  float adj30;
 public:
-  KFMCycleAnalyze(PClip fmframe, PClip source, float lscale, float costth, float psplit, bool enable30p, IScriptEnvironment* env)
+  KFMCycleAnalyze(PClip fmframe, PClip source, float lscale, float costth, float adj2224, float adj30, IScriptEnvironment* env)
 		: GenericVideoFilter(fmframe)
 		, source(source)
     , srcvi(source->GetVideoInfo())
 		, lscale(lscale)
 		, costth(costth)
-    , psplit(psplit)
-    , enable30p(enable30p)
+    , adj2224(adj2224)
+    , adj30(adj30)
 	{
     int out_bytes = sizeof(std::pair<int, float>);
     vi.pixel_type = VideoInfo::CS_BGR32;
@@ -407,7 +415,7 @@ public:
 			data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / vbase;
 		}
 
-		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth, enable30p);
+		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth, adj2224, adj30);
 
     Frame dst = env->NewVideoFrame(vi);
     uint8_t* dstp = dst.GetWritePtr<uint8_t>();
@@ -428,8 +436,8 @@ public:
       args[1].AsClip(),       // source
 			(float)args[2].AsFloat(5.0f), // lscale
       (float)args[3].AsFloat(1.0f), // costth
-      (float)args[4].AsFloat(0.5f), // psplit
-      args[5].AsBool(true), // enable30p
+      (float)args[4].AsFloat(0.5f), // adj2224
+      (float)args[5].AsFloat(0.5f), // adj30
       env
     );
   }
@@ -494,7 +502,7 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
-  env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f[psplit]f[enable30p]b", KFMCycleAnalyze::Create, 0);
+  env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f[adj2224]f[adj30]f", KFMCycleAnalyze::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 }
 

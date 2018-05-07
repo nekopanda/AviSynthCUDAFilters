@@ -1295,7 +1295,7 @@ public:
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KTelecineSuper(
-      args[0].AsClip(),       // source
+      args[0].AsClip(),       // super
       args[1].AsClip(),       // fmclip
       env
     );
