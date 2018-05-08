@@ -7,7 +7,7 @@
 #include "CommonFunctions.h"
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
-#include "Copy.cuh"
+#include "Copy.h"
 
 
 class Align : public GenericVideoFilter

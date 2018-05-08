@@ -12,6 +12,7 @@
 #include "Frame.h"
 #include "KMV.h"
 #include "KFM.h"
+#include "Copy.h"
 
 void OnCudaError(cudaError_t err) {
 #if 1 // デバッグ用（本番は取り除く）
@@ -39,16 +40,6 @@ int GetCommonDevices(const std::vector<PClip>& clips)
   return devs;
 }
 
-template <typename pixel_t>
-void Copy(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height)
-{
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      dst[x + y * dst_pitch] = src[x + y * src_pitch];
-    }
-  }
-}
-
 class KShowStatic : public GenericVideoFilter
 {
   typedef uint8_t pixel_t;
@@ -58,7 +49,7 @@ class KShowStatic : public GenericVideoFilter
   int logUVx;
   int logUVy;
 
-  void CopyFrame(Frame& src, Frame& dst)
+  void CopyFrame(Frame& src, Frame& dst, PNeoEnv env)
   {
     const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
     const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
@@ -72,9 +63,9 @@ class KShowStatic : public GenericVideoFilter
     int widthUV = vi.width >> logUVx;
     int heightUV = vi.height >> logUVy;
 
-    Copy<pixel_t>(dstY, pitchY, srcY, pitchY, vi.width, vi.height);
-    Copy<pixel_t>(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV);
-    Copy<pixel_t>(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV);
+    Copy(dstY, pitchY, srcY, pitchY, vi.width, vi.height, env);
+    Copy(dstU, pitchUV, srcU, pitchUV, widthUV, heightUV, env);
+    Copy(dstV, pitchUV, srcV, pitchUV, widthUV, heightUV, env);
   }
 
   void MaskFill(pixel_t* dstp, int dstPitch,
@@ -129,7 +120,7 @@ public:
     Frame frame30 = child->GetFrame(n, env);
     Frame dst = env->NewVideoFrame(vi);
 
-    CopyFrame(frame30, dst);
+    CopyFrame(frame30, dst, env);
     VisualizeBlock(flag, dst);
 
     return dst.frame;

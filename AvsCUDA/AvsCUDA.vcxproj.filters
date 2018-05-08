@@ -33,6 +33,9 @@
     <ClInclude Include="filters\merge_avx2.h">
       <Filter>ヘッダー ファイル\filters</Filter>
     </ClInclude>
+    <ClInclude Include="..\common\Copy.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AvsCUDA.cpp">
@@ -50,8 +53,8 @@
     <ClCompile Include="filters\merge_avx2.cpp">
       <Filter>ソース ファイル\filters</Filter>
     </ClCompile>
-    <ClCompile Include="filters\merge.cu">
-      <Filter>ソース ファイル\filters</Filter>
+    <ClCompile Include="..\common\Copy.cu">
+      <Filter>ソース ファイル</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -61,5 +64,6 @@
     <CudaCompile Include="filters\Filters.cu">
       <Filter>ソース ファイル\filters</Filter>
     </CudaCompile>
+    <CudaCompile Include="filters\merge.cu" />
   </ItemGroup>
 </Project>

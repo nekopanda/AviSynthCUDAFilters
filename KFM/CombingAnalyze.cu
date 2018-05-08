@@ -11,7 +11,7 @@
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
 #include "KFMFilterBase.cuh"
-#include "Copy.cuh"
+#include "Copy.h"
 
 
 __device__ __host__ void CountFlag(int cnt[3], int flag)

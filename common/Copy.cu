@@ -1,4 +1,5 @@
-#pragma once
+#include "Copy.h"
+#include "CommonFunctions.h"
 
 template <typename pixel_t>
 __global__ void kl_copy(
@@ -12,7 +13,7 @@ __global__ void kl_copy(
   }
 }
 
-static void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, PNeoEnv env)
+void Copy_(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, PNeoEnv env)
 {
   if (src_pitch == 0) return;
 

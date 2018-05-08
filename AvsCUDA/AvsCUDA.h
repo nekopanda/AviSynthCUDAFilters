@@ -22,8 +22,6 @@ struct FuncDefinition {
 
 int GetDeviceTypes(const PClip& clip);
 
-void Copy(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height, PNeoEnv env);
-
 #ifndef NDEBUG
 //#if 1
 #define DEBUG_SYNC \
@@ -35,3 +33,4 @@ CUDA_CHECK(cudaDeviceSynchronize())
 
 #define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
 
+#include "Copy.h"

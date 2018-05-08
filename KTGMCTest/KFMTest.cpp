@@ -211,7 +211,7 @@ TEST_F(KFMTest, KFMSuperTest)
   }
 }
 
-TEST_F(KFMTest, KPreCycleAnalyzeTest)
+TEST_F(KFMTest, PreCycleAnalyzeTest)
 {
   PEnv env;
   try {
@@ -248,7 +248,7 @@ TEST_F(KFMTest, KPreCycleAnalyzeTest)
   }
 }
 
-TEST_F(KFMTest, KTelecineTest)
+TEST_F(KFMTest, TelecineTest)
 {
   PEnv env;
   try {
@@ -285,7 +285,7 @@ TEST_F(KFMTest, KTelecineTest)
   }
 }
 
-TEST_F(KFMTest, KTelecineSuperTest)
+TEST_F(KFMTest, TelecineSuperTest)
 {
   PEnv env;
   try {
@@ -323,7 +323,7 @@ TEST_F(KFMTest, KTelecineSuperTest)
   }
 }
 
-TEST_F(KFMTest, KSwitchFlagTest)
+TEST_F(KFMTest, SwitchFlagTest)
 {
   PEnv env;
   try {
@@ -360,7 +360,7 @@ TEST_F(KFMTest, KSwitchFlagTest)
   }
 }
 
-TEST_F(KFMTest, KCombeMaskTest)
+TEST_F(KFMTest, CombeMaskTest)
 {
   PEnv env;
   try {
@@ -397,205 +397,6 @@ TEST_F(KFMTest, KCombeMaskTest)
   }
 }
 
-TEST_F(KFMTest, KRemoveCombeTest)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KFM.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "super = src.KFMSuper(src.KFMPad())" << std::endl;
-
-    out << "ref = src.KRemoveCombe(super)" << std::endl;
-    out << "cuda = src.KRemoveCombe(super)" O_C(0) "" << std::endl;
-
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
-TEST_F(KFMTest, KPatchCombeTest)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KFM.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    // TODO:
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "super = src.KFMSuper(src.KFMPad()).OnCPU(0)" << std::endl;
-    out << "bob = src.Bob()" << std::endl;
-    out << "fm = super.KPreCycleAnalyze().KFMCycleAnalyze(src).OnCPU(0)" << std::endl;
-    out << "clip24 = src.KTelecine(fm)"
-
-    out << "ref = super.KTelecineSuper(fm)" << std::endl;
-    out << "cuda = super.KTelecineSuper(fm)" O_C(0) "" << std::endl;
-
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
-
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "super = src.KFMSuper(src.KFMPad())" << std::endl;
-
-    out << "ref = src.KRemoveCombe(super)" << std::endl;
-    out << "cuda = src.KRemoveCombe(super)" O_C(0) "" << std::endl;
-
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
-
-TEST_F(KFMTest, AnalyzeFrameTest)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KFM.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "srcuda = src.OnCPU(0)" << std::endl;
-
-    out << "ref = src.KFMFrameAnalyze()" << std::endl;
-    out << "cuda = srcuda.KFMFrameAnalyze()" O_C(0) "" << std::endl;
-
-    out << "KFMFrameAnalyzeCheck(ref, cuda)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
-TEST_F(KFMTest, AnalyzeFrameSuperTest)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KFM.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    out << "src = LWLibavVideoSource(\"test.ts\").OnCPU(0)" << std::endl;
-    out << "super = src.KFMSuper()" << std::endl;
-
-    out << "ref = src.KFMFrameAnalyze()" << std::endl;
-    out << "cuda = src.KFMFrameAnalyze(super=super)" O_C(0) "" << std::endl;
-
-    out << "KFMFrameAnalyzeCheck(ref, cuda)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
-TEST_F(KFMTest, TelecineTest)
-{
-  PEnv env;
-  try {
-    env = PEnv(CreateScriptEnvironment2());
-
-    AVSValue result;
-    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
-    std::string ktgmcPath = modulePath + "\\KFM.dll";
-    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
-
-    std::string scriptpath = workDirPath + "\\script.avs";
-
-    std::ofstream out(scriptpath);
-
-    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "srcuda = src.OnCPU(0)" << std::endl;
-
-    out << "fm = src.KFMFrameAnalyze(15, 7, 20, 8).KFMCycleAnalyze(src)" << std::endl;
-    out << "ref = src.KTelecine(fm)" << std::endl;
-    out << "cuda = srcuda.KTelecine(fm.OnCPU(0))" O_C(0) "" << std::endl;
-
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
-
-    out.close();
-
-    {
-      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
-    }
-  }
-  catch (const AvisynthError& err) {
-    printf("%s\n", err.msg);
-    GTEST_FAIL();
-  }
-}
-
 TEST_F(KFMTest, RemoveCombeTest)
 {
   PEnv env;
@@ -613,12 +414,11 @@ TEST_F(KFMTest, RemoveCombeTest)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "super = src.KFMSuper(src.KFMPad())" << std::endl;
 
-    out << "ref = src.KRemoveCombe(6, 50)" << std::endl;
-    out << "cuda = srcuda.KRemoveCombe(6, 50)" O_C(0) "" << std::endl;
+    out << "ref = src.KRemoveCombe(super)" << std::endl;
+    out << "cuda = src.KRemoveCombe(super)" O_C(0) "" << std::endl;
 
-    out << "check = KRemoveCombeCheck(ref, cuda)" << std::endl;
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
     out.close();
@@ -626,8 +426,49 @@ TEST_F(KFMTest, RemoveCombeTest)
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
       GetFrames(clip, TF_MID, env.get());
-      PClip check = env->GetVar("check").AsClip();
-      GetFrames(check, TF_MID, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
+}
+
+TEST_F(KFMTest, PatchCombeTest)
+{
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
+
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    std::string ktgmcPath = modulePath + "\\KFM.dll";
+    env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+    std::string scriptpath = workDirPath + "\\script.avs";
+
+    std::ofstream out(scriptpath);
+
+    out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "super = src.KFMSuper(src.KFMPad()).OnCPU(0)" << std::endl;
+    out << "clip60 = src.Bob().OnCPU(0)" << std::endl;
+    out << "fmclip = super.KPreCycleAnalyze().KFMCycleAnalyze(src).OnCPU(0)" << std::endl;
+    out << "clip24 = src.KTelecine(fm).OnCPU(0)" << std::endl;
+    out << "flag = super.KSwitchFlag()" << std::endl;
+    out << "combemask = src.KCombeMask(flag).OnCPU(0)" << std::endl;
+    out << "containscombe = flag.KContainsCombe().OnCPU(0)" << std::endl;
+
+    out << "ref = clip24.KPatchCombe(clip60, fm, combemask, containscombe)" << std::endl;
+    out << "cuda = clip24.KPatchCombe(clip60, fm, combemask, containscombe)" O_C(0) "" << std::endl;
+
+    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+    out.close();
+
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, TF_MID, env.get());
     }
   }
   catch (const AvisynthError& err) {
@@ -653,18 +494,16 @@ TEST_F(KFMTest, SwitchTest)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "super = src.KFMSuper(src.KFMPad()).OnCPU(0)" << std::endl;
+    out << "clip60 = src.Bob().OnCPU(0)" << std::endl;
+    out << "fmclip = super.KPreCycleAnalyze().KFMCycleAnalyze(src).OnCPU(0)" << std::endl;
+    out << "clip24 = src.KTelecine(fm).OnCPU(0)" << std::endl;
+    out << "flag = super.KSwitchFlag()" << std::endl;
+    out << "combemask = src.KCombeMask(flag).OnCPU(0)" << std::endl;
+    out << "containscombe = flag.KContainsCombe().OnCPU(0)" << std::endl;
 
-    out << "fm = src.KFMFrameAnalyze(15, 7, 20, 8).KFMCycleAnalyze(src)" << std::endl;
-    out << "fmcuda = fm.OnCPU(0)" << std::endl;
-    out << "tc = src.KTelecine(fm)" << std::endl;
-    out << "tc = tc.KRemoveCombe(6, 50)" << std::endl;
-    out << "tccuda = tc.OnCPU(0)" << std::endl;
-    out << "bb = src.Bob()" << std::endl;
-    out << "bbcuda = bb.OnCPU(0)" << std::endl;
-
-    out << "ref = bb.KFMSwitch(tc, fm, tc, 10000, 40)" << std::endl;
-    out << "cuda = bbcuda.KFMSwitch(tccuda, fmcuda, tccuda, 10000, 40)" O_C(0) "" << std::endl;
+    out << "ref = clip60.KFMSwitch(clip24, fmclip, combemask, containscombe, thswitch=40)" << std::endl;
+    out << "cuda = clip60.KFMSwitch(clip24, fmclip, combemask, containscombe, thswitch=40)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 

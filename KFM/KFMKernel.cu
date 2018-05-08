@@ -116,7 +116,6 @@ class KFMSwitch : public KFMFilterBase
   PClip containscombeclip;
   PClip ucfclip;
 	float thswitch;
-  float th2224;
 	bool show;
 	bool showflag;
 
@@ -202,8 +201,7 @@ class KFMSwitch : public KFMFilterBase
 
 		// 24pフレーム番号を取得
 		Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
-    int shift = (kfmCost <= th2224) ? frameInfo.fieldShift : 0;
-		int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex + shift;
+		int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex + frameInfo.fieldShift;
 
 		if (frameInfo.frameIndex < 0) {
 			// 前に空きがあるので前のサイクル
@@ -276,7 +274,7 @@ class KFMSwitch : public KFMFilterBase
 
 public:
 	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combemaskclip, PClip containscombeclip, PClip ucfclip,
-		float thswitch, float th2224, bool show, bool showflag, IScriptEnvironment* env)
+		float thswitch, bool show, bool showflag, IScriptEnvironment* env)
 		: KFMFilterBase(clip60)
 		, clip24(clip24)
 		, fmclip(fmclip)
@@ -284,7 +282,6 @@ public:
     , containscombeclip(containscombeclip)
     , ucfclip(ucfclip)
 		, thswitch(thswitch)
-    , th2224(th2224)
 		, show(show)
 		, showflag(showflag)
 		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -340,8 +337,6 @@ public:
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
 	{
-    float thswitch = (float)args[6].AsFloat(0.8f);
-    float th2224 = (float)args[7].AsFloat(thswitch);
 		return new KFMSwitch(
 			args[0].AsClip(),           // clip60
 			args[1].AsClip(),           // clip24
@@ -349,10 +344,9 @@ public:
       args[3].AsClip(),           // combemaskclip
       args[4].AsClip(),           // containscombeclip
       args[5].Defined() ? args[5].AsClip() : nullptr,           // ucfclip
-			thswitch,// thswitch
-      th2224,// th2224
-			args[8].AsBool(false),      // show
-			args[9].AsBool(false),      // showflag
+      (float)args[6].AsFloat(0.8f),// thswitch
+			args[7].AsBool(false),      // show
+			args[8].AsBool(false),      // showflag
 			env
 			);
 	}
@@ -437,7 +431,7 @@ public:
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
-  env->AddFunction("KFMSwitch", "ccccc[ucfclip]c[thswitch]f[th2224]f[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSwitch", "ccccc[ucfclip]c[thswitch]f[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
 	env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }
