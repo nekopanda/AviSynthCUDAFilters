@@ -53,9 +53,6 @@
     <ClCompile Include="filters\merge_avx2.cpp">
       <Filter>ソース ファイル\filters</Filter>
     </ClCompile>
-    <ClCompile Include="..\common\Copy.cu">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="filters\ConditionalFunctions.cu">
@@ -65,5 +62,8 @@
       <Filter>ソース ファイル\filters</Filter>
     </CudaCompile>
     <CudaCompile Include="filters\merge.cu" />
+    <CudaCompile Include="..\common\Copy.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>

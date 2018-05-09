@@ -77,12 +77,12 @@ public:
 };
 
 enum {
-  COMBE_FLAG_PAD_H = 4,
-  COMBE_FLAG_PAD_W = 2,
+  COMBE_FLAG_PAD_W = 4,
+  COMBE_FLAG_PAD_H = 2,
 };
 
 static Frame WrapSwitchFragFrame(const PVideoFrame& frame) {
-  return Frame(frame, COMBE_FLAG_PAD_H, COMBE_FLAG_PAD_W, 1);
+  return Frame(frame, COMBE_FLAG_PAD_W, COMBE_FLAG_PAD_H, 1);
 }
 
 #define DECOMB_UCF_FLAG_STR "KDecombUCF_Flag"

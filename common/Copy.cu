@@ -1,5 +1,6 @@
 #include "Copy.h"
 #include "CommonFunctions.h"
+#include <string.h>
 
 template <typename pixel_t>
 __global__ void kl_copy(

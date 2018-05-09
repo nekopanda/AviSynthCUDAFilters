@@ -119,6 +119,7 @@ struct Frame {
 private:
   void init()
   {
+    if (!frame) return;
     if (width == 0) {
       width = frame->GetRowSize() - offsetX;
     }

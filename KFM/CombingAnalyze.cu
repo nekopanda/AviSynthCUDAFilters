@@ -613,6 +613,7 @@ __global__ void kl_analyze2_frame(uchar2* flag0, uchar2* flag1, int fpitch,
 class KFMSuper : public KFMFilterBase
 {
   PClip padclip;
+  VideoInfo srcvi;
 
   int cacheFrame;
   Frame cache[2];
@@ -642,7 +643,7 @@ class KFMSuper : public KFMFilterBase
     int height = combe0.GetHeight(PLANAR_Y);
     int heightUV = combe0.GetHeight(PLANAR_U);
 
-    int shift = vi.BitsPerComponent() - 8 + 4;
+    int shift = srcvi.BitsPerComponent() - 8 + 4;
 
     if (IS_CUDA) {
       dim3 threads(DC_BLOCK_SIZE, DC_BLOCK_TH_W, DC_BLOCK_TH_H);
@@ -652,7 +653,7 @@ class KFMSuper : public KFMFilterBase
         combe0Y, combe1Y, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       DEBUG_SYNC;
       kl_analyze2_frame<pixel_t, parity> << <blocksUV, threads >> >(
-        combe0U, combe1V, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
+        combe0U, combe1U, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
       kl_analyze2_frame<pixel_t, parity> << <blocksUV, threads >> >(
         combe0V, combe1V, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
@@ -662,7 +663,7 @@ class KFMSuper : public KFMFilterBase
       cpu_analyze2_frame<pixel_t, parity>(
         combe0Y, combe1Y, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       cpu_analyze2_frame<pixel_t, parity>(
-        combe0U, combe1V, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
+        combe0U, combe1U, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       cpu_analyze2_frame<pixel_t, parity>(
         combe0V, combe1V, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
     }
@@ -690,6 +691,7 @@ public:
   KFMSuper(PClip clip, PClip pad, IScriptEnvironment* env)
     : KFMFilterBase(clip)
     , padclip(pad)
+    , srcvi(vi)
     , cacheFrame(-1)
   {
     if (vi.width & 7) env->ThrowError("[KFMSuper]: width must be multiple of 8");
@@ -706,14 +708,17 @@ public:
     int n = n60 >> 1;
 
     if (n != cacheFrame) {
-      int pixelSize = vi.ComponentSize();
+      int pixelSize = srcvi.ComponentSize();
       switch (pixelSize) {
       case 1:
         GetFrameT<uint8_t>(n, env);
+        break;
       case 2:
         GetFrameT<uint16_t>(n, env);
+        break;
       default:
         env->ThrowError("[KFMSuper] Unsupported pixel format");
+        break;
       }
     }
 
@@ -796,13 +801,6 @@ class KPreCycleAnalyze : public KFMFilterBase
   KCycleAnalyzeParam prmY;
   KCycleAnalyzeParam prmC;
 
-  Frame GetFrame(int n, PNeoEnv env)
-  {
-    // 左1列と上1行は必要ないので除く
-    return Frame(child->GetFrame(n, env),
-      1, 1, combevi.width / sizeof(uchar2) - 1, combevi.height - 1, sizeof(uchar2));
-  }
-
 public:
   KPreCycleAnalyze(PClip super, int threshMY, int threshSY, int threshMC, int threshSC, IScriptEnvironment* env)
     : KFMFilterBase(super)
@@ -812,7 +810,7 @@ public:
   {
     int out_bytes = sizeof(FMCount) * 2;
     vi.pixel_type = VideoInfo::CS_BGR32;
-    vi.width = 16;
+    vi.width = 6;
     vi.height = nblocks(out_bytes, vi.width * 4);
   }
 
@@ -821,25 +819,32 @@ public:
     PNeoEnv env = env_;
 
     int parity = child->GetParity(0);
-    Frame combe0 = GetFrame(2 * n + 0, env);
-    Frame combe1 = GetFrame(2 * n + 1, env);
+    Frame combe0 = child->GetFrame(2 * n + 0, env);
+    Frame combe1 = child->GetFrame(2 * n + 1, env);
 
     Frame dst = env->NewVideoFrame(vi);
 
     const uchar2 *combe0Y = combe0.GetReadPtr<uchar2>(PLANAR_Y);
     const uchar2 *combe0U = combe0.GetReadPtr<uchar2>(PLANAR_U);
     const uchar2 *combe0V = combe0.GetReadPtr<uchar2>(PLANAR_V);
-    const uchar2 *combe1Y = combe0.GetReadPtr<uchar2>(PLANAR_Y);
-    const uchar2 *combe1U = combe0.GetReadPtr<uchar2>(PLANAR_U);
-    const uchar2 *combe1V = combe0.GetReadPtr<uchar2>(PLANAR_V);
+    const uchar2 *combe1Y = combe1.GetReadPtr<uchar2>(PLANAR_Y);
+    const uchar2 *combe1U = combe1.GetReadPtr<uchar2>(PLANAR_U);
+    const uchar2 *combe1V = combe1.GetReadPtr<uchar2>(PLANAR_V);
     FMCount* fmcnt = dst.GetWritePtr<FMCount>();
 
     int pitch = combe0.GetPitch<uchar2>(PLANAR_Y);
     int pitchUV = combe0.GetPitch<uchar2>(PLANAR_U);
-    int width = combe0.GetWidth<uchar2>(PLANAR_Y);
-    int widthUV = combe0.GetWidth<uchar2>(PLANAR_U);
-    int height = combe0.GetHeight(PLANAR_Y) >> 1;
-    int heightUV = combe0.GetHeight(PLANAR_U) >> 1;
+    int width = combe0.GetWidth<uchar2>(PLANAR_Y) - 1;
+    int widthUV = combe0.GetWidth<uchar2>(PLANAR_U) - 1;
+    int height = (combe0.GetHeight(PLANAR_Y) >> 1) - 1;
+    int heightUV = (combe0.GetHeight(PLANAR_U) >> 1) - 1;
+
+    combe0Y += pitch + 1;
+    combe0U += pitchUV + 1;
+    combe0V += pitchUV + 1;
+    combe1Y += pitch + 1;
+    combe1U += pitchUV + 1;
+    combe1V += pitchUV + 1;
 
     if (IS_CUDA) {
       dim3 threads(FM_COUNT_TH_W, FM_COUNT_TH_H);
@@ -1197,7 +1202,7 @@ public:
     return new KTelecine(
       args[0].AsClip(),       // source
       args[1].AsClip(),       // fmclip
-      args[3].AsBool(false),  // show
+      args[2].AsBool(false),  // show
       env
     );
   }
@@ -1585,7 +1590,8 @@ class KSwitchFlag : public KFMFilterBase
         // 縮小しない場合はコピー
         assert(fpitch == pitchUV);
         assert(fwidth == widthUV);
-        Copy(flagpC, fpitch, combeU, pitchUV, fwidth, fheight, env);
+        // 左1列と上1行はスキップ
+        Copy(flagpC + fpitch + 1, fpitch, combeU + pitchUV + 1, pitchUV, fwidth - 1, fheight - 1, env);
       }
     }
 
@@ -1635,10 +1641,14 @@ public:
     , thC(thC)
   {
     if (combvi.GetPlaneHeightSubsampling(PLANAR_U) != combvi.GetPlaneWidthSubsampling(PLANAR_U)) {
-      env->ThrowError("[KCombeMask] Only 444 or 420 is supported");
+      env->ThrowError("[KSwitchFlag] Only 444 or 420 is supported");
     }
 
     combvi.width /= 2;
+
+    vi.width = nblocks(combvi.width, 2) + COMBE_FLAG_PAD_W * 2;
+    vi.height = nblocks(combvi.height, 2) + COMBE_FLAG_PAD_H * 2;
+    vi.pixel_type = VideoInfo::CS_Y8;
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -1689,7 +1699,7 @@ __global__ void kl_contains_durty_block(const uint8_t* flagp, int width, int hei
   }
 }
 
-class KContainsCombe : public KFMFilterBase
+class KContainsCombe : public GenericVideoFilter
 {
   VideoInfo workvi;
 
@@ -1715,7 +1725,7 @@ class KContainsCombe : public KFMFilterBase
 
 public:
   KContainsCombe(PClip flag, IScriptEnvironment* env)
-    : KFMFilterBase(flag)
+    : GenericVideoFilter(flag)
   {
     int work_bytes = sizeof(int);
     workvi.pixel_type = VideoInfo::CS_BGR32;
@@ -1732,6 +1742,14 @@ public:
     ContainsDurtyBlock(src, dst, env);
 
     return dst.frame;
+  }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceTypes(child) &
+        (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    return 0;
   }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -1839,10 +1857,10 @@ public:
   {
     VideoInfo flagvi = flagclip->GetVideoInfo();
 
-    if (flagvi.width * 8 != vi.width) {
+    if ((flagvi.width - COMBE_FLAG_PAD_W * 2) * 8 != vi.width) {
       env->ThrowError("[KCombeMask] width unmatch");
     }
-    if (flagvi.height * 8 != vi.height) {
+    if ((flagvi.height - COMBE_FLAG_PAD_H * 2) * 8 != vi.height) {
       env->ThrowError("[KCombeMask] height unmatch");
     }
   }

@@ -53,6 +53,9 @@ class ImageCompare : GenericVideoFilter
   const bool alpha;
   const double thresh;
 
+  int offX;
+  int offY;
+
   void PrintMissMatch(int a, int b, int x, int y) {
     printf("miss match %d vs %d at (%d,%d)\n", a, b, x, y);
   }
@@ -71,8 +74,8 @@ class ImageCompare : GenericVideoFilter
     //DebugWriteBitmap("bob-ref-%d.bmp", (const uint8_t*)a, width, height, pitch, 1);
     //DebugWriteBitmap("bob-cuda-%d.bmp", (const uint8_t*)b, width, height, pitch, 1);
 
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
+    for (int y = offY; y < height; ++y) {
+      for (int x = offX; x < width; ++x) {
         pixel_t diff = std::abs(a[x + y * apitch] - b[x + y * bpitch]);
         if (diff > thresh) {
           PrintMissMatch(a[x + y * apitch], b[x + y * bpitch], x, y);
@@ -166,18 +169,29 @@ class ImageCompare : GenericVideoFilter
   }
 
 public:
-  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, bool alpha, PNeoEnv env)
+  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, bool alpha, int offX, int offY, PNeoEnv env)
     : GenericVideoFilter(child1)
     , child2(child2)
     , thresh(thresh)
     , chroma(chroma)
     , alpha(alpha)
+    , offX(offX)
+    , offY(offY)
   {
     if (vi.IsYUY2()) {
       env->ThrowError("[ImageCompare] YUY2 is not supported");
     }
     if (vi.ComponentSize() == 4) {
       thresh /= 65536;
+    }
+
+    VideoInfo vi2 = child2->GetVideoInfo();
+
+    if (vi.width != vi2.width) {
+      env->ThrowError("[ImageCompare] different width");
+    }
+    if (vi.height != vi2.height) {
+      env->ThrowError("[ImageCompare] different height");
     }
   }
 
@@ -222,6 +236,8 @@ public:
       args[2].AsInt(2), // thresh
       args[3].AsBool(true), // chroma
       args[4].AsBool(true), // alpha
+      args[5].AsInt(0), // offX
+      args[6].AsInt(0), // offY
       env);
   }
 };
@@ -233,7 +249,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   //init_console();
   
   env->AddFunction("Time", "c[name]s", Create_Time, 0);
-  env->AddFunction("ImageCompare", "cc[thresh]i[chroma]b[alpha]b", ImageCompare::Create, 0);
+  env->AddFunction("ImageCompare", "cc[thresh]i[chroma]b[alpha]b[offX]i[offY]i", ImageCompare::Create, 0);
 
   return "K Debug Plugin";
 }

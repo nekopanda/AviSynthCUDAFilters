@@ -26,11 +26,7 @@ Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
 {
   typedef typename VectorType<uint8_t>::type vpixel_t;
 
-  VideoInfo blockpadvi = vi;
-  blockpadvi.width = nblocks(vi.width, OVERLAP) + COMBE_FLAG_PAD_H * 2;
-  blockpadvi.height = nblocks(vi.height, OVERLAP) + COMBE_FLAG_PAD_W * 2;
-  blockpadvi.pixel_type = VideoInfo::CS_Y8;
-  Frame frame = env->NewVideoFrame(blockpadvi);
+  Frame frame = env->NewVideoFrame(vi);
 
   // É[Éçèâä˙âª
   vpixel_t* flagp = frame.GetWritePtr<vpixel_t>();
@@ -38,14 +34,14 @@ Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
   int width = frame.GetPitch<vpixel_t>();
   if (IS_CUDA) {
     dim3 threads(32, 8);
-    dim3 blocks(nblocks(width, threads.x), nblocks(blockpadvi.height, threads.y));
-    kl_fill<vpixel_t, 0> << <blocks, threads >> >(flagp, width, blockpadvi.height, pitch);
+    dim3 blocks(nblocks(width, threads.x), nblocks(vi.height, threads.y));
+    kl_fill<vpixel_t, 0> << <blocks, threads >> >(flagp, width, vi.height, pitch);
   }
   else {
-    cpu_fill<vpixel_t, 0>(flagp, width, blockpadvi.height, pitch);
+    cpu_fill<vpixel_t, 0>(flagp, width, vi.height, pitch);
   }
 
-  frame.Crop(COMBE_FLAG_PAD_H, COMBE_FLAG_PAD_W, sizeof(uint8_t));
+  frame.Crop(COMBE_FLAG_PAD_W, COMBE_FLAG_PAD_H, sizeof(uint8_t));
   return frame;
 }
 

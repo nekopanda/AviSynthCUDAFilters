@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-  ::testing::GTEST_FLAG(filter) = "*FrameAnalyze2*";
+  ::testing::GTEST_FLAG(filter) = "KFMTest.*";
   ::testing::InitGoogleTest(&argc, argv);
 
   //_crtBreakAlloc = 7978;
@@ -22,7 +22,7 @@ int main(int argc, char **argv)
 
   //_CrtMemDumpAllObjectsSince(&s1);
 
-  //getchar();
+  getchar();
 
   return result;
 }

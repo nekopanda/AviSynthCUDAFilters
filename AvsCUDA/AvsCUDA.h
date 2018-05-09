@@ -22,15 +22,4 @@ struct FuncDefinition {
 
 int GetDeviceTypes(const PClip& clip);
 
-#ifndef NDEBUG
-//#if 1
-#define DEBUG_SYNC \
-CUDA_CHECK(cudaGetLastError()); \
-CUDA_CHECK(cudaDeviceSynchronize())
-#else
-#define DEBUG_SYNC
-#endif
-
-#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
-
 #include "Copy.h"

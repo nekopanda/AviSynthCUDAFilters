@@ -25,8 +25,10 @@ class KPatchCombe : public KFMFilterBase
   template <typename pixel_t>
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
+    PDevice cpuDevice = env->GetDevice(DEV_TYPE_CPU, 0);
+
     {
-      Frame containsframe = containscombeclip->GetFrame(n, env);
+      Frame containsframe = env->GetFrame(containscombeclip, n, cpuDevice);
       if (*containsframe.GetReadPtr<int>() == 0) {
         // ダメなブロックはないのでそのまま返す
         return child->GetFrame(n, env);
@@ -34,7 +36,7 @@ class KPatchCombe : public KFMFilterBase
     }
 
     int cycleIndex = n / 4;
-    Frame fmframe = env->GetFrame(fmclip, cycleIndex, env->GetDevice(DEV_TYPE_CPU, 0));
+    Frame fmframe = env->GetFrame(fmclip, cycleIndex, cpuDevice);
     int kfmPattern = fmframe.GetProperty("KFM_Pattern", -1);
     if (kfmPattern == -1) {
       env->ThrowError("[KPatchCombe] Failed to get frame info. Check fmclip");
@@ -229,7 +231,7 @@ class KFMSwitch : public KFMFilterBase
     }
 
 		{
-      Frame containsframe = containscombeclip->GetFrame(n24, env);
+      Frame containsframe = env->GetFrame(containscombeclip, n24, env->GetDevice(DEV_TYPE_CPU, 0));
       if (*containsframe.GetReadPtr<int>() == 0) {
         // ダメなブロックはないのでそのまま返す
         return baseFrame;

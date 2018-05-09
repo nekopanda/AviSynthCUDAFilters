@@ -172,6 +172,7 @@
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\common\Copy.h" />
     <ClInclude Include="AvsCUDA.h" />
     <ClInclude Include="filters\focus.h" />
     <ClInclude Include="filters\merge.h" />
@@ -186,6 +187,7 @@
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
+    <CudaCompile Include="..\common\Copy.cu" />
     <CudaCompile Include="filters\merge.cu">
       <FileType>CppCode</FileType>
     </CudaCompile>
