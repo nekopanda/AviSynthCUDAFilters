@@ -700,6 +700,8 @@ public:
     vi.width = vi.width / DC_OVERLAP * 2;
     vi.height = vi.height / DC_OVERLAP;
     vi.pixel_type = Get8BitType(vi);
+    vi.MulDivFPS(2, 1);
+    vi.num_frames *= 2;
   }
 
   PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
@@ -812,6 +814,8 @@ public:
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 6;
     vi.height = nblocks(out_bytes, vi.width * 4);
+    vi.MulDivFPS(1, 2);
+    vi.num_frames /= 2;
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -836,8 +840,8 @@ public:
     int pitchUV = combe0.GetPitch<uchar2>(PLANAR_U);
     int width = combe0.GetWidth<uchar2>(PLANAR_Y) - 1;
     int widthUV = combe0.GetWidth<uchar2>(PLANAR_U) - 1;
-    int height = (combe0.GetHeight(PLANAR_Y) >> 1) - 1;
-    int heightUV = (combe0.GetHeight(PLANAR_U) >> 1) - 1;
+    int height = combe0.GetHeight(PLANAR_Y) - 1;
+    int heightUV = combe0.GetHeight(PLANAR_U) - 1;
 
     combe0Y += pitch + 1;
     combe0U += pitchUV + 1;
@@ -876,10 +880,49 @@ public:
   {
     return new KPreCycleAnalyze(
       args[0].AsClip(),       // super
-      args[1].AsInt(15),      // threshMY
-      args[2].AsInt(7),       // threshSY
-      args[3].AsInt(20),      // threshMC
-      args[4].AsInt(8),       // threshSC
+      args[1].AsInt(20),      // threshMY
+      args[2].AsInt(12),       // threshSY
+      args[3].AsInt(24),      // threshMC
+      args[4].AsInt(16),       // threshSC
+      env
+    );
+  }
+};
+
+class KPreCycleAnalyzeShow : public KFMFilterBase
+{
+  PClip fmclip;
+
+public:
+  KPreCycleAnalyzeShow(PClip fmclip, PClip source, IScriptEnvironment* env)
+    : KFMFilterBase(source)
+    , fmclip(fmclip)
+  { }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+
+    Frame frame = fmclip->GetFrame(n, env);
+    const FMCount *fmcount = frame.GetReadPtr<FMCount>();
+
+    Frame dst = child->GetFrame(n, env);
+    env->MakeWritable(&dst.frame);
+
+    char buf[100];
+    sprintf(buf, "Pre: [0](%d,%d,%d) [1](%d,%d,%d)",
+      fmcount[0].move, fmcount[0].shima, fmcount[0].lshima,
+      fmcount[1].move, fmcount[1].shima, fmcount[1].lshima);
+    DrawText<uint8_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
+
+    return dst.frame;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KPreCycleAnalyzeShow(
+      args[0].AsClip(),       // fmclip
+      args[1].AsClip(),       // source
       env
     );
   }
@@ -913,7 +956,7 @@ class KFMSuperShow : public KFMFilterBase
     int dstPitchUV = dst.GetPitch<uint8_t>(PLANAR_U);
 
     int width = combe.GetWidth<uchar2>(PLANAR_Y);
-    int height = combe.GetHeight(PLANAR_Y) >> 1;
+    int height = combe.GetHeight(PLANAR_Y);
 
     // 黒で初期化しておく
     for (int y = 0; y < vi.height; ++y) {
@@ -991,6 +1034,7 @@ public:
     Frame combetmp = env->NewVideoFrame(combvi);
     Frame dst = env->NewVideoFrame(vi);
 
+    env->MakeWritable(&combe.frame);
     ExtendBlocks<uchar4>(combe, combetmp, true, env);
     VisualizeFlags(dst, combe, env);
 
@@ -1274,7 +1318,8 @@ public:
     , fmclip(fmclip)
   {
     // フレームレート
-    vi.MulDivFPS(4, 5);
+    vi.MulDivFPS(2, 5);
+    vi.num_frames >>= 1;
     vi.num_frames = (vi.num_frames / 5 * 4) + (vi.num_frames % 5);
   }
 
@@ -1283,7 +1328,7 @@ public:
     PNeoEnv env = env_;
 
     int cycleIndex = n / 4;
-    int parity = child->GetParity(cycleIndex * 5);
+    int parity = child->GetParity(cycleIndex * 10);
     Frame fm = fmclip->GetFrame(cycleIndex, env);
     int pattern = fm.GetProperty("KFM_Pattern", -1);
     if (pattern == -1) {
@@ -1498,12 +1543,84 @@ void launch_bilinear_h(uint8_t* dst, int width, int height, int dpitch, const ui
   DEBUG_SYNC;
 }
 
+template <typename pixel_t>
+void cpu_temporal_soften(pixel_t* dst,
+  const pixel_t* src0, const pixel_t* src1, const pixel_t* src2,
+  int width, int height, int pitch)
+{
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      auto t = to_float(src0[x + y * pitch]) + to_float(src1[x + y * pitch]) + to_float(src2[x + y * pitch]);
+      dst[x + y * pitch] = VHelper<pixel_t>::cast_to(to_int(t * (1.0f / 3.0f)));
+    }
+  }
+}
+
+template <typename pixel_t>
+__global__ void kl_temporal_soften(pixel_t* dst,
+  const pixel_t* src0, const pixel_t* src1, const pixel_t* src2,
+  int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    auto t = to_float(src0[x + y * pitch]) + to_float(src1[x + y * pitch]) + to_float(src2[x + y * pitch]);
+    dst[x + y * pitch] = VHelper<pixel_t>::cast_to(to_int(t * (1.0f / 3.0f)));
+  }
+}
+
 class KSwitchFlag : public KFMFilterBase
 {
+  VideoInfo srcvi;
   VideoInfo combvi;
 
   float thY;
   float thC;
+
+  Frame TemporalSoften(const Frame& src0, const Frame& src1, const Frame& src2, PNeoEnv env)
+  {
+    Frame dst = env->NewVideoFrame(srcvi);
+
+    const uchar4* src0Y = src0.GetReadPtr<uchar4>(PLANAR_Y);
+    const uchar4* src0U = src0.GetReadPtr<uchar4>(PLANAR_U);
+    const uchar4* src0V = src0.GetReadPtr<uchar4>(PLANAR_V);
+    const uchar4* src1Y = src1.GetReadPtr<uchar4>(PLANAR_Y);
+    const uchar4* src1U = src1.GetReadPtr<uchar4>(PLANAR_U);
+    const uchar4* src1V = src1.GetReadPtr<uchar4>(PLANAR_V);
+    const uchar4* src2Y = src2.GetReadPtr<uchar4>(PLANAR_Y);
+    const uchar4* src2U = src2.GetReadPtr<uchar4>(PLANAR_U);
+    const uchar4* src2V = src2.GetReadPtr<uchar4>(PLANAR_V);
+    uchar4* dstY = dst.GetWritePtr<uchar4>(PLANAR_Y);
+    uchar4* dstU = dst.GetWritePtr<uchar4>(PLANAR_U);
+    uchar4* dstV = dst.GetWritePtr<uchar4>(PLANAR_V);
+
+    int pitchY = src0.GetPitch<uchar4>(PLANAR_Y);
+    int pitchUV = src0.GetPitch<uchar4>(PLANAR_U);
+    int width = src0.GetWidth<uchar4>(PLANAR_Y);
+    int widthUV = src0.GetWidth<uchar4>(PLANAR_U);
+    int height = src0.GetHeight(PLANAR_Y);
+    int heightUV = src0.GetHeight(PLANAR_U);
+
+    if (IS_CUDA) {
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+      dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
+      kl_temporal_soften << <blocks, threads >> >(dstY, src0Y, src1Y, src2Y, width, height, pitchY);
+      DEBUG_SYNC;
+      kl_temporal_soften << <blocksUV, threads >> >(dstU, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+      kl_temporal_soften << <blocksUV, threads >> >(dstV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+    }
+    else {
+      cpu_temporal_soften(dstY, src0Y, src1Y, src2Y, width, height, pitchY);
+      cpu_temporal_soften(dstU, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      cpu_temporal_soften(dstV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+    }
+
+    return dst;
+  }
 
   Frame MakeSwitchFlag(Frame& src, PNeoEnv env)
   {
@@ -1535,7 +1652,9 @@ class KSwitchFlag : public KFMFilterBase
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
       kl_copy_first << <blocks, threads >> >(combeY, pitchY, srcY, width, height, spitchY);
+      DEBUG_SYNC;
       kl_copy_first << <blocksUV, threads >> >(combeU, pitchUV, srcU, widthUV, heightUV, spitchUV);
+      DEBUG_SYNC;
       kl_copy_first << <blocksUV, threads >> >(combeV, pitchUV, srcV, widthUV, heightUV, spitchUV);
       DEBUG_SYNC;
     }
@@ -1636,6 +1755,7 @@ class KSwitchFlag : public KFMFilterBase
 public:
   KSwitchFlag(PClip combe, float thY, float thC, IScriptEnvironment* env)
     : KFMFilterBase(combe)
+    , srcvi(combe->GetVideoInfo())
     , combvi(combe->GetVideoInfo())
     , thY(thY)
     , thC(thC)
@@ -1655,7 +1775,10 @@ public:
   {
     PNeoEnv env = env_;
 
-    Frame src = child->GetFrame(n, env);
+    Frame src = TemporalSoften(
+      child->GetFrame(n - 1, env),
+      child->GetFrame(n + 0, env),
+      child->GetFrame(n + 1, env), env);
     Frame flag = MakeSwitchFlag(src, env);
 
     return flag.frame;
@@ -1665,8 +1788,8 @@ public:
   {
     return new KSwitchFlag(
       args[0].AsClip(),       // combe
-      (float)args[1].AsFloat(40),  // thY
-      (float)args[2].AsFloat(40),  // thC
+      (float)args[1].AsFloat(60),  // thY
+      (float)args[2].AsFloat(80),  // thC
       env
     );
   }
@@ -2043,6 +2166,7 @@ void AddFuncCombingAnalyze(IScriptEnvironment* env)
 
   env->AddFunction("KFMSuper", "cc", KFMSuper::Create, 0);
   env->AddFunction("KPreCycleAnalyze", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KPreCycleAnalyze::Create, 0);
+  env->AddFunction("KPreCycleAnalyzeShow", "cc", KPreCycleAnalyzeShow::Create, 0);
   env->AddFunction("KFMSuperShow", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMSuperShow::Create, 0);
 
   env->AddFunction("KTelecine", "cc[show]b", KTelecine::Create, 0);

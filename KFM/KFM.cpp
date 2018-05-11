@@ -399,7 +399,7 @@ public:
 		}
 
 		FMData data = { 0 };
-		int vbase = (int)(srcvi.width * srcvi.height * 0.001f);
+		int vbase = (int)(srcvi.width * srcvi.height * 0.001f) >> 4;
     for (int i = 0; i < 14; ++i) {
 			data.mft[i] = (float)mft[i + 2];
 			data.mftr[i] = (mft[i + 2] + vbase) * 2.0f / (mft[i + 1] + mft[i + 3] + vbase * 2.0f) - 1.0f;
@@ -426,9 +426,9 @@ public:
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
 			(float)args[2].AsFloat(5.0f), // lscale
-      (float)args[3].AsFloat(1.0f), // costth
+      (float)args[3].AsFloat(1.5f), // costth
       (float)args[4].AsFloat(0.5f), // adj2224
-      (float)args[5].AsFloat(0.5f), // adj30
+      (float)args[5].AsFloat(0.7f), // adj30
       env
     );
   }

@@ -51,7 +51,7 @@ class KPatchCombe : public KFMFilterBase
     n60 += cycleIndex * 10;
 
     Frame baseFrame = child->GetFrame(n, env);
-    Frame frame60 = child->GetFrame(n60, env);
+    Frame frame60 = clip60->GetFrame(n60, env);
     Frame mflag = combemaskclip->GetFrame(n, env);
 
     // ダメなブロックはbobフレームからコピー
@@ -104,6 +104,7 @@ public:
 
 enum KFMSWTICH_FLAG {
   FRAME_60 = 1,
+  FRAME_30,
 	FRAME_24,
   FRAME_UCF,
 };
@@ -112,7 +113,14 @@ class KFMSwitch : public KFMFilterBase
 {
 	typedef uint8_t pixel_t;
 
-	PClip clip24;
+  PClip clip24;
+  PClip mask24;
+  PClip cc24;
+  
+  PClip clip30;
+  PClip mask30;
+  PClip cc30;
+
 	PClip fmclip;
   PClip combemaskclip;
   PClip containscombeclip;
@@ -172,8 +180,8 @@ class KFMSwitch : public KFMFilterBase
 		float kfmCost = (float)fmframe.GetProperty("KFM_Cost", 1.0);
     Frame baseFrame;
 
-		if (kfmCost > thswitch || PulldownPatterns::Is30p(kfmPattern)) {
-			// コストが高いので60pと判断 or 30pの場合
+		if (kfmCost > thswitch) {
+			// コストが高いので60pと判断
       type = FRAME_60;
 
       if (ucfclip) {
@@ -196,50 +204,67 @@ class KFMSwitch : public KFMFilterBase
       }
 		}
     else {
-      type = FRAME_24;
     }
 
-    // ここでのtypeは 24 or UCF
+    // ここでのtypeは 24 or 30 or UCF
+    Frame mflag;
 
-		// 24pフレーム番号を取得
-		Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
-		int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex + frameInfo.fieldShift;
+    if (PulldownPatterns::Is30p(kfmPattern)) {
+      // 30p
+      int n30 = n60 >> 1;
 
-		if (frameInfo.frameIndex < 0) {
-			// 前に空きがあるので前のサイクル
-			n24 = frameInfo.cycleIndex * 4 - 1;
-		}
-		else if (frameInfo.frameIndex >= 4) {
-			// 後ろのサイクルのパターンを取得
-			Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-			int nextPattern = nextfmframe.GetProperty("KFM_Pattern", -1);
-			int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
-			if (fstart > 0) {
-				// 前に空きがあるので前のサイクル
-				n24 = frameInfo.cycleIndex * 4 + 3;
-			}
-			else {
-				// 前に空きがないので後ろのサイクル
-				n24 = frameInfo.cycleIndex * 4 + 4;
-			}
-		}
+      if (!baseFrame) {
+        baseFrame = clip30->GetFrame(n30, env);
+        type = FRAME_30;
+      }
 
-		Frame frame24 = clip24->GetFrame(n24, env);
-
-    if (type == FRAME_24) {
-      baseFrame = frame24;
-    }
-
-		{
-      Frame containsframe = env->GetFrame(containscombeclip, n24, env->GetDevice(DEV_TYPE_CPU, 0));
+      Frame containsframe = env->GetFrame(cc30, n30, env->GetDevice(DEV_TYPE_CPU, 0));
       if (*containsframe.GetReadPtr<int>() == 0) {
         // ダメなブロックはないのでそのまま返す
         return baseFrame;
       }
-		}
+
+      mflag = mask30->GetFrame(n30, env);
+    }
+    else {
+      // 24pフレーム番号を取得
+      Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
+      int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex + frameInfo.fieldShift;
+
+      if (frameInfo.frameIndex < 0) {
+        // 前に空きがあるので前のサイクル
+        n24 = frameInfo.cycleIndex * 4 - 1;
+      }
+      else if (frameInfo.frameIndex >= 4) {
+        // 後ろのサイクルのパターンを取得
+        Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
+        int nextPattern = nextfmframe.GetProperty("KFM_Pattern", -1);
+        int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
+        if (fstart > 0) {
+          // 前に空きがあるので前のサイクル
+          n24 = frameInfo.cycleIndex * 4 + 3;
+        }
+        else {
+          // 前に空きがないので後ろのサイクル
+          n24 = frameInfo.cycleIndex * 4 + 4;
+        }
+      }
+
+      if (!baseFrame) {
+        baseFrame = clip24->GetFrame(n24, env);
+        type = FRAME_24;
+      }
+
+      Frame containsframe = env->GetFrame(cc24, n24, env->GetDevice(DEV_TYPE_CPU, 0));
+      if (*containsframe.GetReadPtr<int>() == 0) {
+        // ダメなブロックはないのでそのまま返す
+        return baseFrame;
+      }
+
+      mflag = mask24->GetFrame(n24, env);
+    }
 
     Frame frame60 = child->GetFrame(n60, env);
-    Frame mflag = combemaskclip->GetFrame(n24, env);
 
 		if (!IS_CUDA && vi.ComponentSize() == 1 && showflag) {
 			env->MakeWritable(&baseFrame.frame);
@@ -254,6 +279,17 @@ class KFMSwitch : public KFMFilterBase
 		return dst;
 	}
 
+  static const char* FrameTypeStr(int frameType)
+  {
+    switch (frameType) {
+    case FRAME_60: return "60p";
+    case FRAME_30: return "30p";
+    case FRAME_24: return "24p";
+    case FRAME_UCF: return "UCF";
+    }
+    return "???";
+  }
+
   template <typename pixel_t>
   PVideoFrame GetFrameTop(int n60, PNeoEnv env)
   {
@@ -265,7 +301,7 @@ class KFMSwitch : public KFMFilterBase
 
     if (show) {
       const std::pair<int, float>* pfm = fmframe.GetReadPtr<std::pair<int, float>>();
-      const char* fps = (frameType == FRAME_60) ? "60p" : (frameType == FRAME_24) ? "24p" : "UCF";
+      const char* fps = FrameTypeStr(frameType);
       char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.1f", fps, pfm->first, pfm->second);
       DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
       return dst.frame;
@@ -275,13 +311,19 @@ class KFMSwitch : public KFMFilterBase
   }
 
 public:
-	KFMSwitch(PClip clip60, PClip clip24, PClip fmclip, PClip combemaskclip, PClip containscombeclip, PClip ucfclip,
+	KFMSwitch(PClip clip60, PClip fmclip,
+    PClip clip24, PClip mask24, PClip cc24,
+    PClip clip30, PClip mask30, PClip cc30,
+    PClip ucfclip,
 		float thswitch, bool show, bool showflag, IScriptEnvironment* env)
 		: KFMFilterBase(clip60)
-		, clip24(clip24)
-		, fmclip(fmclip)
-    , combemaskclip(combemaskclip)
-    , containscombeclip(containscombeclip)
+    , fmclip(fmclip)
+    , clip24(clip24)
+    , mask24(mask24)
+    , cc24(cc24)
+    , clip30(clip30)
+    , mask30(mask30)
+    , cc30(cc30)
     , ucfclip(ucfclip)
 		, thswitch(thswitch)
 		, show(show)
@@ -300,19 +342,25 @@ public:
     if (!(GetDeviceTypes(fmclip) & DEV_TYPE_CPU)) {
       env->ThrowError("[KFMSwitch]: fmclip must be CPU device");
     }
-    if (!(GetDeviceTypes(containscombeclip) & DEV_TYPE_CPU)) {
-      env->ThrowError("[KFMSwitch]: containscombeclip must be CPU device");
+    if (!(GetDeviceTypes(cc24) & DEV_TYPE_CPU)) {
+      env->ThrowError("[KFMSwitch]: cc24 must be CPU device");
+    }
+    if (!(GetDeviceTypes(cc30) & DEV_TYPE_CPU)) {
+      env->ThrowError("[KFMSwitch]: cc30 must be CPU device");
     }
 
     auto devs = GetDeviceTypes(clip60);
     if (!(GetDeviceTypes(clip24) & devs)) {
       env->ThrowError("[KFMSwitch]: clip24 device unmatch");
     }
-    if (!(GetDeviceTypes(combemaskclip) & devs)) {
-      env->ThrowError("[KFMSwitch]: combeclip device unmatch");
+    if (!(GetDeviceTypes(clip30) & devs)) {
+      env->ThrowError("[KFMSwitch]: clip30 device unmatch");
     }
-    if (!(GetDeviceTypes(clip24) & devs)) {
-      env->ThrowError("[KFMSwitch]: clip24 device unmatch");
+    if (!(GetDeviceTypes(mask24) & devs)) {
+      env->ThrowError("[KFMSwitch]: mask24 device unmatch");
+    }
+    if (!(GetDeviceTypes(mask30) & devs)) {
+      env->ThrowError("[KFMSwitch]: mask30 device unmatch");
     }
     if (ucfclip && !(GetDeviceTypes(ucfclip) & devs)) {
       env->ThrowError("[KFMSwitch]: ucfclip device unmatch");
@@ -341,14 +389,17 @@ public:
 	{
 		return new KFMSwitch(
 			args[0].AsClip(),           // clip60
-			args[1].AsClip(),           // clip24
-			args[2].AsClip(),           // fmclip
-      args[3].AsClip(),           // combemaskclip
-      args[4].AsClip(),           // containscombeclip
-      args[5].Defined() ? args[5].AsClip() : nullptr,           // ucfclip
-      (float)args[6].AsFloat(0.8f),// thswitch
-			args[7].AsBool(false),      // show
-			args[8].AsBool(false),      // showflag
+      args[1].AsClip(),           // fmclip
+      args[2].AsClip(),           // clip24
+      args[3].AsClip(),           // mask24
+      args[4].AsClip(),           // cc24
+      args[5].AsClip(),           // clip30
+			args[6].AsClip(),           // mask30
+      args[7].AsClip(),           // cc30
+      args[8].Defined() ? args[5].AsClip() : nullptr,           // ucfclip
+      (float)args[9].AsFloat(3.0f),// thswitch
+			args[10].AsBool(false),      // show
+			args[11].AsBool(false),      // showflag
 			env
 			);
 	}
@@ -433,7 +484,7 @@ public:
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
-  env->AddFunction("KFMSwitch", "ccccc[ucfclip]c[thswitch]f[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
 	env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

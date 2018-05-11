@@ -64,7 +64,7 @@ struct Frame {
   template <typename T> int GetWidth(int plane = 0) const {
     return GetRowSize(plane) / sizeof(T);
   }
-  template <typename T> const T* GetReadPtr(int plane = 0) {
+  template <typename T> const T* GetReadPtr(int plane = 0) const {
     const BYTE* ptr = frame->GetReadPtr(plane);
     if (ptr) {
       if (plane & (PLANAR_U | PLANAR_V)) {

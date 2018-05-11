@@ -77,11 +77,16 @@ TEST_F(MiscTest, KFMPerf)
 
     std::ofstream out(scriptpath);
 
-    out << "src = LWLibavVideoSource(\"test.ts\",dominance=1,repeat=True).OnCPU(2)" << std::endl;
-    out << "fm = src.KFMFrameAnalyze(5, 4, 7, 6)" << std::endl;
-    out << "fm = fm.OnCUDA(0).KFMCycleAnalyze(src, 5, 1).OnCPU(2)" << std::endl;
-    out << "tc = src.KTelecine(fm)" << std::endl;
-    out << "tc.KRemoveCombe(6, 100).OnCUDA(2)" << std::endl;
+    out << "src = LWLibavVideoSource(\"test.ts\").OnCPU(0)" << std::endl;
+    out << "super = src.KFMSuper(src.KFMPad())" << std::endl;
+    out << "clip60 = src.KTGMC_Bob()" << std::endl;
+    out << "fmclip = super.KPreCycleAnalyze().OnCUDA(0).KFMCycleAnalyze(src).OnCPU(0)" << std::endl;
+    out << "clip24 = src.KTelecine(fmclip)" << std::endl;
+    out << "mask24 = src.KCombeMask(super.KTelecineSuper(fmclip).KSwitchFlag())" << std::endl;
+    out << "cc24 = mask24.OnCUDA(0).KContainsCombe()" << std::endl;
+    out << "mask30 = src.KCombeMask(super.SelectEven().KSwitchFlag())" << std::endl;
+    out << "cc30 = mask30.OnCUDA(0).KContainsCombe()" << std::endl;
+    out << "clip60.KFMSwitch(fmclip, clip24, mask24, cc24, src, mask30, cc30, thswitch=40).OnCUDA(0)" << std::endl;
 
     out.close();
 
