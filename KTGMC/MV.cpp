@@ -4360,6 +4360,12 @@ public:
 
 class KMDegrainX : public GenericVideoFilter
 {
+  enum USE_FLAG {
+    USE_ALL = 0,
+    USE_ONLY_BEFORE = 1,
+    USE_ONLY_AFTER = 2,
+  };
+
   const KMVParam *params;
   std::unique_ptr<IMVCUDA> cuda;
 
@@ -4377,6 +4383,7 @@ class KMDegrainX : public GenericVideoFilter
   int thSADC;
 
   bool binomial;
+  int useFlag;
 
   std::unique_ptr<OverlapWindows> OverWins;
   std::unique_ptr<OverlapWindows> OverWinsUV;
@@ -4622,12 +4629,13 @@ public:
     PClip mvbw, PClip mvfw, PClip mvbw2, PClip mvfw2,
     int _thSAD, int _thSADC, int _YUVplanes, int _nLimit, int _nLimitC,
     int _nSCD1, int _nSCD2, bool _isse2, bool _planar, bool _lsb_flag,
-    bool _mt_flag, int _delta, bool binomial, PNeoEnv env)
+    bool _mt_flag, int _delta, bool binomial, int useFlag, PNeoEnv env)
     : GenericVideoFilter(child)
     , params(KMVParam::GetParam(mvbw->GetVideoInfo(), env))
     , cuda(CreateKDeintCUDA())
     , delta(_delta)
     , binomial(binomial)
+    , useFlag(useFlag)
     , YUVplanes(_YUVplanes)
     , super(super)
     , OverWins()
@@ -4682,31 +4690,33 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
-    bool isUsableF[MAX_DEGRAIN];
+    bool isUsableF[MAX_DEGRAIN] = { 0 };
     PVideoFrame mvF[MAX_DEGRAIN];
     PVideoFrame refF[MAX_DEGRAIN];
 
     // mv,refŽæ“¾
-    for (int j = delta - 1; j >= 0; j--)
-    {
-			mvF[j] = rawClipF[j]->GetFrame(n, env);
-			bool isValid = mvF[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
-			mvClipF[j]->SetData(reinterpret_cast<const VECTOR*>(mvF[j]->GetReadPtr()), isValid);
-      refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
-      SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
+    if (useFlag != USE_ONLY_AFTER) {
+      for (int j = delta - 1; j >= 0; j--) {
+        mvF[j] = rawClipF[j]->GetFrame(n, env);
+        bool isValid = mvF[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+        mvClipF[j]->SetData(reinterpret_cast<const VECTOR*>(mvF[j]->GetReadPtr()), isValid);
+        refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
+        SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
+      }
     }
 
-    bool isUsableB[MAX_DEGRAIN];
+    bool isUsableB[MAX_DEGRAIN] = { 0 };
     PVideoFrame mvB[MAX_DEGRAIN];
     PVideoFrame refB[MAX_DEGRAIN];
 
-    for (int j = 0; j < delta; j++)
-    {
-      mvB[j] = rawClipB[j]->GetFrame(n, env);
-			bool isValid = mvB[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
-			mvClipB[j]->SetData(reinterpret_cast<const VECTOR*>(mvB[j]->GetReadPtr()), isValid);
-      refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
-      SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
+    if (useFlag != USE_ONLY_BEFORE) {
+      for (int j = 0; j < delta; j++) {
+        mvB[j] = rawClipB[j]->GetFrame(n, env);
+        bool isValid = mvB[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+        mvClipB[j]->SetData(reinterpret_cast<const VECTOR*>(mvB[j]->GetReadPtr()), isValid);
+        refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
+        SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
+      }
     }
 
     cuda->SetEnv(env);
@@ -4813,6 +4823,7 @@ public:
       true,  // mt
       delta,
       args[11 + param_index_shift].AsBool(false),    // binomial
+      args[12 + param_index_shift].AsInt(0),    // useFlag
       env
     );
   }
@@ -5355,11 +5366,11 @@ void AddFuncMV(IScriptEnvironment* env)
     KMAnalyse::Create, 0);
 
   env->AddFunction("KMDegrain1",
-    "cccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i[binomial]b",
+    "cccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i[binomial]b[useFlag]i",
     KMDegrainX::Create, (void *)1);
 
   env->AddFunction("KMDegrain2",
-    "cccccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i[binomial]b",
+    "cccccc[thSAD]i[thSADC]i[plane]i[limit]i[limitC]i[thSCD1]i[thSCD2]i[binomial]b[useFlag]i",
     KMDegrainX::Create, (void *)2);
 
   env->AddFunction("KMCompensate",

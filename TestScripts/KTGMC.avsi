@@ -160,7 +160,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
                     int "ShutterBlur", float "ShutterAngleSrc", float "ShutterAngleOut", int "SBlurLimit", bool "Border", bool "Precise", string "Tuning", \
                     bool "ShowSettings", string "GlobalNames", string "PrevGlobals", int "ForceTR", \
                     val "BT", val "DetailRestore", val "MotionBlur", val "MBlurLimit", val "NoiseBypass", float "Str", float "Amp", bool "TV_range", bool "useEdiExt", int "DftDither", bool "lsbd", bool "lsb", \
-					int "dev", int "analyzeBatch" )
+					int "useFlag", int "dev", int "analyzeBatch" )
 {
 	# EdiMode="RepcYadif"/"cYadif" require the Yadif plugin, which doesn't autoload. Typically the calling script would load it.
 
@@ -408,6 +408,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	rgBlur         = (Precise) ? 11 : 12
 	dev = default(dev, 0)
 	analyzeBatch   = default(analyzeBatch, 4)
+	useFlag = default(useFlag, 0) # 0: no limitation, 1: use only previous fields, 1: use only next fields
 
 	# Get maximum temporal radius needed
 	maxTR = (temporalSL)       ? SLRad : 0
@@ -637,22 +638,29 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 
 	# >>>> Switch to planar YUY2 during next step - remains planar until very end of script except blurring for back blending & SVThin
 
+	edi  = KTGMC_GetUserGlobal( GlobalNames, "edi",  ReuseGlobals )
+	ediSuper = KTGMC_GetUserGlobal( GlobalNames, "ediSuper", ReuseGlobals )
+
 	# InputType=2,3: use motion mask to blend luma between original clip & reweaved clip based on ProgSADMask setting. Use chroma from original clip in any case
 	inputTypeBlend = (ProgSADMask > 0.0) ? MMask( srchClip, bVec1, kind=1, ml=ProgSADMask ) : NOP()
-	edi = (InputType != 2 && InputType != 3) ? (!yuy2 ? edi1 : edi1.nonyuy2clipin(true)) :\
+	edi = IsClip(edi) ? edi : (InputType != 2 && InputType != 3) ? (!yuy2 ? edi1 : edi1.nonyuy2clipin(true)) :\
 	      (ProgSADMask <= 0.0)               ? (!yuy2 ? edi1.MergeChroma( innerClip ) : edi1.MergeChroma( innerClip ).nonyuy2clipin(true)) : \
 	                                           (!yuy2 ? mt_merge( innerClip, edi1, inputTypeBlend, U=2,V=2 ) : \
 											            mt_merge( innerClip.nonyuy2clipin(true), edi1.nonyuy2clipin(true), inputTypeBlend, U=2,V=2 ))
 
 	# Get the max/min value for each pixel over neighboring motion-compensated frames - used for temporal sharpness limiting
-	ediSuper = (TR1 > 0 || temporalSL)   ? edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
+	ediSuper = IsClip(ediSuper) ? ediSuper : (TR1 > 0 || temporalSL)   ? edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
+
+	KTGMC_SetUserGlobal( GlobalNames, "edi",  edi,  ReplaceGlobals )
+	KTGMC_SetUserGlobal( GlobalNames, "ediSuper", ediSuper, ReplaceGlobals )
+	
 	bComp1   = (temporalSL)              ? edi.KMCompensate( ediSuper, bVec1, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
 	fComp1   = (temporalSL)              ? edi.KMCompensate( ediSuper, fVec1, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
 	bComp3   = (SLRad > 1 && temporalSL) ? edi.KMCompensate( ediSuper, bVec3, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
 	fComp3   = (SLRad > 1 && temporalSL) ? edi.KMCompensate( ediSuper, fVec3, thSCD1=ThSCD1,thSCD2=ThSCD2              ) : NOP()
 	tMax     = (SLRad > 1 && temporalSL) ? tMax.mt_logic( fComp3, "max", U=3,V=3 ).mt_logic( bComp3, "max", U=3,V=3 )   : NOP()
 	tMin     = (SLRad > 1 && temporalSL) ? tMin.mt_logic( fComp3, "min", U=3,V=3 ).mt_logic( bComp3, "min", U=3,V=3 )   : NOP()
-
+	
 	#---------------------------------------
 	# Create basic output
 
@@ -660,8 +668,8 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# alternate frames so the same binomial kernels are used. However, by using motion-compensated smoothing this time we avoid motion blur. The use of
 	# MDegrain1 (motion compensated) rather than TemporalSmooth makes the weightings *look* different, but they evaluate to the same values
 	binomial1 = (TR1 == 0) ? edi : \
-	            (TR1 == 1) ? edi.KMDegrain1( ediSuper, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True) : \
-	                         edi.KMDegrain2( ediSuper, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True)
+	            (TR1 == 1) ? edi.KMDegrain1( ediSuper, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag) : \
+	                         edi.KMDegrain2( ediSuper, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag)
 
 	# Remove areas of difference between smoothed image and interpolated image that are not bob-shimmer fixes: repairs residual motion blur from temporal smooth
 	repair1 = (Rep1 == 0) ? binomial1 : binomial1.KTGMC_KeepOnlyBobShimmerFixes( edi, Rep1, RepChroma )
@@ -671,7 +679,7 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	                             repair1.KTGMC_ApplySourceMatch( InputType, ediInput, bVec1,fVec1, bVec2,fVec2, SubPel, SubPelInterp, hpad, vpad, \
 	                                                             ThSAD1, ThSCD1, ThSCD2, SourceMatch, MatchTR1, MatchEdi, MatchNNSize, MatchNNeurons, \
 	                                                             MatchEdiQual, MatchEdiMaxD, MatchTR2, MatchEdi2, MatchNNSize2, MatchNNeurons2, MatchEdiQual2, \
-	                                                             MatchEdiMaxD2, MatchEnhance, EdiThreads, lsb )
+	                                                             MatchEdiMaxD2, MatchEnhance, EdiThreads, lsb, useFlag )
 
 	# Lossless=2 - after preparing an interpolated, de-shimmered clip, restore the original source fields into it and clean up any artefacts.
 	# This mode will not give a true lossless result because the resharpening and final temporal smooth are still to come, but it will add further detail.
@@ -719,8 +727,8 @@ function KTGMC( clip Input, string "Preset", int "TR0", int "TR1", int "TR2", in
 	# Final light linear temporal smooth for denoising
 	stableSuper = (TR2 > 0) ? addNoise1.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	stable  = (TR2 == 0) ? addNoise1 : \
-	          (TR2 == 1) ? addNoise1.KMDegrain1( stableSuper, bVec1,fVec1,                                                     thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2 ) : \
-	          (TR2 == 2) ? addNoise1.KMDegrain2( stableSuper, bVec1,fVec1, bVec2,fVec2,                                        thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2 ) : \
+	          (TR2 == 1) ? addNoise1.KMDegrain1( stableSuper, bVec1,fVec1,                                                     thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, useFlag=useFlag ) : \
+	          (TR2 == 2) ? addNoise1.KMDegrain2( stableSuper, bVec1,fVec1, bVec2,fVec2,                                        thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, useFlag=useFlag ) : \
  	          (TR2 == 3) ? addNoise1.MDegrain3( stableSuper, bVec1,fVec1, bVec2,fVec2, bVec3,fVec3,                           thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : \
  	          (TR2 == 4) ? addNoise1.MDegrain4( stableSuper, bVec1,fVec1, bVec2,fVec2, bVec3,fVec3, bVec4,fVec4,              thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb ) : \
  	                       addNoise1.MDegrain5( stableSuper, bVec1,fVec1, bVec2,fVec2, bVec3,fVec3, bVec4,fVec4, bVec5,fVec5, thSAD=ThSAD2, thSCD1=ThSCD1,thSCD2=ThSCD2, lsb=lsb )
@@ -994,7 +1002,7 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
                                  int SubPel, int SubPelInterp, int hpad, int vpad, int ThSAD1, int ThSCD1, int ThSCD2, int SourceMatch, \
                                  int MatchTR1, string MatchEdi, int MatchNNSize, int MatchNNeurons, int MatchEdiQual, int MatchEdiMaxD,\
                                  int MatchTR2, string MatchEdi2, int MatchNNSize2, int MatchNNeurons2, int MatchEdiQual2, int MatchEdiMaxD2, \
-                                 float MatchEnhance, int EdiThreads, bool lsb )
+                                 float MatchEnhance, int EdiThreads, bool lsb, int useFlag )
 {
 	# >>>> YUY2: 'Deinterlace' is planar, 'Source' is interleaved (changed to planar here for all processing except interpolation) - returns planar result
 	yuy2 = Source.IsYUY2()
@@ -1024,8 +1032,8 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	match1Super    = (SourceMatch > 0 && MatchTR1 > 0) ? match1Edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match1         = (SourceMatch < 1) ? Deinterlace : \
 	                 (MatchTR1 == 0)   ? match1Edi : \
-	                 (MatchTR1 == 1)   ? match1Edi.KMDegrain1( match1Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True ) : \
-	                                     match1Edi.KMDegrain2( match1Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True )
+	                 (MatchTR1 == 1)   ? match1Edi.KMDegrain1( match1Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag ) : \
+	                                     match1Edi.KMDegrain2( match1Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag )
 
 	# Enhance effect of source-match stages 2 & 3 by sharpening clip prior to refinement (source-match tends to underestimate so this will leave result sharper)
 	match1Shp = (SourceMatch > 1 && MatchEnhance > 0.0) ? match1.KTGMC_Resharpen( match1.KRemoveGrain( 12 ), MatchEnhance, U=3,V=3 ) : match1
@@ -1044,8 +1052,8 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	match2Super    = (SourceMatch > 1 && MatchTR2 > 0) ? match2Edi.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match2         = (SourceMatch < 2) ? match1 : \
 	                 (MatchTR2 == 0)   ? match2Edi : \
-	                 (MatchTR2 == 1)   ? match2Edi.KMDegrain1( match2Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True ) : \
-	                                     match2Edi.KMDegrain2( match2Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True )
+	                 (MatchTR2 == 1)   ? match2Edi.KMDegrain1( match2Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag ) : \
+	                                     match2Edi.KMDegrain2( match2Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag )
 
 	# Source-match second refinement - correct error introduced in the refined difference by temporal smoothing. Similar to error correction from basic step
 	errorAdjust2   = Select( MatchTR2, 1.0, 2.0 / (1.0 + errorTemporalSimilarity), 8.0 / (3.0 + 5.0 * errorTemporalSimilarity) )
@@ -1054,8 +1062,8 @@ function KTGMC_ApplySourceMatch( clip Deinterlace, int InputType, val Source, va
 	match3Super    = (SourceMatch > 2 && MatchTR2 > 0) ? match3Update.KMSuper( pel=SubPel, sharp=SubPelInterp, levels=1, hpad=hpad, vpad=vpad ) : NOP()
 	match3         = (SourceMatch < 3) ? match2 : \
 	                 (MatchTR2 == 0)   ? match3Update : \
-	                 (MatchTR2 == 1)   ? match3Update.KMDegrain1( match3Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True ) : \
-	                                     match3Update.KMDegrain2( match3Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True )
+	                 (MatchTR2 == 1)   ? match3Update.KMDegrain1( match3Super, bVec1,fVec1,              thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag ) : \
+	                                     match3Update.KMDegrain2( match3Super, bVec1,fVec1, bVec2,fVec2, thSAD=ThSAD1, thSCD1=ThSCD1,thSCD2=ThSCD2, binomial=True, useFlag=useFlag )
 
 	# Apply difference calculated in source-match refinement
 	return (SourceMatch < 2) ? match1 : match1Shp.KAddDiff( match3, U=3,V=3 )
