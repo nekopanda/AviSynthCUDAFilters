@@ -500,12 +500,17 @@ TEST_F(KFMTest, SwitchTest)
     out << "clip60 = src.Bob().OnCPU(0)" << std::endl;
     out << "fmclip = super.KPreCycleAnalyze().KFMCycleAnalyze(src).OnCPU(0)" << std::endl;
     out << "clip24 = src.KTelecine(fmclip).OnCPU(0)" << std::endl;
-    out << "flag = super.KSwitchFlag()" << std::endl;
-    out << "combemask = src.KCombeMask(flag).OnCPU(0)" << std::endl;
-    out << "containscombe = flag.KContainsCombe().OnCPU(0)" << std::endl;
+    out << "super24 = super.KTelecineSuper(fmclip).OnCPU(0)" << std::endl;
+    out << "flag24 = super24.KSwitchFlag()" << std::endl;
+    out << "mask24 = src.KCombeMask(flag24).OnCPU(0)" << std::endl;
+    out << "cc24 = flag24.KContainsCombe().OnCPU(0)" << std::endl;
+    out << "super30 = super.SelectEven().OnCPU(0)" << std::endl;
+    out << "flag30 = super30.KSwitchFlag()" << std::endl;
+    out << "mask30 = src.KCombeMask(flag30).OnCPU(0)" << std::endl;
+    out << "cc30 = flag30.KContainsCombe().OnCPU(0)" << std::endl;
 
-    out << "ref = clip60.KFMSwitch(clip24, fmclip, combemask, containscombe, thswitch=40)" << std::endl;
-    out << "cuda = clip60.KFMSwitch(clip24, fmclip, combemask, containscombe, thswitch=40)" O_C(0) "" << std::endl;
+    out << "ref = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, mask30, cc30, thswitch=40)" << std::endl;
+    out << "cuda = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, mask30, cc30, thswitch=40)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
