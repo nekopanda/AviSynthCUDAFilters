@@ -22,7 +22,7 @@ int main(int argc, char **argv)
 
   //_CrtMemDumpAllObjectsSince(&s1);
 
-  //getchar();
+  getchar();
 
   return result;
 }

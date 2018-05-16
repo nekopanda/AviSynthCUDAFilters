@@ -1230,7 +1230,7 @@ public:
     : vi()
     , param(param)
   {
-    DecombUCFParam::SetParam(vi, &param);
+    DecombUCFParam::SetParam(vi, &this->param);
   }
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) { return PVideoFrame(); }
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) { }
@@ -1611,24 +1611,24 @@ public:
     }
 
     if (!(GetDeviceTypes(fmclip) & DEV_TYPE_CPU)) {
-      env->ThrowError("[KDecombUCF]: fmclip must be CPU device");
+      env->ThrowError("[KDecombUCF24]: fmclip must be CPU device");
     }
     if (!(GetDeviceTypes(noiseclip) & DEV_TYPE_CPU)) {
-      env->ThrowError("[KDecombUCF]: noiseclip must be CPU device");
+      env->ThrowError("[KDecombUCF24]: noiseclip must be CPU device");
     }
 
     auto devs = GetDeviceTypes(clip24);
     if (!(GetDeviceTypes(beforeclip) & devs)) {
-      env->ThrowError("[KDecombUCF]: beforeclip device unmatch");
+      env->ThrowError("[KDecombUCF24]: beforeclip device unmatch");
     }
     if (!(GetDeviceTypes(afterclip) & devs)) {
-      env->ThrowError("[KDecombUCF]: afterclip device unmatch");
+      env->ThrowError("[KDecombUCF24]: afterclip device unmatch");
     }
     if (!(GetDeviceTypes(dweaveclip) & devs)) {
-      env->ThrowError("[KDecombUCF]: dweaveclip device unmatch");
+      env->ThrowError("[KDecombUCF24]: dweaveclip device unmatch");
     }
     if (nrclip && !(GetDeviceTypes(nrclip) & devs)) {
-      env->ThrowError("[KDecombUCF]: nrclip device unmatch");
+      env->ThrowError("[KDecombUCF24]: nrclip device unmatch");
     }
   }
 

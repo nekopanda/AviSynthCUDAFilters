@@ -464,6 +464,73 @@ public:
 	}
 };
 
+class AMTVFRShow : public GenericVideoFilter
+{
+  PClip vfrclip;
+
+  const AMTGenTime* gentime_;
+
+  const char* FrameTypeStr(int fps) {
+    switch (fps) {
+    case AMT_FPS_24: return "24p";
+    case AMT_FPS_30: return "30p";
+    case AMT_FPS_60: return "60p";
+    }
+    return "Unknown";
+  }
+
+  template <typename pixel_t>
+  PVideoFrame GetFrameT(int n60, PNeoEnv env)
+  {
+    Frame timeframe = env->GetFrame(vfrclip, n60, env->GetDevice(DEV_TYPE_CPU, 0));
+    const AMTFrameFps* frameFps = timeframe.GetReadPtr<AMTFrameFps>();
+    char buf[100]; sprintf(buf, "KFM VFR: %s %d", 
+      FrameTypeStr(frameFps->fps), frameFps->source);
+    Frame dst = child->GetFrame(n60, env);
+    env->MakeWritable(&dst.frame);
+    DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
+    return dst.frame;
+  }
+
+public:
+  AMTVFRShow(PClip bob, PClip vfrclip, PNeoEnv env)
+    : GenericVideoFilter(bob)
+    , vfrclip(vfrclip)
+    , gentime_(AMTGenTime::GetParam(vfrclip->GetVideoInfo()))
+  {
+    if (gentime_ == nullptr) {
+      env->ThrowError("vfrクリップが不正");
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+
+    int pixelSize = vi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return GetFrameT<uint8_t>(n, env);
+    case 2:
+      return GetFrameT<uint16_t>(n, env);
+    default:
+      env->ThrowError("[AMTVFRShow] Unsupported pixel format");
+      break;
+    }
+
+    return PVideoFrame();
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new AMTVFRShow(
+      args[0].AsClip(),           // clip60
+      args[1].AsClip(),           // vfrclip
+      env
+    );
+  }
+};
+
 class KFMPad : public KFMFilterBase
 {
   VideoInfo srcvi;
@@ -544,6 +611,7 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
   env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[gentime]b[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("AMTVFRShow", "cc", AMTVFRShow::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
 	env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

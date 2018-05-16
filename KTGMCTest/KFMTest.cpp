@@ -509,8 +509,8 @@ TEST_F(KFMTest, SwitchTest)
     out << "mask30 = src.KCombeMask(flag30).OnCPU(0)" << std::endl;
     out << "cc30 = flag30.KContainsCombe().OnCPU(0)" << std::endl;
 
-    out << "ref = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, mask30, cc30, thswitch=40)" << std::endl;
-    out << "cuda = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, mask30, cc30, thswitch=40)" O_C(0) "" << std::endl;
+    out << "ref = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, src, mask30, cc30, thswitch=40)" << std::endl;
+    out << "cuda = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, src, mask30, cc30, thswitch=40)" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 
