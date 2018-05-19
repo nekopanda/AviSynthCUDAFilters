@@ -4,7 +4,7 @@
 
 template <typename pixel_t>
 __global__ void kl_copy(
-  pixel_t* dst, int dst_pitch, const pixel_t* __restrict__ src, int src_pitch, int width, int height)
+  pixel_t* __restrict__ dst, int dst_pitch, const pixel_t* __restrict__ src, int src_pitch, int width, int height)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;

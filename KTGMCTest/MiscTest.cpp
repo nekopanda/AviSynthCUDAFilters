@@ -77,22 +77,15 @@ TEST_F(MiscTest, KFMPerf)
 
     std::ofstream out(scriptpath);
 
+    out << "Import(\"KFMDeint.avs\")" << std::endl;
     out << "src = LWLibavVideoSource(\"test.ts\").OnCPU(0)" << std::endl;
-    out << "super = src.KFMSuper(src.KFMPad())" << std::endl;
-    out << "clip60 = src.KTGMC_Bob()" << std::endl;
-    out << "fmclip = super.KPreCycleAnalyze().OnCUDA(0).KFMCycleAnalyze(src).OnCPU(0)" << std::endl;
-    out << "clip24 = src.KTelecine(fmclip)" << std::endl;
-    out << "mask24 = src.KCombeMask(super.KTelecineSuper(fmclip).KSwitchFlag())" << std::endl;
-    out << "cc24 = mask24.OnCUDA(0).KContainsCombe()" << std::endl;
-    out << "mask30 = src.KCombeMask(super.SelectEven().KSwitchFlag())" << std::endl;
-    out << "cc30 = mask30.OnCUDA(0).KContainsCombe()" << std::endl;
-    out << "clip60.KFMSwitch(fmclip, clip24, mask24, cc24, src, mask30, cc30, thswitch=40).OnCUDA(0)" << std::endl;
+    out << "src.KFM()" << std::endl;
 
     out.close();
 
     {
       PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-      GetFrames(clip, TF_MID, env.get());
+      GetFrames(clip, TF_100, env.get());
     }
   }
   catch (const AvisynthError& err) {

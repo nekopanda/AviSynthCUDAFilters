@@ -96,4 +96,41 @@ enum DECOMB_UCF_FLAG {
   DECOMB_UCF_NR,    // ‰˜‚¢ƒtƒŒ[ƒ€
 };
 
+struct DecombUCFInfo {
+    enum
+    {
+        VERSION = 1,
+        MAGIC_KEY = 0x7080EDF8,
+    };
+    int nMagicKey;
+    int nVersion;
+
+    int fpsType;
+
+    DecombUCFInfo(int fpsType)
+        : nMagicKey(MAGIC_KEY)
+        , nVersion(VERSION)
+        , fpsType(fpsType)
+    { }
+
+    static const DecombUCFInfo* GetParam(const VideoInfo& vi, PNeoEnv env)
+    {
+        if (vi.sample_type != MAGIC_KEY) {
+            env->ThrowError("Invalid source (sample_type signature does not match)");
+        }
+        const DecombUCFInfo* param = (const DecombUCFInfo*)(void*)vi.num_audio_samples;
+        if (param->nMagicKey != MAGIC_KEY) {
+            env->ThrowError("Invalid source (magic key does not match)");
+        }
+        return param;
+    }
+
+    static void SetParam(VideoInfo& vi, const DecombUCFInfo* param)
+    {
+        vi.audio_samples_per_second = 0; // kill audio
+        vi.sample_type = MAGIC_KEY;
+        vi.num_audio_samples = (size_t)param;
+    }
+};
+
 int GetDeviceTypes(const PClip& clip);

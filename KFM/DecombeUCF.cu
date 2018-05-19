@@ -1408,6 +1408,8 @@ class KDecombUCF : public KFMFilterBase
   PClip noiseclip;
   PClip nrclip;
 
+  DecombUCFInfo info;
+
   const UCFNoiseMeta* meta;
   const DecombUCFParam* param;
   PulldownPatterns patterns;
@@ -1420,6 +1422,7 @@ public:
     , beforeclip(beforeclip)
     , afterclip(afterclip)
     , nrclip(nrclip)
+    , info(30)
     , meta(UCFNoiseMeta::GetParam(noiseclip->GetVideoInfo(), env))
     , param(DecombUCFParam::GetParam(paramclip->GetVideoInfo(), env))
   {
@@ -1529,6 +1532,8 @@ class KDecombUCF24 : public KFMFilterBase
   PClip noiseclip;
   PClip nrclip;
 
+  DecombUCFInfo info;
+
   const UCFNoiseMeta* meta;
   const DecombUCFParam* param;
   PulldownPatterns patterns;
@@ -1543,6 +1548,7 @@ public:
     , afterclip(afterclip)
     , dweaveclip(dweaveclip)
     , nrclip(nrclip)
+    , info(24)
     , meta(UCFNoiseMeta::GetParam(noiseclip->GetVideoInfo(), env))
     , param(DecombUCFParam::GetParam(paramclip->GetVideoInfo(), env))
   {
@@ -1566,6 +1572,8 @@ public:
     if (nrclip) {
       vinr.MulDivFPS(5, 2);
     }
+
+    DecombUCFInfo::SetParam(vi, &info);
 
     if (vi24.fps_denominator != vinoise.fps_denominator)
       env->ThrowError("[KDecombUCF24]: vi24.fps_denominator != vinoise.fps_denominator");
@@ -1592,22 +1600,22 @@ public:
 
     // サイズチェック
     if (vi24.width != vibefore.width)
-      env->ThrowError("[KDecombUCF24]: vi24.num_frames != vibefore.num_frames");
+      env->ThrowError("[KDecombUCF24]: vi24.width != vibefore.width");
     if (vi24.width != viafter.width)
-      env->ThrowError("[KDecombUCF24]: vi24.num_frames != viafter.num_frames");
+      env->ThrowError("[KDecombUCF24]: vi24.width != viafter.width");
     if (vi24.height != vibefore.height)
-      env->ThrowError("[KDecombUCF24]: vi24.num_frames != vibefore.num_frames");
+      env->ThrowError("[KDecombUCF24]: vi24.height != vibefore.height");
     if (vi24.height != viafter.height)
-      env->ThrowError("[KDecombUCF24]: vi24.num_frames != viafter.num_frames");
+      env->ThrowError("[KDecombUCF24]: vi24.height != viafter.height");
     if (vi24.width != vidw.width)
-      env->ThrowError("[KDecombUCF24]: vi24.num_frames != vidw.num_frames");
+      env->ThrowError("[KDecombUCF24]: vi24.width != vidw.width");
     if (vi24.height != vidw.height)
-      env->ThrowError("[KDecombUCF24]: vi24.num_frames != vidw.num_frames");
+      env->ThrowError("[KDecombUCF24]: vi24.height != vidw.height");
     if (nrclip) {
       if (vi24.width != vinr.width)
-        env->ThrowError("[KDecombUCF24]: vi24.num_frames != vinoise.num_frames");
+        env->ThrowError("[KDecombUCF24]: vi24.width != vinr.width");
       if (vi24.height != vinr.height)
-        env->ThrowError("[KDecombUCF24]: vi24.num_frames != vinoise.num_frames");
+        env->ThrowError("[KDecombUCF24]: vi24.height != vinr.height");
     }
 
     if (!(GetDeviceTypes(fmclip) & DEV_TYPE_CPU)) {
@@ -1921,6 +1929,8 @@ class KDecombUCF60 : public KFMFilterBase
   PClip afterclip;
   PClip nrclip;
 
+  DecombUCFInfo info;
+
 public:
   KDecombUCF60(PClip clip60, PClip flagclip, PClip beforeclip, PClip afterclip, PClip nrclip, IScriptEnvironment* env)
     : KFMFilterBase(clip60)
@@ -1928,6 +1938,7 @@ public:
     , beforeclip(beforeclip)
     , afterclip(afterclip)
     , nrclip(nrclip)
+    , info(60)
   {
     if (srcvi.width & 3) env->ThrowError("[KDecombUCF60]: width must be multiple of 4");
     if (srcvi.height & 3) env->ThrowError("[KDecombUCF60]: height must be multiple of 4");
@@ -1947,6 +1958,8 @@ public:
     if (nrclip) {
       vinr.MulDivFPS(1, 1);
     }
+
+    DecombUCFInfo::SetParam(vi, &info);
 
     if (vi60.fps_denominator != viflag.fps_denominator)
       env->ThrowError("[KDecombUCF60]: vi60.fps_denominator != viflag.fps_denominator");
@@ -2096,7 +2109,7 @@ void AddFuncUCF(IScriptEnvironment* env)
   env->AddFunction("KAnalyzeNoise", "cc[s4uper]c", KAnalyzeNoise::Create, 0);
   env->AddFunction("KDecombUCFParam", DecombUCF_PARAM_STR, KDecombUCFParam::Create, 0);
   env->AddFunction("KDecombUCF", "cccc[nr]c", KDecombUCF::Create, 0);
-  env->AddFunction("KDecombUCF24", "cccccc[nr]c", KDecombUCF24::Create, 0);
+  env->AddFunction("KDecombUCF24", "ccccccc[nr]c", KDecombUCF24::Create, 0);
   env->AddFunction("KDecombUCF60Flag", "cc[showclip]c[sc_thresh]f[dup_factor]f", KDecombUCF60Flag::Create, 0);
   env->AddFunction("KDecombUCF60", "ccccc[nr]c[sc_thresh]f[dup_factor]f", KDecombUCF60::Create, 0);
 }

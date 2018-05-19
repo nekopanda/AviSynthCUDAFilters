@@ -21,7 +21,7 @@ __device__ __host__ void CountFlag(int cnt[3], int flag)
   if (flag & LSHIMA) cnt[2]++;
 }
 
-void cpu_count_fmflags(FMCount* dst, const uchar4* flagp, int width, int height, int pitch)
+void cpu_count_fmflags(FMCount*  __restrict__ dst, const uchar4*  __restrict__ flagp, int width, int height, int pitch)
 {
   int cnt[3] = { 0 };
   for (int y = 0; y < height; ++y) {
@@ -50,7 +50,7 @@ enum {
   FM_COUNT_THREADS = FM_COUNT_TH_W * FM_COUNT_TH_H,
 };
 
-__global__ void kl_count_fmflags(FMCount* dst, const uchar4* flagp, int width, int height, int pitch)
+__global__ void kl_count_fmflags(FMCount* __restrict__ dst, const uchar4* __restrict__ flagp, int width, int height, int pitch)
 {
   int x = threadIdx.x + blockIdx.x * FM_COUNT_TH_W;
   int y = threadIdx.y + blockIdx.y * FM_COUNT_TH_H;
@@ -268,10 +268,10 @@ class KFMFrameAnalyzeShow : public KFMFilterBase
     int gray[] = { 140, 128, 128 };
     int purple[] = { 197, 160, 122 };
 
-    const pixel_t* fflagp = fflag.GetReadPtr<pixel_t>(PLANAR_Y);
-    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
-    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
-    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+    const pixel_t* __restrict__ fflagp = fflag.GetReadPtr<pixel_t>(PLANAR_Y);
+    pixel_t* __restrict__ dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* __restrict__ dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* __restrict__ dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
     int flagPitch = fflag.GetPitch<pixel_t>(PLANAR_Y);
     int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
@@ -427,7 +427,7 @@ __host__ __device__ int calc_diff(
 }
 
 template<typename pixel_t, bool parity>
-void cpu_analyze2_frame(uchar2* flag0, uchar2* flag1, int fpitch,
+void cpu_analyze2_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
   const pixel_t* __restrict__ f0, const pixel_t* __restrict__ f1,
   int pitch, int nBlkX, int nBlkY, int shift)
 {
@@ -517,7 +517,7 @@ void cpu_analyze2_frame(uchar2* flag0, uchar2* flag1, int fpitch,
 }
 
 template<typename pixel_t, bool parity>
-__global__ void kl_analyze2_frame(uchar2* flag0, uchar2* flag1, int fpitch,
+__global__ void kl_analyze2_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
   const pixel_t* __restrict__ f0, const pixel_t* __restrict__ f1,
   int pitch, int nBlkX, int nBlkY, int shift)
 {
@@ -749,8 +749,8 @@ struct KCycleAnalyzeParam {
   { }
 };
 
-__global__ void kl_count_cmflags(FMCount* dst,
-  const uchar2* combe0, const uchar2* combe1, int pitch,
+__global__ void kl_count_cmflags(FMCount* __restrict__ dst,
+  const uchar2* __restrict__ combe0, const uchar2* __restrict__ combe1, int pitch,
   int width, int height, int parity,
   int threshM, int threshS, int threshLS)
 {
@@ -779,8 +779,8 @@ __global__ void kl_count_cmflags(FMCount* dst,
   }
 }
 
-void cpu_count_cmflags(FMCount* dst,
-  const uchar2* combe0, const uchar2* combe1, int pitch,
+void cpu_count_cmflags(FMCount* __restrict__ dst,
+  const uchar2* __restrict__ combe0, const uchar2* __restrict__ combe1, int pitch,
   int width, int height, int parity,
   int threshM, int threshS, int threshLS)
 {
@@ -943,12 +943,12 @@ class KFMSuperShow : public KFMFilterBase
     int gray[] = { 140, 128, 128 };
     int purple[] = { 197, 160, 122 };
 
-    const uchar2* combeY = combe.GetReadPtr<uchar2>(PLANAR_Y);
-    const uchar2* combeU = combe.GetReadPtr<uchar2>(PLANAR_U);
-    const uchar2* combeV = combe.GetReadPtr<uchar2>(PLANAR_V);
-    uint8_t* dstY = dst.GetWritePtr<uint8_t>(PLANAR_Y);
-    uint8_t* dstU = dst.GetWritePtr<uint8_t>(PLANAR_U);
-    uint8_t* dstV = dst.GetWritePtr<uint8_t>(PLANAR_V);
+    const uchar2* __restrict__ combeY = combe.GetReadPtr<uchar2>(PLANAR_Y);
+    const uchar2* __restrict__ combeU = combe.GetReadPtr<uchar2>(PLANAR_U);
+    const uchar2* __restrict__ combeV = combe.GetReadPtr<uchar2>(PLANAR_V);
+    uint8_t* __restrict__ dstY = dst.GetWritePtr<uint8_t>(PLANAR_Y);
+    uint8_t* __restrict__ dstU = dst.GetWritePtr<uint8_t>(PLANAR_U);
+    uint8_t* __restrict__ dstV = dst.GetWritePtr<uint8_t>(PLANAR_V);
 
     int combPitchY = combe.GetPitch<uchar2>(PLANAR_Y);
     int combPitchUV = combe.GetPitch<uchar2>(PLANAR_U);
@@ -1354,7 +1354,7 @@ public:
 
 
 template <typename vpixel_t>
-void cpu_copy_first(uint8_t* dst, int dpitch,
+void cpu_copy_first(uint8_t* __restrict__ dst, int dpitch,
   const vpixel_t* __restrict__ src, int width, int height, int spitch)
 {
   for (int y = 0; y < height; ++y) {
@@ -1365,7 +1365,7 @@ void cpu_copy_first(uint8_t* dst, int dpitch,
 }
 
 template <typename vpixel_t>
-__global__ void kl_copy_first(uint8_t* dst, int dpitch,
+__global__ void kl_copy_first(uint8_t* __restrict__ dst, int dpitch,
   const vpixel_t* __restrict__ src, int width, int height, int spitch)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1377,7 +1377,7 @@ __global__ void kl_copy_first(uint8_t* dst, int dpitch,
 }
 
 template <typename pixel_t>
-void cpu_combe_to_flag(pixel_t* flag, int nBlkX, int nBlkY, int fpitch, const pixel_t* combe, int cpitch)
+void cpu_combe_to_flag(pixel_t* __restrict__ flag, int nBlkX, int nBlkY, int fpitch, const pixel_t* __restrict__ combe, int cpitch)
 {
   for (int y = 0; y < nBlkY; ++y) {
     for (int x = 0; x < nBlkX; ++x) {
@@ -1391,7 +1391,7 @@ void cpu_combe_to_flag(pixel_t* flag, int nBlkX, int nBlkY, int fpitch, const pi
 }
 
 template <typename pixel_t>
-__global__ void kl_combe_to_flag(pixel_t* flag, int nBlkX, int nBlkY, int fpitch, const pixel_t* combe, int cpitch)
+__global__ void kl_combe_to_flag(pixel_t* __restrict__ flag, int nBlkX, int nBlkY, int fpitch, const pixel_t* __restrict__ combe, int cpitch)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -1406,7 +1406,7 @@ __global__ void kl_combe_to_flag(pixel_t* flag, int nBlkX, int nBlkY, int fpitch
 }
 
 template <typename pixel_t>
-void cpu_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height, int pitch, int maxv)
+void cpu_sum_box3x3(pixel_t* __restrict__ dst, pixel_t* __restrict__ src, int width, int height, int pitch, int maxv)
 {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
@@ -1419,7 +1419,7 @@ void cpu_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height, int pitch
 }
 
 template <typename pixel_t>
-__global__ void kl_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height, int pitch, int maxv)
+__global__ void kl_sum_box3x3(pixel_t* __restrict__ dst, pixel_t* __restrict__ src, int width, int height, int pitch, int maxv)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -1433,7 +1433,7 @@ __global__ void kl_sum_box3x3(pixel_t* dst, pixel_t* src, int width, int height,
 }
 
 void cpu_binary_flag(
-  uint8_t* dst, const uint8_t* srcY, const uint8_t* srcC,
+  uint8_t* __restrict__ dst, const uint8_t* __restrict__ srcY, const uint8_t* __restrict__ srcC,
   int nBlkX, int nBlkY, int pitch, int thY, int thC)
 {
   for (int y = 0; y < nBlkY; ++y) {
@@ -1446,7 +1446,7 @@ void cpu_binary_flag(
 }
 
 __global__ void kl_binary_flag(
-  uint8_t* dst, const uint8_t* srcY, const uint8_t* srcC,
+  uint8_t* __restrict__ dst, const uint8_t* __restrict__ srcY, const uint8_t* __restrict__ srcC,
   int nBlkX, int nBlkY, int pitch, int thY, int thC)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1460,7 +1460,9 @@ __global__ void kl_binary_flag(
 }
 
 template <int SCALE, int SHIFT>
-void cpu_bilinear_v(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch, PNeoEnv env)
+void cpu_bilinear_v(
+  uint8_t* __restrict__  dst, int width, int height, int dpitch,
+  const uint8_t* __restrict__  src, int spitch, PNeoEnv env)
 {
   enum { HALF = SCALE / 2 };
   for (int y = 0; y < height; ++y) {
@@ -1476,7 +1478,9 @@ void cpu_bilinear_v(uint8_t* dst, int width, int height, int dpitch, const uint8
 }
 
 template <int SCALE, int SHIFT>
-__global__ void kl_bilinear_v(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch)
+__global__ void kl_bilinear_v(
+  uint8_t* __restrict__ dst, int width, int height, int dpitch,
+  const uint8_t* __restrict__ src, int spitch)
 {
   enum { HALF = SCALE / 2 };
   int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1493,7 +1497,9 @@ __global__ void kl_bilinear_v(uint8_t* dst, int width, int height, int dpitch, c
 }
 
 template <int SCALE, int SHIFT>
-void launch_bilinear_v(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch, PNeoEnv env)
+void launch_bilinear_v(
+  uint8_t* __restrict__ dst, int width, int height, int dpitch,
+  const uint8_t* __restrict__ src, int spitch, PNeoEnv env)
 {
   dim3 threads(32, 8);
   dim3 h_blocks(nblocks(width, threads.x), nblocks(height, threads.y));
@@ -1502,7 +1508,9 @@ void launch_bilinear_v(uint8_t* dst, int width, int height, int dpitch, const ui
 }
 
 template <int SCALE, int SHIFT>
-void cpu_bilinear_h(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch, PNeoEnv env)
+void cpu_bilinear_h(
+  uint8_t* __restrict__  dst, int width, int height, int dpitch,
+  const uint8_t* __restrict__  src, int spitch, PNeoEnv env)
 {
   enum { HALF = SCALE / 2 };
   for (int y = 0; y < height; ++y) {
@@ -1518,7 +1526,9 @@ void cpu_bilinear_h(uint8_t* dst, int width, int height, int dpitch, const uint8
 }
 
 template <int SCALE, int SHIFT>
-__global__ void kl_bilinear_h(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch)
+__global__ void kl_bilinear_h(
+  uint8_t* __restrict__ dst, int width, int height, int dpitch,
+  const uint8_t* __restrict__ src, int spitch)
 {
   enum { HALF = SCALE / 2 };
   int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1535,7 +1545,9 @@ __global__ void kl_bilinear_h(uint8_t* dst, int width, int height, int dpitch, c
 }
 
 template <int SCALE, int SHIFT>
-void launch_bilinear_h(uint8_t* dst, int width, int height, int dpitch, const uint8_t* src, int spitch, PNeoEnv env)
+void launch_bilinear_h(
+  uint8_t* __restrict__ dst, int width, int height, int dpitch,
+  const uint8_t* __restrict__ src, int spitch, PNeoEnv env)
 {
   dim3 threads(32, 8);
   dim3 h_blocks(nblocks(width, threads.x), nblocks(height, threads.y));
@@ -1544,8 +1556,8 @@ void launch_bilinear_h(uint8_t* dst, int width, int height, int dpitch, const ui
 }
 
 template <typename pixel_t>
-void cpu_temporal_soften(pixel_t* dst,
-  const pixel_t* src0, const pixel_t* src1, const pixel_t* src2,
+void cpu_temporal_soften(pixel_t* __restrict__ dst,
+  const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, const pixel_t* __restrict__ src2,
   int width, int height, int pitch)
 {
   for (int y = 0; y < height; ++y) {
@@ -1557,8 +1569,8 @@ void cpu_temporal_soften(pixel_t* dst,
 }
 
 template <typename pixel_t>
-__global__ void kl_temporal_soften(pixel_t* dst,
-  const pixel_t* src0, const pixel_t* src1, const pixel_t* src2,
+__global__ void kl_temporal_soften(pixel_t* __restrict__ dst,
+  const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, const pixel_t* __restrict__ src2,
   int width, int height, int pitch)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -2014,9 +2026,9 @@ __device__ __host__ int BinomialMerge(int a, int b, int c)
 }
 
 template <typename pixel_t>
-void cpu_remove_combe2(pixel_t* dst,
-  const pixel_t* src, int width, int height, int pitch,
-  const uchar2* combe, int c_pitch, int thcombe)
+void cpu_remove_combe2(pixel_t* __restrict__ dst,
+  const pixel_t* __restrict__ src, int width, int height, int pitch,
+  const uchar2* __restrict__ combe, int c_pitch, int thcombe)
 {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
@@ -2035,9 +2047,9 @@ void cpu_remove_combe2(pixel_t* dst,
 }
 
 template <typename pixel_t>
-__global__ void kl_remove_combe2(pixel_t* dst,
-  const pixel_t* src, int width, int height, int pitch,
-  const uchar2* combe, int c_pitch, int thcombe)
+__global__ void kl_remove_combe2(pixel_t* __restrict__ dst,
+  const pixel_t* __restrict__ src, int width, int height, int pitch,
+  const uchar2* __restrict__ combe, int c_pitch, int thcombe)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -2124,6 +2136,12 @@ public:
   {
     if (vi.width & 7) env->ThrowError("[KRemoveCombe]: width must be multiple of 8");
     if (vi.height & 7) env->ThrowError("[KRemoveCombe]: height must be multiple of 8");
+
+    // superclipをチェック
+    VideoInfo supervi = superclip->GetVideoInfo();
+    if (supervi.num_frames != vi.num_frames) {
+      env->ThrowError("[KRemoveCombe]: padclip and superclip should have the same num_frames");
+    }
 
     vi.height -= VPAD * 2;
   }
