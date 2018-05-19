@@ -43,8 +43,34 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
 
     clip60 = call_xTGMC(0).KMergeStatic(src, stt)
     
-    if(ivtc) {
+    if(ucf) {
+        # ノイズ情報クリップ作成関数
+        UCFNoise = function[pad, cuda, OnDev](clip src) {
+            if(cuda) {
+                # ノイズ判定の準備。外周4ピクセルは判定から除外。Crop後にCUDAで処理するのにAlign必須
+                fields = src.SeparateFields().Crop(4,4,-4,-4).Align()
+                # オリジナルのDecombUCFだとCrop前にbinomialBlurを掛けていたが、CropとAlignが多くなるので
+                # Crop後に掛けちゃう。多少結果が変わるかもしれないけどあまり変わらないと思う
+                # オリジナルのbinomialBlurは理論的にはp=2.5相当（ただ見比べるとフィルタ範囲の違いよる差は結構出てる）
+                noise = fields.KGaussResize(p=2.5)
+                # ノイズ判定のための情報を集計。KAnalyzeNoiseの結果はCPUからアクセスされるのでOnCUDAしておく
+                src.KAnalyzeNoise(fields.KNoiseClip(noise), pad).OnDEV()
+            }
+            else {
+                w = src.Width()
+                h = src.Height()
+                epsilon = 0.0001
+                fields = src.SeparateFields().Crop(4,4,-4,-4)
+                noise = fields.GaussResize( w,h, 0,0, w+epsilon,h+epsilon, p=2.5 )
+                src.KAnalyzeNoise(fields.KNoiseClip(noise), pad)
+            }
+        }
 
+        # DecombUCFパラメータ
+        ucfparam = KDecombUCFParam()
+        # ノイズ情報クリップ
+        noise30 = src.UCFNoise()
+        
         if(cuda) {
             before60 = call_xTGMC(1).KMergeStatic(src, stt)
             after60 = call_xTGMC(2).KMergeStatic(src, stt)
@@ -54,11 +80,17 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
             before60 = src.TDeint(chroma=true,mode=1,edeint=src.nnedi3(field=-2),emask=src.TMM2(mode=1, order=-1, field=-1))
             after60 = before60
         }
+        
+        if(show) {
+            before60 = before60.Print("*** BOB BEFORE ***", y=20)
+            after60 = after60.Print("*** BOB AFTER ***", y=20)
+        }
+    }
+    
+    if(ivtc) {
 
         if(show) {
             clip60 = clip60.Print("****** BOB ******", y=20)
-            before60 = before60.Print("*** BOB BEFORE ***", y=20)
-            after60 = after60.Print("*** BOB AFTER ***", y=20)
         }
 
         ## 逆テレシネ解析 ##
@@ -76,36 +108,10 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
         super24 = super.KTelecineSuper(fmclip)
 
         # 逆テレシネ 縞除去はノイズ低減のため
-        clip24 = src.KTelecine(fmclip).KFMPad().KRemoveCombe(super24)
+        #clip24 = src.KTelecine(fmclip).KFMPad().KRemoveCombe(super24)
+        clip24 = pad.KTelecine(fmclip).KRemoveCombe(super24)
 
         if(ucf) {
-            # ノイズ情報クリップ作成関数
-            UCFNoise = function[pad, cuda, OnDev](clip src) {
-                if(cuda) {
-                    # ノイズ判定の準備。外周4ピクセルは判定から除外。Crop後にCUDAで処理するのにAlign必須
-                    fields = src.SeparateFields().Crop(4,4,-4,-4).Align()
-                    # オリジナルのDecombUCFだとCrop前にbinomialBlurを掛けていたが、CropとAlignが多くなるので
-                    # Crop後に掛けちゃう。多少結果が変わるかもしれないけどあまり変わらないと思う
-                    # オリジナルのbinomialBlurは理論的にはp=2.5相当（ただ見比べるとフィルタ範囲の違いよる差は結構出てる）
-                    noise = fields.KGaussResize(p=2.5)
-                    # ノイズ判定のための情報を集計。KAnalyzeNoiseの結果はCPUからアクセスされるのでOnCUDAしておく
-                    src.KAnalyzeNoise(fields.KNoiseClip(noise), pad).OnDEV()
-                }
-                else {
-                    w = src.Width()
-                    h = src.Height()
-                    epsilon = 0.0001
-                    fields = src.SeparateFields().Crop(4,4,-4,-4)
-                    noise = fields.GaussResize( w,h, 0,0, w+epsilon,h+epsilon, p=2.5 )
-                    src.KAnalyzeNoise(fields.KNoiseClip(noise), pad)
-                }
-            }
-
-            # DecombUCFパラメータ
-            ucfparam = KDecombUCFParam()
-            # ノイズ情報クリップ
-            noise30 = src.UCFNoise()
-
             # DoubleWeaveしたクリップ 縞除去はノイズ低減のため
             #dweave = src.DoubleWeave().KFMPad().KRemoveCombe(super)
             dweave = pad.DoubleWeave().KRemoveCombe(super)
@@ -167,7 +173,7 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
         }
     }
     else {
-        clip60
+        ucf ? clip60.KDecombUCF60(ucfparam, noise30, before60, after60) : clip60
     }
     
     OnDEV()
