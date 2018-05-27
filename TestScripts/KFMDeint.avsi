@@ -57,10 +57,10 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
                 src.KAnalyzeNoise(fields.KNoiseClip(noise), pad).OnDEV()
             }
             else {
-                w = src.Width()
-                h = src.Height()
-                epsilon = 0.0001
                 fields = src.SeparateFields().Crop(4,4,-4,-4)
+                w = fields.Width()
+                h = fields.Height()
+                epsilon = 0.0001
                 noise = fields.GaussResize( w,h, 0,0, w+epsilon,h+epsilon, p=2.5 )
                 src.KAnalyzeNoise(fields.KNoiseClip(noise), pad)
             }
@@ -135,7 +135,7 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
                 }
             }
             else {
-                clip24 = clip24.SMDegrain(tr=1, chroma=False)
+                clip24 = clip24.SMDegrain(tr=1)
             }
         }
 
@@ -155,7 +155,12 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
             }
             if(nr) {
                 # 30fpsは軽めの設定で行う
-                clip30 = clip30.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
+                if(cuda) {
+                    clip30 = clip30.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
+                }
+                else {
+                    clip30 = clip30.SMDegrain(tr=1)
+                }
             }
 
             # 30fps/60fps 切り替えマスク（maskとccをセットで使う）
@@ -176,5 +181,12 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
         ucf ? clip60.KDecombUCF60(ucfparam, noise30, before60, after60) : clip60
     }
     
-    OnDEV()
+    if(cuda) {
+		if(!gentime) {
+			OnDEV()
+		}
+	}
+	else {
+		Prefetch(4)
+	}
 }

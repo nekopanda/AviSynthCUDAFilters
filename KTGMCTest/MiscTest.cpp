@@ -77,9 +77,11 @@ TEST_F(MiscTest, KFMPerf)
 
     std::ofstream out(scriptpath);
 
+    out << "SetMemoryMax(1500, type=DEV_TYPE_CUDA)" << std::endl;
+    out << "SetDeviceOpt(DEV_CUDA_PINNED_HOST)" << std::endl;
     out << "Import(\"KFMDeint.avs\")" << std::endl;
     out << "src = LWLibavVideoSource(\"test.ts\").OnCPU(0)" << std::endl;
-    out << "src.KFM()" << std::endl;
+    out << "src.KFMDeint(mode=0, ucf=true, nr=true, cuda=true, show=true)" << std::endl;
 
     out.close();
 
