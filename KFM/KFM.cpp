@@ -166,7 +166,10 @@ float RSplitCost(const PulldownPatternField* pattern, const float* fv, const flo
 		if (pattern[i].split) {
 			nsplit++;
 			if (fv[i] < costth) {
-				sumcost += (costth - fv[i]) * fvcost[i];
+				// 相対的にfvを重視したいので、fvcostはlogで抑える
+				//「全切り替えポイントでfvが小さい」->大（ただし動きが全く無ければ小）
+				//「ある切り替えポイントでのみノイズが発生」->小 にしたい
+				sumcost += (costth - fv[i]) * log2f(fvcost[i] + 1.0f);
 			}
 		}
 	}

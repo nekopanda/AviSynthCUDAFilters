@@ -251,13 +251,15 @@ class KFMSwitch : public KFMFilterBase
     else {
       // 24pフレーム番号を取得
       Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
-      int n24 = frameInfo.cycleIndex * 4 + frameInfo.frameIndex + frameInfo.fieldShift;
+      // fieldShiftでサイクルをまたぐこともあるので、frameIndexはfieldShift込で計算
+      int frameIndex = frameInfo.frameIndex + frameInfo.fieldShift;
+      int n24 = frameInfo.cycleIndex * 4 + frameIndex;
 
-      if (frameInfo.frameIndex < 0) {
+      if (frameIndex < 0) {
         // 前に空きがあるので前のサイクル
         n24 = frameInfo.cycleIndex * 4 - 1;
       }
-      else if (frameInfo.frameIndex >= 4) {
+      else if (frameIndex >= 4) {
         // 後ろのサイクルのパターンを取得
         Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
         int nextPattern = nextfmframe.GetProperty("KFM_Pattern", -1);
@@ -333,7 +335,7 @@ class KFMSwitch : public KFMFilterBase
     if (!gentime && show) {
       const std::pair<int, float>* pfm = fmframe.GetReadPtr<std::pair<int, float>>();
       const char* fps = FrameTypeStr(frameType);
-      char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.1f", fps, pfm->first, pfm->second);
+      char buf[100]; sprintf(buf, "KFMSwitch: %s pattern:%2d cost:%.3f", fps, pfm->first, pfm->second);
       DrawText<pixel_t>(dst.frame, srcvi.BitsPerComponent(), 0, 0, buf, env);
       return dst.frame;
     }
