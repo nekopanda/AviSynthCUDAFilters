@@ -4,6 +4,7 @@
 #include "../AvsCUDA.h"
 
 #include <stdint.h>
+#include <algorithm>
 #include "CommonFunctions.h"
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
@@ -71,7 +72,7 @@ public:
     , isRGB(vi.IsPlanarRGB() || vi.IsPlanarRGBA())
   {
     PNeoEnv env = env_;
-    systemFrameAlign = env->GetProperty(AEP_FRAME_ALIGN);
+    systemFrameAlign = (int)env->GetProperty(AEP_FRAME_ALIGN);
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -783,10 +784,38 @@ AVSValue Invert::Create(AVSValue args, void*, IScriptEnvironment* env)
   return new Invert(args[0].AsClip(), args[0].AsClip()->GetVideoInfo().IsRGB() ? args[1].AsString("RGBA") : args[1].AsString("YUVA"), env);
 }
 
+AVSValue CUDAComputeCapability(AVSValue args, void*, IScriptEnvironment* env)
+{
+  int target = args[0].AsInt(0);
+  int devCount = 0;
+  CUDA_CHECK(cudaGetDeviceCount(&devCount));
+  if (devCount <= target) {
+    return -1;
+  }
+  cudaDeviceProp prop;
+  CUDA_CHECK(cudaGetDeviceProperties(&prop, target));
+  return prop.major * 10 + std::min(9, prop.minor);
+}
+
+AVSValue CUDADeviceName(AVSValue args, void*, IScriptEnvironment* env)
+{
+  int target = args[0].AsInt(0);
+  int devCount = 0;
+  CUDA_CHECK(cudaGetDeviceCount(&devCount));
+  if (devCount <= target) {
+    return "No such device ...";
+  }
+  cudaDeviceProp prop;
+  CUDA_CHECK(cudaGetDeviceProperties(&prop, target));
+  return env->SaveString(prop.name);
+}
+
 extern const FuncDefinition generic_filters[] = {
   { "Align",  BUILTIN_FUNC_PREFIX,  "c", Align::Create, 0 },
   { "Weave",            BUILTIN_FUNC_PREFIX, "c", Create_Weave },
   { "DoubleWeave",      BUILTIN_FUNC_PREFIX, "c", Create_DoubleWeave },
   { "Invert",       BUILTIN_FUNC_PREFIX, "c[channels]s", Invert::Create },
+  { "CUDAComputeCapability",       BUILTIN_FUNC_PREFIX, "[device]i", CUDAComputeCapability },
+  { "CUDADeviceName",       BUILTIN_FUNC_PREFIX, "[device]i", CUDADeviceName },
   { 0 }
 };

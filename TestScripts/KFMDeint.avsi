@@ -1,10 +1,11 @@
 # KFMとKTGMCを使ったインタレース解除
 # requires AvisynthNeo
 
-function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", bool "gentime", bool "cuda", int "dev", bool "show") {
+function KFMDeint(clip src, int "mode", string "preset", float "thswitch", bool "ucf", bool "nr", bool "gentime", bool "cuda", int "dev", bool "show") {
 
     mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps
     preset = default(preset, "Faster") # QTGMC preset
+    thswitch = default(thswitch, 0.5)
     ucf = default(ucf, false) # Enable DecombUCF
     nr = default(nr, false) # Enable Noise Reduction with (K)SMDegrain
     gentime = default(gentime, false) # generate VFR timecode (returns timecode clip)
@@ -14,6 +15,12 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
     
     ivtc = Select(mode, true, false, true) # Enable Inverse Telecine
     out24 = Select(mode, false, false, true) # output 24fps
+
+	# CUDAデバイスチェック
+	if(cuda) {
+		cc = CUDAComputeCapability(dev)
+		Assert(cc >= 35, "[KFM CUDA Error] Specified GPU: " + CUDADeviceName(dev) + " is not usable. (CC=" + string(cc) + " < 35)")
+	}
     
     OnDEV = cuda ? function[dev](clip c) { c.OnCUDA(2, dev) } : function(clip c) { c }
 
@@ -171,7 +178,7 @@ function KFMDeint(clip src, int "mode", string "preset", bool "ucf", bool "nr", 
             # DecombUCFを適用(60fps)
             ucfc = ucf ? clip60.KDecombUCF60(ucfparam, noise30, before60, after60) : Undefined()
 
-            result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=40, show=show, gentime=gentime)
+            result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, show=show, gentime=gentime)
 
             #(show && gentime) ? clip60.AMTVFRShow(result) : result
             result
