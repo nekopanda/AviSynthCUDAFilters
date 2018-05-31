@@ -71,6 +71,9 @@ private:
   FILE * fp_;
 };
 
+int64_t GetPerfFrequency();
+int64_t GetPerfCounter();
+
 class Stopwatch
 {
   int64_t sum;
@@ -80,7 +83,7 @@ public:
   Stopwatch()
     : sum(0)
   {
-    QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+    freq = GetPerfFrequency();
   }
 
   void reset() {
@@ -88,18 +91,16 @@ public:
   }
 
   void start() {
-    QueryPerformanceCounter((LARGE_INTEGER*)&prev);
+    prev = GetPerfCounter();
   }
 
   double current() {
-    int64_t cur;
-    QueryPerformanceCounter((LARGE_INTEGER*)&cur);
+    int64_t cur = GetPerfCounter();
     return (double)(cur - prev) / freq;
   }
 
   void stop() {
-    int64_t cur;
-    QueryPerformanceCounter((LARGE_INTEGER*)&cur);
+    int64_t cur = GetPerfCounter();
     sum += cur - prev;
     prev = cur;
   }
@@ -476,16 +477,41 @@ class KFMCycleAnalyze : public GenericVideoFilter
     }
   };
 
+  class DebugFile
+  {
+  public:
+    FILE* fp;
+    DebugFile(const std::string& fname , IScriptEnvironment* env)
+      : fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
+    {
+      if (fp == nullptr) {
+        env->ThrowError("Failed to open debug dump file ... %s", fname);
+      }
+    }
+    ~DebugFile() {
+      fclose(fp);
+    }
+  };
+
 	PClip source;
   VideoInfo srcvi;
   int numCycles;
 	PulldownPatterns patterns;
   int mode; // 0:リアルタイム最良, 1:1パス目, 2:2パス目
-	float lscale;
+	
+  // 基本パラメータ
+  float lscale;
 	float costth;
   float adj2224;
   float adj30;
+
+  // 2パス用
+  int cycleRange;
+  float NGThresh;
+  int pastCycles;
   std::string filepath;
+  int debug;
+
   std::vector<KFMResult> results;
 
   PVideoFrame MakeFrame(KFMResult result, IScriptEnvironment* env)
@@ -554,9 +580,11 @@ class KFMCycleAnalyze : public GenericVideoFilter
       return MakeFrame({ 0, 0, 0 }, env);
     }
 
-    int cycleRange = 5;
-    int pastCycles = 180;
-    float NGThresh = 3.0f;
+    std::unique_ptr<DebugFile> debugFile;
+
+    if (debug) {
+      debugFile = std::unique_ptr<DebugFile>(new DebugFile(filepath + ".debug", env));
+    }
 
     std::deque<KFMResult> recentBest;
     int pattern = 0;
@@ -571,12 +599,21 @@ class KFMCycleAnalyze : public GenericVideoFilter
 
       results.emplace_back(MakeResult(match, pattern));
       recentBest.emplace_front(MakeResult(match, BestPattern(match)));
-      
+
+      if (debug) {
+        auto cur = results.back();
+        auto best = recentBest[0];
+        fprintf(debugFile->fp, "%d,%d,%.2f,%d,%.2f", cycle, cur.pattern, cur.score, best.pattern, best.score);
+      }
+
       if (results.back().pattern != recentBest[0].pattern) {
         // 現在のパターンが最良パターンでないならパターン切り替え判定
         float NGScore = 0;
         for (int i = 0; i < std::min(cycleRange, (int)recentBest.size()); ++i) {
           NGScore += recentBest[i].score - results[cycle - i].score;
+        }
+        if (debug) {
+          fprintf(debugFile->fp, ",%.2f,%s", NGScore, (NGScore > NGThresh) ? "@" : "-");
         }
         if (NGScore > NGThresh) {
           // パターン切り替え
@@ -589,6 +626,10 @@ class KFMCycleAnalyze : public GenericVideoFilter
             }
           }
         }
+      }
+
+      if (debug) {
+        fprintf(debugFile->fp, "\n");
       }
 
       if (recentBest.size() > pastCycles) {
@@ -609,6 +650,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
 public:
   KFMCycleAnalyze(PClip fmframe, PClip source, int mode,
     float lscale, float costth, float adj2224, float adj30,
+    int cycleRange, float NGThresh, int pastCycles,
     const std::string& filepath, IScriptEnvironment* env)
 		: GenericVideoFilter(fmframe)
 		, source(source)
@@ -619,6 +661,9 @@ public:
 		, costth(costth)
     , adj2224(adj2224)
     , adj30(adj30)
+    , cycleRange(cycleRange)
+    , NGThresh(NGThresh)
+    , pastCycles(pastCycles)
     , filepath(filepath)
 	{
     
@@ -660,7 +705,10 @@ public:
       (float)args[4].AsFloat(1.5f), // costth
       (float)args[5].AsFloat(0.5f), // adj2224
       (float)args[6].AsFloat(0.7f), // adj30
-      args[7].AsString("kfm_cycle.dat"),           // filepath
+      args[7].AsInt(5),             // range
+      (float)args[8].AsFloat(3.0f), // thresh
+      args[9].AsInt(180),           // past
+      args[10].AsString("kfm_cycle.dat"),           // filepath
       env
     );
   }
@@ -760,4 +808,19 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   AddFuncUCF(env);
 
   return "K Field Matching Plugin";
+}
+
+#define NOMINMAX
+#include <Windows.h>
+
+int64_t GetPerfFrequency() {
+  int64_t freq;
+  QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+  return freq;
+}
+
+int64_t GetPerfCounter() {
+  int64_t counter;
+  QueryPerformanceCounter((LARGE_INTEGER*)&counter);
+  return counter;
 }
