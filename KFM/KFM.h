@@ -9,6 +9,8 @@ enum {
   MOVE = 1,
   SHIMA = 2,
   LSHIMA = 4,
+
+  NUM_PATTERNS = 21,
 };
 
 struct FMCount {
@@ -46,11 +48,22 @@ struct Frame24Info {
   int fieldShift; // 2224パターンを2323変換する場合のずらしが必要はフレーム
 };
 
-struct FMData;
+struct FMData {
+  // 縞と動きの和
+  float mft[14];
+  float mftr[14];
+  float mftcost[14];
+};
+
+struct FMMatch {
+  float shima[NUM_PATTERNS];
+  float costs[NUM_PATTERNS];
+};
 
 class PulldownPatterns
 {
-  enum { NUM_PATTERNS = 21 };
+public:
+private:
   PulldownPattern p2323, p2233, p2224, p30;
   int patternOffsets[5];
   const PulldownPatternField* allpatterns[NUM_PATTERNS];
@@ -71,7 +84,7 @@ public:
   // fieldStartIndexとnumFieldsは正しくない可能性があるので注意
   Frame24Info GetFrame60(int patternIndex, int n60) const;
 
-  std::pair<int, float> Matching(const FMData* data, int width, int height, float costth, float adj2224, float adj30) const;
+  FMMatch Matching(const FMData& data, int width, int height, float costth, float adj2224, float adj30) const;
 
 	static bool Is30p(int patternIndex) { return patternIndex == NUM_PATTERNS - 1; }
 };

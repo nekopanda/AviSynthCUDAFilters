@@ -6,6 +6,7 @@
 #include <numeric>
 #include <memory>
 #include <vector>
+#include <deque>
 
 #include "CommonFunctions.h"
 #include "TextOut.h"
@@ -19,6 +20,101 @@ void OnCudaError(cudaError_t err) {
   printf("[CUDA Error] %s (code: %d)\n", cudaGetErrorString(err), err);
 #endif
 }
+
+class File
+{
+public:
+  File(const std::string& path, const char* mode, IScriptEnvironment* env) {
+    fp_ = _fsopen(path.c_str(), mode, _SH_DENYNO);
+    if (fp_ == NULL) {
+      env->ThrowError("failed to open file %s", path.c_str());
+    }
+  }
+  ~File() {
+    fclose(fp_);
+  }
+  void write(uint8_t* ptr, size_t sz, IScriptEnvironment* env) const {
+    if (sz == 0) return;
+    if (fwrite(ptr, sz, 1, fp_) != 1) {
+      env->ThrowError("failed to write to file");
+    }
+  }
+  template <typename T>
+  void writeValue(T v, IScriptEnvironment* env) const {
+    write((uint8_t*)&v, sizeof(T), env);
+  }
+  size_t read(uint8_t* ptr, size_t sz, IScriptEnvironment* env) const {
+    if (sz == 0) return 0;
+    size_t ret = fread(ptr, 1, sz, fp_);
+    if (ret <= 0) {
+      env->ThrowError("failed to read from file");
+    }
+    return ret;
+  }
+  template <typename T>
+  T readValue(IScriptEnvironment* env) const {
+    T v;
+    if (read((uint8_t*)&v, sizeof(T), env) != sizeof(T)) {
+      env->ThrowError("failed to read value from file");
+    }
+    return v;
+  }
+  static bool exists(const std::string& path) {
+    FILE* fp_ = _fsopen(path.c_str(), "rb", _SH_DENYNO);
+    if (fp_) {
+      fclose(fp_);
+      return true;
+    }
+    return false;
+  }
+private:
+  FILE * fp_;
+};
+
+class Stopwatch
+{
+  int64_t sum;
+  int64_t prev;
+  int64_t freq;
+public:
+  Stopwatch()
+    : sum(0)
+  {
+    QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+  }
+
+  void reset() {
+    sum = 0;
+  }
+
+  void start() {
+    QueryPerformanceCounter((LARGE_INTEGER*)&prev);
+  }
+
+  double current() {
+    int64_t cur;
+    QueryPerformanceCounter((LARGE_INTEGER*)&cur);
+    return (double)(cur - prev) / freq;
+  }
+
+  void stop() {
+    int64_t cur;
+    QueryPerformanceCounter((LARGE_INTEGER*)&cur);
+    sum += cur - prev;
+    prev = cur;
+  }
+
+  double getTotal() const {
+    return (double)sum / freq;
+  }
+
+  double getAndReset() {
+    stop();
+    double ret = getTotal();
+    sum = 0;
+    return ret;
+  }
+};
 
 int GetDeviceTypes(const PClip& clip)
 {
@@ -134,13 +230,6 @@ public:
       args[1].AsClip(),       // clip30
       env);
   }
-};
-
-struct FMData {
-	// 縞と動きの和
-	float mft[14];
-	float mftr[14];
-	float mftcost[14];
 };
 
 float RSplitScore(const PulldownPatternField* pattern, const float* fv) {
@@ -329,98 +418,236 @@ Frame24Info PulldownPatterns::GetFrame60(int patternIndex, int n60) const {
   throw "Error !!!";
 }
 
-std::pair<int, float> PulldownPatterns::Matching(const FMData* data, int width, int height, float costth, float adj2224, float adj30) const
+FMMatch PulldownPatterns::Matching(const FMData& data, int width, int height, float costth, float adj2224, float adj30) const
 {
-	std::vector<float> mtshima(NUM_PATTERNS);
-	std::vector<float> mtshimacost(NUM_PATTERNS);
+  FMMatch match;
 
   // 各スコアを計算
   for (int i = 0; i < NUM_PATTERNS; ++i) {
-    mtshima[i] = RSplitScore(allpatterns[i], data->mftr);
-    mtshimacost[i] = RSplitCost(allpatterns[i], data->mftr, data->mftcost, costth);
+    match.shima[i] = RSplitScore(allpatterns[i], data.mftr);
+    match.costs[i] = RSplitCost(allpatterns[i], data.mftr, data.mftcost, costth);
   }
 
   // 調整
   for (int i = patternOffsets[2]; i < patternOffsets[3]; ++i) {
-    mtshima[i] -= adj2224;
+    match.shima[i] -= adj2224;
   }
   for (int i = patternOffsets[3]; i < patternOffsets[4]; ++i) {
-    mtshima[i] -= adj30;
+    match.shima[i] -= adj30;
   }
 
-	auto makeRet = [&](int n) {
-		float cost = mtshimacost[n];
-		return std::pair<int, float>(n, cost);
-	};
-
-	auto it = std::max_element(mtshima.begin(), mtshima.end());
-	return makeRet((int)(it - mtshima.begin()));
+  return match;
 }
 
 #pragma endregion
 
 class KFMCycleAnalyze : public GenericVideoFilter
 {
+  struct KFMResult {
+    int pattern;
+    float score;
+    float cost;
+  };
+
+  class ProgressPrinter
+  {
+    int total;
+    int prev;
+    Stopwatch sw;
+  public:
+    ProgressPrinter(int total)
+    : total(total)
+    , prev(0) {
+      fprintf(stderr, "テレシネパターン判定中... 予定ブロック数: %d\n", total);
+      sw.start();
+    }
+    void Progress(int current) {
+      double elapsed = sw.current();
+      if (elapsed >= 1.0) {
+        double fps = (current - prev) / elapsed;
+        fprintf(stderr, "%dブロック完了 %.2ffps\r", current, fps);
+
+        prev = current;
+        sw.start();
+      }
+    }
+    void Finish() {
+      fprintf(stderr, "完了\n");
+    }
+  };
+
 	PClip source;
   VideoInfo srcvi;
+  int numCycles;
 	PulldownPatterns patterns;
+  int mode; // 0:リアルタイム最良, 1:1パス目, 2:2パス目
 	float lscale;
 	float costth;
   float adj2224;
   float adj30;
-public:
-  KFMCycleAnalyze(PClip fmframe, PClip source, float lscale, float costth, float adj2224, float adj30, IScriptEnvironment* env)
-		: GenericVideoFilter(fmframe)
-		, source(source)
-    , srcvi(source->GetVideoInfo())
-		, lscale(lscale)
-		, costth(costth)
-    , adj2224(adj2224)
-    , adj30(adj30)
-	{
-    int out_bytes = sizeof(std::pair<int, float>);
-    vi.pixel_type = VideoInfo::CS_BGR32;
-    vi.width = 4;
-    vi.height = nblocks(out_bytes, vi.width * 4);
-  }
+  std::string filepath;
+  std::vector<KFMResult> results;
 
-  PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
-	{
-		FMCount fmcnt[18];
-		for (int i = -2; i <= 6; ++i) {
-			Frame frame = child->GetFrame(cycle * 5 + i, env);
-			memcpy(fmcnt + (i + 2) * 2, frame.GetReadPtr<uint8_t>(), sizeof(fmcnt[0]) * 2);
-		}
-
-		// shima, lshima, moveの画素数がマチマチなので大きさの違いによる重みの違いが出る
-		// shima, lshimaをmoveに合わせる（平均が同じになるようにする）
-
-		int mft[18] = { 0 };
-		for (int i = 1; i < 17; ++i) {
-			int split = std::min(fmcnt[i - 1].move, fmcnt[i].move);
-			mft[i] = split + fmcnt[i].shima + (int)(fmcnt[i].lshima * lscale);
-		}
-
-		FMData data = { 0 };
-		int vbase = (int)(srcvi.width * srcvi.height * 0.001f) >> 4;
-    for (int i = 0; i < 14; ++i) {
-			data.mft[i] = (float)mft[i + 2];
-			data.mftr[i] = (mft[i + 2] + vbase) * 2.0f / (mft[i + 1] + mft[i + 3] + vbase * 2.0f) - 1.0f;
-			data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / vbase;
-		}
-
-		auto result = patterns.Matching(&data, srcvi.width, srcvi.height, costth, adj2224, adj30);
-
+  PVideoFrame MakeFrame(KFMResult result, IScriptEnvironment* env)
+  {
     Frame dst = env->NewVideoFrame(vi);
     uint8_t* dstp = dst.GetWritePtr<uint8_t>();
     memcpy(dstp, &result, sizeof(result));
 
-		// フレームをCUDAに持っていった後、
+    // フレームをCUDAに持っていった後、
     // CPUからも取得できるようにプロパティにも入れておく
-    dst.SetProperty("KFM_Pattern", result.first);
-    dst.SetProperty("KFM_Cost", result.second);
+    dst.SetProperty("KFM_Pattern", result.pattern);
+    dst.SetProperty("KFM_Cost", result.cost);
 
     return dst.frame;
+  }
+
+  FMData GetFMData(int cycle, IScriptEnvironment* env)
+  {
+    FMCount fmcnt[18];
+    for (int i = -2; i <= 6; ++i) {
+      Frame frame = child->GetFrame(cycle * 5 + i, env);
+      memcpy(fmcnt + (i + 2) * 2, frame.GetReadPtr<uint8_t>(), sizeof(fmcnt[0]) * 2);
+    }
+
+    // shima, lshima, moveの画素数がマチマチなので大きさの違いによる重みの違いが出る
+    // shima, lshimaをmoveに合わせる（平均が同じになるようにする）
+
+    int mft[18] = { 0 };
+    for (int i = 1; i < 17; ++i) {
+      int split = std::min(fmcnt[i - 1].move, fmcnt[i].move);
+      mft[i] = split + fmcnt[i].shima + (int)(fmcnt[i].lshima * lscale);
+    }
+
+    FMData data = { 0 };
+    int vbase = (int)(srcvi.width * srcvi.height * 0.001f) >> 4;
+    for (int i = 0; i < 14; ++i) {
+      data.mft[i] = (float)mft[i + 2];
+      data.mftr[i] = (mft[i + 2] + vbase) * 2.0f / (mft[i + 1] + mft[i + 3] + vbase * 2.0f) - 1.0f;
+      data.mftcost[i] = (float)(mft[i + 1] + mft[i + 3]) / vbase;
+    }
+
+    return data;
+  }
+
+  int BestPattern(FMMatch& match)
+  {
+    auto it = std::max_element(match.shima, match.shima + NUM_PATTERNS);
+    return (int)(it - match.shima);
+  }
+
+  KFMResult MakeResult(FMMatch& match, int pattern)
+  {
+    return KFMResult{ pattern, match.shima[pattern], match.costs[pattern] };
+  }
+
+  PVideoFrame RealTimeGetFrame(int cycle, IScriptEnvironment* env)
+  {
+    auto result = patterns.Matching(GetFMData(cycle, env),
+      srcvi.width, srcvi.height, costth, adj2224, adj30);
+    return MakeFrame(MakeResult(result, BestPattern(result)), env);
+  }
+
+  PVideoFrame ExecuteOnePath(int not_used, IScriptEnvironment* env)
+  {
+    if (results.size() != 0) {
+      return MakeFrame({ 0, 0, 0 }, env);
+    }
+
+    int cycleRange = 5;
+    int pastCycles = 180;
+    float NGThresh = 3.0f;
+
+    std::deque<KFMResult> recentBest;
+    int pattern = 0;
+    ProgressPrinter printer(numCycles + cycleRange);
+
+    FMMatch match = { 0 };
+    for (int cycle = 0; cycle < numCycles + cycleRange; ++cycle) {
+      if (cycle < numCycles) {
+        match = patterns.Matching(GetFMData(cycle, env),
+          srcvi.width, srcvi.height, costth, adj2224, adj30);
+      }
+
+      results.emplace_back(MakeResult(match, pattern));
+      recentBest.emplace_front(MakeResult(match, BestPattern(match)));
+      
+      if (results.back().pattern != recentBest[0].pattern) {
+        // 現在のパターンが最良パターンでないならパターン切り替え判定
+        float NGScore = 0;
+        for (int i = 0; i < std::min(cycleRange, (int)recentBest.size()); ++i) {
+          NGScore += recentBest[i].score - results[cycle - i].score;
+        }
+        if (NGScore > NGThresh) {
+          // パターン切り替え
+          pattern = results.back().pattern;
+
+          // 遡って切り替え後のパターンが最良パターンなら書き換え
+          for (int i = 0; i < (int)recentBest.size(); ++i) {
+            if (recentBest[i].pattern == pattern) {
+              results[cycle - i] = recentBest[i];
+            }
+          }
+        }
+      }
+
+      if (recentBest.size() > pastCycles) {
+        recentBest.pop_back();
+      }
+
+      printer.Progress(cycle);
+    }
+
+    printer.Finish();
+
+    File file(filepath, "wb", env);
+    for (int i = 0; i < numCycles; ++i) {
+      file.writeValue(results[i], env);
+    }
+  }
+
+public:
+  KFMCycleAnalyze(PClip fmframe, PClip source, int mode,
+    float lscale, float costth, float adj2224, float adj30,
+    const std::string& filepath, IScriptEnvironment* env)
+		: GenericVideoFilter(fmframe)
+		, source(source)
+    , srcvi(source->GetVideoInfo())
+    , numCycles(nblocks(vi.num_frames, 5))
+    , mode(mode)
+		, lscale(lscale)
+		, costth(costth)
+    , adj2224(adj2224)
+    , adj30(adj30)
+    , filepath(filepath)
+	{
+    
+    int out_bytes = sizeof(std::pair<int, float>);
+    vi.pixel_type = VideoInfo::CS_BGR32;
+    vi.width = 4;
+    vi.height = nblocks(out_bytes, vi.width * 4);
+    vi.num_frames = (mode == 1) ? 1 : numCycles;
+
+    if (mode == 2) {
+      File file(filepath, "rb", env);
+      for (int i = 0; i < numCycles; ++i) {
+        results.push_back(file.readValue<KFMResult>(env));
+      }
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
+	{
+    if (mode == 0) {
+      return RealTimeGetFrame(cycle, env);
+    }
+    else if (mode == 1) {
+      return ExecuteOnePath(cycle, env);
+    }
+    else if (mode == 2) {
+      return MakeFrame(results[cycle], env);
+    }
+    return PVideoFrame();
 	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -428,10 +655,12 @@ public:
     return new KFMCycleAnalyze(
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
-			(float)args[2].AsFloat(5.0f), // lscale
-      (float)args[3].AsFloat(1.5f), // costth
-      (float)args[4].AsFloat(0.5f), // adj2224
-      (float)args[5].AsFloat(0.7f), // adj30
+      args[2].AsInt(0),       // mode
+			(float)args[3].AsFloat(5.0f), // lscale
+      (float)args[4].AsFloat(1.5f), // costth
+      (float)args[5].AsFloat(0.5f), // adj2224
+      (float)args[6].AsFloat(0.7f), // adj30
+      args[7].AsString("kfm_cycle.dat"),           // filepath
       env
     );
   }
