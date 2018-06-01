@@ -493,6 +493,12 @@ class KFMCycleAnalyze : public GenericVideoFilter
     }
   };
 
+  enum Mode {
+    REALTIME = 0,
+    GEN_PATTERN = 1,
+    READ_PATTERN = 2,
+  };
+
 	PClip source;
   VideoInfo srcvi;
   int numCycles;
@@ -501,7 +507,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
 	
   // 基本パラメータ
   float lscale;
-	float costth;
+  float costth;
   float adj2224;
   float adj30;
 
@@ -513,6 +519,11 @@ class KFMCycleAnalyze : public GenericVideoFilter
   int debug;
 
   std::vector<KFMResult> results;
+  std::unique_ptr<DebugFile> debugFile;
+
+  // テンポラリ
+  std::deque<KFMResult> recentBest;
+  int pattern;
 
   PVideoFrame MakeFrame(KFMResult result, IScriptEnvironment* env)
   {
@@ -574,24 +585,15 @@ class KFMCycleAnalyze : public GenericVideoFilter
     return MakeFrame(MakeResult(result, BestPattern(result)), env);
   }
 
-  PVideoFrame ExecuteOnePath(int not_used, IScriptEnvironment* env)
+  PVideoFrame ExecuteOnePath(int cycle, IScriptEnvironment* env)
   {
-    if (results.size() != 0) {
-      return MakeFrame({ 0, 0, 0 }, env);
+    if (results.size() != cycle) {
+      env->ThrowError("[KFMCycleAnalyze] Must be called in order!!!");
     }
-
-    std::unique_ptr<DebugFile> debugFile;
-
-    if (debug) {
-      debugFile = std::unique_ptr<DebugFile>(new DebugFile(filepath + ".debug", env));
-    }
-
-    std::deque<KFMResult> recentBest;
-    int pattern = 0;
-    ProgressPrinter printer(numCycles + cycleRange);
 
     FMMatch match = { 0 };
-    for (int cycle = 0; cycle < numCycles + cycleRange; ++cycle) {
+    int last = (cycle == numCycles - 1) ? (numCycles + cycleRange) : (cycle + 1);
+    for ( ; cycle < last; ++cycle) {
       if (cycle < numCycles) {
         match = patterns.Matching(GetFMData(cycle, env),
           srcvi.width, srcvi.height, costth, adj2224, adj30);
@@ -635,16 +637,17 @@ class KFMCycleAnalyze : public GenericVideoFilter
       if (recentBest.size() > pastCycles) {
         recentBest.pop_back();
       }
-
-      printer.Progress(cycle);
     }
 
-    printer.Finish();
-
-    File file(filepath, "wb", env);
-    for (int i = 0; i < numCycles; ++i) {
-      file.writeValue(results[i], env);
+    if (last == numCycles + cycleRange) {
+      // 最後はファイルに書き込む
+      File file(filepath, "wb", env);
+      for (int i = 0; i < numCycles; ++i) {
+        file.writeValue(results[i], env);
+      }
     }
+
+    return MakeFrame(results.back(), env);
   }
 
 public:
@@ -657,39 +660,47 @@ public:
     , srcvi(source->GetVideoInfo())
     , numCycles(nblocks(vi.num_frames, 5))
     , mode(mode)
-		, lscale(lscale)
-		, costth(costth)
+	  , lscale(lscale)
+	  , costth(costth)
     , adj2224(adj2224)
     , adj30(adj30)
     , cycleRange(cycleRange)
     , NGThresh(NGThresh)
     , pastCycles(pastCycles)
     , filepath(filepath)
+    , pattern(0)
 	{
-    
     int out_bytes = sizeof(std::pair<int, float>);
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 4;
     vi.height = nblocks(out_bytes, vi.width * 4);
-    vi.num_frames = (mode == 1) ? 1 : numCycles;
+    vi.num_frames = (mode == GEN_PATTERN) ? (numCycles + cycleRange) : numCycles;
 
-    if (mode == 2) {
+    if (mode == GEN_PATTERN) {
+      if (debug) {
+        debugFile = std::unique_ptr<DebugFile>(new DebugFile(filepath + ".debug", env));
+      }
+    }
+    else if (mode == READ_PATTERN) {
       File file(filepath, "rb", env);
       for (int i = 0; i < numCycles; ++i) {
         results.push_back(file.readValue<KFMResult>(env));
+      }
+      if (results.size() != numCycles) {
+        env->ThrowError("[KFMCycleAnalyze] # of cycles does not match. please generate again.");
       }
     }
   }
 
   PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
 	{
-    if (mode == 0) {
+    if (mode == REALTIME) {
       return RealTimeGetFrame(cycle, env);
     }
-    else if (mode == 1) {
+    else if (mode == GEN_PATTERN) {
       return ExecuteOnePath(cycle, env);
     }
-    else if (mode == 2) {
+    else if (mode == READ_PATTERN) {
       return MakeFrame(results[cycle], env);
     }
     return PVideoFrame();
@@ -701,7 +712,7 @@ public:
       args[0].AsClip(),       // fmframe
       args[1].AsClip(),       // source
       args[2].AsInt(0),       // mode
-			(float)args[3].AsFloat(5.0f), // lscale
+      (float)args[3].AsFloat(5.0f), // lscale
       (float)args[4].AsFloat(1.5f), // costth
       (float)args[5].AsFloat(0.5f), // adj2224
       (float)args[6].AsFloat(0.7f), // adj30
@@ -773,7 +784,7 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
-  env->AddFunction("KFMCycleAnalyze", "cc[lscale]f[costth]f[adj2224]f[adj30]f", KFMCycleAnalyze::Create, 0);
+  env->AddFunction("KFMCycleAnalyze", "cc[mode]i[lscale]f[costth]f[adj2224]f[adj30]f[range]i[thresh]f[past]i[filepath]s", KFMCycleAnalyze::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 }
 
