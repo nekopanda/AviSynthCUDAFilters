@@ -267,6 +267,22 @@ float RSplitCost(const PulldownPatternField* pattern, const float* fv, const flo
 	return sumcost / nsplit;
 }
 
+float RSplitReliability(const PulldownPatternField* pattern, const float* fv, float costth) {
+  int nsplit = 0;
+  float sumcost = 0;
+
+  for (int i = 0; i < 14; ++i) {
+    if (pattern[i].split) {
+      nsplit++;
+      if (fv[i] < costth) {
+        sumcost += (costth - fv[i]);
+      }
+    }
+  }
+
+  return sumcost / nsplit;
+}
+
 #pragma region PulldownPatterns
 
 PulldownPattern::PulldownPattern(int nf0, int nf1, int nf2, int nf3)
@@ -359,7 +375,7 @@ Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
 	// 前後のサイクルが24pで、サイクル境界の空きフレームとして30p部分も取得されることがある
 	// なので、5枚中、最初と最後のフレームだけは正しく60pに復元する必要がある
 	// 以下の処理がないと最後のフレーム(4枚目)がズレてしまう
-	if (patternIndex >= patternOffsets[3]) {
+	if (Is30p(patternIndex)) {
 		if (searchFrame >= 2) ++searchFrame;
 	}
 
@@ -427,6 +443,7 @@ FMMatch PulldownPatterns::Matching(const FMData& data, int width, int height, fl
   for (int i = 0; i < NUM_PATTERNS; ++i) {
     match.shima[i] = RSplitScore(allpatterns[i], data.mftr);
     match.costs[i] = RSplitCost(allpatterns[i], data.mftr, data.mftcost, costth);
+    match.reliability[i] = RSplitReliability(allpatterns[i], data.mftr, costth);
   }
 
   // 調整
@@ -442,41 +459,10 @@ FMMatch PulldownPatterns::Matching(const FMData& data, int width, int height, fl
 
 #pragma endregion
 
+std::string GetFullPath(const std::string& path);
+
 class KFMCycleAnalyze : public GenericVideoFilter
 {
-  struct KFMResult {
-    int pattern;
-    float score;
-    float cost;
-  };
-
-  class ProgressPrinter
-  {
-    int total;
-    int prev;
-    Stopwatch sw;
-  public:
-    ProgressPrinter(int total)
-    : total(total)
-    , prev(0) {
-      fprintf(stderr, "テレシネパターン判定中... 予定ブロック数: %d\n", total);
-      sw.start();
-    }
-    void Progress(int current) {
-      double elapsed = sw.current();
-      if (elapsed >= 1.0) {
-        double fps = (current - prev) / elapsed;
-        fprintf(stderr, "%dブロック完了 %.2ffps\r", current, fps);
-
-        prev = current;
-        sw.start();
-      }
-    }
-    void Finish() {
-      fprintf(stderr, "完了\n");
-    }
-  };
-
   class DebugFile
   {
   public:
@@ -504,6 +490,8 @@ class KFMCycleAnalyze : public GenericVideoFilter
   int numCycles;
 	PulldownPatterns patterns;
   int mode; // 0:リアルタイム最良, 1:1パス目, 2:2パス目
+
+  CycleAnalyzeInfo info;
 	
   // 基本パラメータ
   float lscale;
@@ -515,6 +503,12 @@ class KFMCycleAnalyze : public GenericVideoFilter
   int cycleRange;
   float NGThresh;
   int pastCycles;
+
+  // 60p判定用
+  float th60;  // 60p判定しきい値
+  float th24;  // 24p判定しきい値
+  float rel24; // 24p判定信頼性しきい値
+
   std::string filepath;
   int debug;
 
@@ -524,18 +518,12 @@ class KFMCycleAnalyze : public GenericVideoFilter
   // テンポラリ
   std::deque<KFMResult> recentBest;
   int pattern;
+  int current;
 
   PVideoFrame MakeFrame(KFMResult result, IScriptEnvironment* env)
   {
     Frame dst = env->NewVideoFrame(vi);
-    uint8_t* dstp = dst.GetWritePtr<uint8_t>();
-    memcpy(dstp, &result, sizeof(result));
-
-    // フレームをCUDAに持っていった後、
-    // CPUからも取得できるようにプロパティにも入れておく
-    dst.SetProperty("KFM_Pattern", result.pattern);
-    dst.SetProperty("KFM_Cost", result.cost);
-
+    *dst.GetWritePtr<KFMResult>() = result;
     return dst.frame;
   }
 
@@ -573,59 +561,97 @@ class KFMCycleAnalyze : public GenericVideoFilter
     return (int)(it - match.shima);
   }
 
-  KFMResult MakeResult(FMMatch& match, int pattern)
-  {
-    return KFMResult{ pattern, match.shima[pattern], match.costs[pattern] };
-  }
-
   PVideoFrame RealTimeGetFrame(int cycle, IScriptEnvironment* env)
   {
     auto result = patterns.Matching(GetFMData(cycle, env),
       srcvi.width, srcvi.height, costth, adj2224, adj30);
-    return MakeFrame(MakeResult(result, BestPattern(result)), env);
+    return MakeFrame(KFMResult(result, BestPattern(result)), env);
+  }
+
+  void Make60p()
+  {
+    bool is60p = true;
+    for (int i = 0; i < (int)results.size(); ++i) {
+      auto& cur = results[i];
+      if (is60p) {
+        // 60pモード
+        if (cur.cost < th24) {
+          if (cur.reliability < rel24) {
+            // 24pへ移行
+            is60p = false;
+          }
+        }
+        else {
+          cur.is60p = true;
+        }
+      }
+      else {
+        // 24pモード
+        if (cur.cost >= th60) {
+          // 60pへ移行
+          is60p = true;
+          // 遡ってth24以上なら60p化
+          for (int t = i; t >= 0; --t) {
+            auto& cur = results[t];
+            if (cur.cost < th24) {
+              if (cur.reliability < rel24) {
+                // 24pへ移行するポイント
+                break;
+              }
+            }
+            else {
+              cur.is60p = true;
+            }
+          }
+        }
+      }
+    }
   }
 
   PVideoFrame ExecuteOnePath(int cycle, IScriptEnvironment* env)
   {
-    if (results.size() != cycle) {
-      env->ThrowError("[KFMCycleAnalyze] Must be called in order!!!");
+    if (cycle < results.size()) {
+      return MakeFrame(results[cycle], env);
     }
 
     FMMatch match = { 0 };
     int last = (cycle == numCycles - 1) ? (numCycles + cycleRange) : (cycle + 1);
-    for ( ; cycle < last; ++cycle) {
-      if (cycle < numCycles) {
-        match = patterns.Matching(GetFMData(cycle, env),
+    for ( ; current < last; ++current) {
+      if (current < numCycles) {
+        match = patterns.Matching(GetFMData(current, env),
           srcvi.width, srcvi.height, costth, adj2224, adj30);
       }
 
-      results.emplace_back(MakeResult(match, pattern));
-      recentBest.emplace_front(MakeResult(match, BestPattern(match)));
+      results.emplace_back(KFMResult(match, pattern));
+      recentBest.emplace_front(KFMResult(match, BestPattern(match)));
 
       if (debug) {
         auto cur = results.back();
         auto best = recentBest[0];
-        fprintf(debugFile->fp, "%d,%d,%.2f,%d,%.2f", cycle, cur.pattern, cur.score, best.pattern, best.score);
+        fprintf(debugFile->fp, "%d,%d,%.2f,%.2f,%.2f,%d,%.2f,%.2f,%.2f", current, 
+          cur.pattern, cur.score, cur.cost, cur.reliability,
+          best.pattern, best.score, best.cost, best.reliability);
       }
 
       if (results.back().pattern != recentBest[0].pattern) {
         // 現在のパターンが最良パターンでないならパターン切り替え判定
         float NGScore = 0;
         for (int i = 0; i < std::min(cycleRange, (int)recentBest.size()); ++i) {
-          NGScore += recentBest[i].score - results[cycle - i].score;
+          NGScore += recentBest[i].score - results[current - i].score;
         }
         if (debug) {
           fprintf(debugFile->fp, ",%.2f,%s", NGScore, (NGScore > NGThresh) ? "@" : "-");
         }
         if (NGScore > NGThresh) {
           // パターン切り替え
-          pattern = results.back().pattern;
+          pattern = recentBest[0].pattern;
 
           // 遡って切り替え後のパターンが最良パターンなら書き換え
           for (int i = 0; i < (int)recentBest.size(); ++i) {
-            if (recentBest[i].pattern == pattern) {
-              results[cycle - i] = recentBest[i];
+            if (recentBest[i].pattern != pattern) {
+              break;
             }
+            results[current - i] = recentBest[i];
           }
         }
       }
@@ -640,41 +666,61 @@ class KFMCycleAnalyze : public GenericVideoFilter
     }
 
     if (last == numCycles + cycleRange) {
+      // 60p判定
+      Make60p();
       // 最後はファイルに書き込む
       File file(filepath, "wb", env);
       for (int i = 0; i < numCycles; ++i) {
         file.writeValue(results[i], env);
       }
+      if (debug) {
+        debugFile = nullptr;
+        auto file = std::unique_ptr<DebugFile>(new DebugFile(filepath + ".pattern", env));
+        for (int i = 0; i < numCycles; ++i) {
+          fprintf(file->fp, "%d\n", results[i].is60p ? NUM_PATTERNS : results[i].pattern);
+        }
+      }
     }
 
-    return MakeFrame(results.back(), env);
+    return MakeFrame(results[cycle], env);
   }
 
 public:
   KFMCycleAnalyze(PClip fmframe, PClip source, int mode,
     float lscale, float costth, float adj2224, float adj30,
     int cycleRange, float NGThresh, int pastCycles,
-    const std::string& filepath, IScriptEnvironment* env)
+    float th60, float th24, float rel24,
+    const std::string& filepath, int debug, IScriptEnvironment* env)
 		: GenericVideoFilter(fmframe)
 		, source(source)
     , srcvi(source->GetVideoInfo())
     , numCycles(nblocks(vi.num_frames, 5))
     , mode(mode)
+    , info(mode)
 	  , lscale(lscale)
 	  , costth(costth)
     , adj2224(adj2224)
     , adj30(adj30)
     , cycleRange(cycleRange)
-    , NGThresh(NGThresh)
+    , NGThresh(NGThresh * cycleRange)
     , pastCycles(pastCycles)
-    , filepath(filepath)
+    , th60(th60)
+    , th24(th24)
+    , rel24(rel24)
+    , filepath(GetFullPath(filepath)) // GetFrame時とカレントディレクトリが違うのでフルパスにしておく
+    , debug(debug)
     , pattern(0)
+    , current(0)
 	{
-    int out_bytes = sizeof(std::pair<int, float>);
+    int out_bytes = sizeof(KFMResult);
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 4;
     vi.height = nblocks(out_bytes, vi.width * 4);
-    vi.num_frames = (mode == GEN_PATTERN) ? (numCycles + cycleRange) : numCycles;
+    vi.num_frames = numCycles;
+
+    if (mode < 0 || mode > 2) {
+      env->ThrowError("[KFMCycleAnalyze] mode(%d) must be in range 0-2", mode);
+    }
 
     if (mode == GEN_PATTERN) {
       if (debug) {
@@ -690,6 +736,8 @@ public:
         env->ThrowError("[KFMCycleAnalyze] # of cycles does not match. please generate again.");
       }
     }
+
+    CycleAnalyzeInfo::SetParam(vi, &info);
   }
 
   PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
@@ -715,11 +763,15 @@ public:
       (float)args[3].AsFloat(5.0f), // lscale
       (float)args[4].AsFloat(1.5f), // costth
       (float)args[5].AsFloat(0.5f), // adj2224
-      (float)args[6].AsFloat(0.7f), // adj30
+      (float)args[6].AsFloat(1.5f), // adj30
       args[7].AsInt(5),             // range
-      (float)args[8].AsFloat(3.0f), // thresh
+      (float)args[8].AsFloat(1.0f), // thresh
       args[9].AsInt(180),           // past
-      args[10].AsString("kfm_cycle.dat"),           // filepath
+      args[10].AsFloat(3.0f),           // th60
+      args[11].AsFloat(0.1f),           // th30
+      args[12].AsFloat(0.2f),           // rell24
+      args[13].AsString("kfm_cycle.dat"),           // filepath
+      args[14].AsInt(0),           // debug
       env
     );
   }
@@ -784,7 +836,7 @@ void AddFuncFM(IScriptEnvironment* env)
 {
   env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
-  env->AddFunction("KFMCycleAnalyze", "cc[mode]i[lscale]f[costth]f[adj2224]f[adj30]f[range]i[thresh]f[past]i[filepath]s", KFMCycleAnalyze::Create, 0);
+  env->AddFunction("KFMCycleAnalyze", "cc[mode]i[lscale]f[costth]f[adj2224]f[adj30]f[range]i[thresh]f[past]i[th60]f[th24]f[rel24]f[filepath]s[debug]i", KFMCycleAnalyze::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 }
 
@@ -834,4 +886,15 @@ int64_t GetPerfCounter() {
   int64_t counter;
   QueryPerformanceCounter((LARGE_INTEGER*)&counter);
   return counter;
+}
+
+std::string GetFullPath(const std::string& path)
+{
+  char buf[MAX_PATH];
+  int sz = GetFullPathNameA(path.c_str(), sizeof(buf), buf, nullptr);
+  if (sz >= sizeof(buf)) {
+  }
+  if (sz == 0) {
+  }
+  return buf;
 }

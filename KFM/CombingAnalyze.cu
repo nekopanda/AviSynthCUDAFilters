@@ -13,31 +13,6 @@
 #include "KFMFilterBase.cuh"
 #include "Copy.h"
 
-
-__device__ __host__ void CountFlag(int cnt[3], int flag)
-{
-  if (flag & MOVE) cnt[0]++;
-  if (flag & SHIMA) cnt[1]++;
-  if (flag & LSHIMA) cnt[2]++;
-}
-
-void cpu_count_fmflags(FMCount*  __restrict__ dst, const uchar4*  __restrict__ flagp, int width, int height, int pitch)
-{
-  int cnt[3] = { 0 };
-  for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      uchar4 flags = flagp[x + y * pitch];
-      CountFlag(cnt, flags.x);
-      CountFlag(cnt, flags.y);
-      CountFlag(cnt, flags.z);
-      CountFlag(cnt, flags.w);
-    }
-  }
-  dst->move = cnt[0];
-  dst->shima = cnt[1];
-  dst->lshima = cnt[2];
-}
-
 __global__ void kl_init_fmcount(FMCount* dst)
 {
   int tx = threadIdx.x;
@@ -48,355 +23,6 @@ enum {
   FM_COUNT_TH_W = 32,
   FM_COUNT_TH_H = 16,
   FM_COUNT_THREADS = FM_COUNT_TH_W * FM_COUNT_TH_H,
-};
-
-__global__ void kl_count_fmflags(FMCount* __restrict__ dst, const uchar4* __restrict__ flagp, int width, int height, int pitch)
-{
-  int x = threadIdx.x + blockIdx.x * FM_COUNT_TH_W;
-  int y = threadIdx.y + blockIdx.y * FM_COUNT_TH_H;
-  int tid = threadIdx.x + threadIdx.y * FM_COUNT_TH_W;
-
-  int cnt[3] = { 0, 0, 0 };
-
-  if (x < width && y < height) {
-    uchar4 flags = flagp[x + y * pitch];
-    CountFlag(cnt, flags.x);
-    CountFlag(cnt, flags.y);
-    CountFlag(cnt, flags.z);
-    CountFlag(cnt, flags.w);
-  }
-
-  __shared__ int sbuf[FM_COUNT_THREADS * 3];
-  dev_reduceN<int, 3, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt, sbuf);
-
-  if (tid == 0) {
-    atomicAdd(&dst->move, cnt[0]);
-    atomicAdd(&dst->shima, cnt[1]);
-    atomicAdd(&dst->lshima, cnt[2]);
-  }
-}
-
-class KFMFrameAnalyze : public KFMFilterBase
-{
-  VideoInfo padvi;
-  VideoInfo flagvi;
-
-  FrameOldAnalyzeParam prmY;
-  FrameOldAnalyzeParam prmC;
-
-  PClip superclip;
-
-  void CountFlags(Frame& flag, Frame& dst, int parity, PNeoEnv env)
-  {
-    const uchar4* flagp = flag.GetReadPtr<uchar4>(PLANAR_Y);
-    FMCount* fmcnt = dst.GetWritePtr<FMCount>();
-    int width4 = srcvi.width >> 2;
-    int flagPitch = flag.GetPitch<uchar4>(PLANAR_Y);
-
-    FMCount* fmcnt0 = &fmcnt[0];
-    FMCount* fmcnt1 = &fmcnt[1];
-    if (!parity) {
-      std::swap(fmcnt0, fmcnt1);
-    }
-
-    if (IS_CUDA) {
-      dim3 threads(FM_COUNT_TH_W, FM_COUNT_TH_H);
-      dim3 blocks(nblocks(srcvi.width, threads.x), nblocks(srcvi.height / 2, threads.y));
-      kl_init_fmcount << <1, 2 >> > (fmcnt);
-      DEBUG_SYNC;
-      kl_count_fmflags << <blocks, threads >> >(
-        fmcnt0, flagp, width4, srcvi.height / 2, flagPitch * 2);
-      DEBUG_SYNC;
-      kl_count_fmflags << <blocks, threads >> >(
-        fmcnt1, flagp + flagPitch, width4, srcvi.height / 2, flagPitch * 2);
-      DEBUG_SYNC;
-    }
-    else {
-      cpu_count_fmflags(fmcnt0, flagp, width4, srcvi.height / 2, flagPitch * 2);
-      cpu_count_fmflags(fmcnt1, flagp + flagPitch, width4, srcvi.height / 2, flagPitch * 2);
-    }
-  }
-
-  template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, PNeoEnv env)
-  {
-    int parity = child->GetParity(n);
-
-    Frame f0padded;
-    Frame f1padded;
-
-    if (superclip) {
-      f0padded = Frame(superclip->GetFrame(n, env), VPAD);
-      f1padded = Frame(superclip->GetFrame(n + 1, env), VPAD);
-    }
-    else {
-      Frame f0 = child->GetFrame(n, env);
-      Frame f1 = child->GetFrame(n + 1, env);
-      f0padded = Frame(env->NewVideoFrame(padvi), VPAD);
-      f1padded = Frame(env->NewVideoFrame(padvi), VPAD);
-      CopyFrame<pixel_t>(f0, f0padded, env);
-      PadFrame<pixel_t>(f0padded, env);
-      CopyFrame<pixel_t>(f1, f1padded, env);
-      PadFrame<pixel_t>(f1padded, env);
-    }
-
-    Frame fflag = env->NewVideoFrame(flagvi);
-    Frame dst = env->NewVideoFrame(vi);
-
-    AnalyzeFrame<pixel_t>(f0padded, f1padded, fflag, &prmY, &prmC, env);
-    MergeUVFlags(fflag, env); // UV判定結果をYにマージ
-    CountFlags(fflag, dst, parity, env);
-
-    return dst.frame;
-  }
-
-public:
-  KFMFrameAnalyze(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, PClip pad, IScriptEnvironment* env)
-    : KFMFilterBase(clip)
-    , prmY(threshMY, threshSY, threshSY * 3)
-    , prmC(threshMC, threshSC, threshSC * 3)
-    , padvi(vi)
-    , flagvi()
-    , superclip(pad)
-  {
-    padvi.height += VPAD * 2;
-
-    int out_bytes = sizeof(FMCount) * 2;
-    vi.pixel_type = VideoInfo::CS_BGR32;
-    vi.width = 16;
-    vi.height = nblocks(out_bytes, vi.width * 4);
-
-    flagvi.pixel_type = Get8BitType(srcvi);
-    flagvi.width = srcvi.width;
-    flagvi.height = srcvi.height;
-  }
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-  {
-    PNeoEnv env = env_;
-
-    int pixelSize = vi.ComponentSize();
-    switch (pixelSize) {
-    case 1:
-      return GetFrameT<uint8_t>(n, env);
-    case 2:
-      return GetFrameT<uint16_t>(n, env);
-    default:
-      env->ThrowError("[KFMFrameAnalyze] Unsupported pixel format");
-    }
-
-    return PVideoFrame();
-  }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-  {
-    return new KFMFrameAnalyze(
-      args[0].AsClip(),       // clip
-      args[1].AsInt(15),      // threshMY
-      args[2].AsInt(7),       // threshSY
-      args[3].AsInt(20),      // threshMC
-      args[4].AsInt(8),       // threshSC
-      args[5].AsClip(),       // pad
-      env
-    );
-  }
-};
-
-class KFMFrameAnalyzeCheck : public GenericVideoFilter
-{
-  PClip clipB;
-public:
-  KFMFrameAnalyzeCheck(PClip clipA, PClip clipB, IScriptEnvironment* env)
-    : GenericVideoFilter(clipA)
-    , clipB(clipB)
-  {}
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-  {
-    PNeoEnv env = env_;
-
-    Frame frameA = child->GetFrame(n, env);
-    Frame frameB = clipB->GetFrame(n, env);
-
-    const FMCount* fmcntA = frameA.GetReadPtr<FMCount>();
-    const FMCount* fmcntB = frameB.GetReadPtr<FMCount>();
-
-    if (memcmp(fmcntA, fmcntB, sizeof(FMCount) * 2)) {
-      env->ThrowError("[KFMFrameAnalyzeCheck] Unmatch !!!");
-    }
-
-    return frameA.frame;
-  }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-  {
-    return new KFMFrameAnalyzeCheck(
-      args[0].AsClip(),       // clipA
-      args[1].AsClip(),       // clipB
-      env
-    );
-  }
-};
-
-class KFMFrameAnalyzeShow : public KFMFilterBase
-{
-  typedef uint8_t pixel_t;
-
-  VideoInfo padvi;
-  VideoInfo flagvi;
-
-  FrameOldAnalyzeParam prmY;
-  FrameOldAnalyzeParam prmC;
-
-  PClip superclip;
-
-  int threshMY;
-  int threshSY;
-  int threshLSY;
-  int threshMC;
-  int threshSC;
-  int threshLSC;
-
-  int logUVx;
-  int logUVy;
-
-  void VisualizeFlags(Frame& dst, Frame& fflag, PNeoEnv env)
-  {
-    // 判定結果を表示
-    int black[] = { 0, 128, 128 };
-    int blue[] = { 73, 230, 111 };
-    int gray[] = { 140, 128, 128 };
-    int purple[] = { 197, 160, 122 };
-
-    const pixel_t* __restrict__ fflagp = fflag.GetReadPtr<pixel_t>(PLANAR_Y);
-    pixel_t* __restrict__ dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
-    pixel_t* __restrict__ dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
-    pixel_t* __restrict__ dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
-
-    int flagPitch = fflag.GetPitch<pixel_t>(PLANAR_Y);
-    int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
-    int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
-
-    // 黒で初期化しておく
-    for (int y = 0; y < vi.height; ++y) {
-      for (int x = 0; x < vi.width; ++x) {
-        int offY = x + y * dstPitchY;
-        int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
-        dstY[offY] = black[0];
-        dstU[offUV] = black[1];
-        dstV[offUV] = black[2];
-      }
-    }
-
-    // 色を付ける
-    for (int y = 0; y < vi.height; ++y) {
-      for (int x = 0; x < vi.width; ++x) {
-        int flag = fflagp[x + y * flagPitch];
-        flag |= (flag >> 4);
-
-        int* color = nullptr;
-        if ((flag & MOVE) && (flag & SHIMA)) {
-          color = purple;
-        }
-        else if (flag & MOVE) {
-          color = blue;
-        }
-        else if (flag & SHIMA) {
-          color = gray;
-        }
-
-        if (color) {
-          int offY = x + y * dstPitchY;
-          int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
-          dstY[offY] = color[0];
-          dstU[offUV] = color[1];
-          dstV[offUV] = color[2];
-        }
-      }
-    }
-  }
-
-  template <typename pixel_t>
-  PVideoFrame GetFrameT(int n, PNeoEnv env)
-  {
-    Frame f0padded;
-    Frame f1padded;
-
-    if (superclip) {
-      f0padded = Frame(superclip->GetFrame(n, env), VPAD);
-      f1padded = Frame(superclip->GetFrame(n + 1, env), VPAD);
-    }
-    else {
-      Frame f0 = child->GetFrame(n, env);
-      Frame f1 = child->GetFrame(n + 1, env);
-      f0padded = Frame(env->NewVideoFrame(padvi), VPAD);
-      f1padded = Frame(env->NewVideoFrame(padvi), VPAD);
-      CopyFrame<pixel_t>(f0, f0padded, env);
-      PadFrame<pixel_t>(f0padded, env);
-      CopyFrame<pixel_t>(f1, f1padded, env);
-      PadFrame<pixel_t>(f1padded, env);
-    }
-
-    Frame fflag = env->NewVideoFrame(flagvi);
-    Frame dst = env->NewVideoFrame(vi);
-
-    AnalyzeFrame<pixel_t>(f0padded, f1padded, fflag, &prmY, &prmC, env);
-    MergeUVFlags(fflag, env); // UV判定結果をYにマージ
-    VisualizeFlags(dst, fflag, env);
-
-    return dst.frame;
-  }
-
-public:
-  KFMFrameAnalyzeShow(PClip clip, int threshMY, int threshSY, int threshMC, int threshSC, PClip pad, IScriptEnvironment* env)
-    : KFMFilterBase(clip)
-    , prmY(threshMY, threshSY, threshSY * 3)
-    , prmC(threshMC, threshSC, threshSC * 3)
-    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
-    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-    , padvi(vi)
-    , flagvi()
-    , superclip(pad)
-  {
-    padvi.height += VPAD * 2;
-
-    flagvi.pixel_type = Get8BitType(srcvi);
-    flagvi.width = srcvi.width;
-    flagvi.height = srcvi.height;
-  }
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-  {
-    PNeoEnv env = env_;
-
-    int pixelSize = vi.ComponentSize();
-    switch (pixelSize) {
-    case 1:
-      return GetFrameT<uint8_t>(n, env);
-    case 2:
-      return GetFrameT<uint16_t>(n, env);
-    default:
-      env->ThrowError("[KFMFrameDev] Unsupported pixel format");
-    }
-
-    return PVideoFrame();
-  }
-
-  // CUDA非対応
-  int __stdcall SetCacheHints(int cachehints, int frame_range) { return 0; }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-  {
-    return new KFMFrameAnalyzeShow(
-      args[0].AsClip(),       // clip
-      args[1].AsInt(10),       // threshMY
-      args[2].AsInt(10),       // threshSY
-      args[3].AsInt(10),       // threshMC
-      args[4].AsInt(10),       // threshSC
-      args[5].AsClip(),        // pad
-      env
-    );
-  }
 };
 
 enum {
@@ -427,7 +53,7 @@ __host__ __device__ int calc_diff(
 }
 
 template<typename pixel_t, bool parity>
-void cpu_analyze2_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
+void cpu_analyze_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
   const pixel_t* __restrict__ f0, const pixel_t* __restrict__ f1,
   int pitch, int nBlkX, int nBlkY, int shift)
 {
@@ -517,7 +143,7 @@ void cpu_analyze2_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, 
 }
 
 template<typename pixel_t, bool parity>
-__global__ void kl_analyze2_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
+__global__ void kl_analyze_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
   const pixel_t* __restrict__ f0, const pixel_t* __restrict__ f1,
   int pitch, int nBlkX, int nBlkY, int shift)
 {
@@ -649,22 +275,22 @@ class KFMSuper : public KFMFilterBase
       dim3 threads(DC_BLOCK_SIZE, DC_BLOCK_TH_W, DC_BLOCK_TH_H);
       dim3 blocks(nblocks(width, DC_BLOCK_TH_W), nblocks(height, DC_BLOCK_TH_H));
       dim3 blocksUV(nblocks(widthUV, DC_BLOCK_TH_W), nblocks(heightUV, DC_BLOCK_TH_H));
-      kl_analyze2_frame<pixel_t, parity> << <blocks, threads >> >(
+      kl_analyze_frame<pixel_t, parity> << <blocks, threads >> >(
         combe0Y, combe1Y, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       DEBUG_SYNC;
-      kl_analyze2_frame<pixel_t, parity> << <blocksUV, threads >> >(
+      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> >(
         combe0U, combe1U, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
-      kl_analyze2_frame<pixel_t, parity> << <blocksUV, threads >> >(
+      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> >(
         combe0V, combe1V, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
     }
     else {
-      cpu_analyze2_frame<pixel_t, parity>(
+      cpu_analyze_frame<pixel_t, parity>(
         combe0Y, combe1Y, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
-      cpu_analyze2_frame<pixel_t, parity>(
+      cpu_analyze_frame<pixel_t, parity>(
         combe0U, combe1U, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
-      cpu_analyze2_frame<pixel_t, parity>(
+      cpu_analyze_frame<pixel_t, parity>(
         combe0V, combe1V, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
     }
   }
@@ -732,6 +358,117 @@ public:
     return new KFMSuper(
       args[0].AsClip(),       // clip
       args[1].AsClip(),       // pad
+      env
+    );
+  }
+};
+
+__global__ void kl_clean_super(uchar2* __restrict__ dst,
+  const uchar2* __restrict__ prev, const uchar2* __restrict__ cur,
+  int width, int height, int pitch, int thresh)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    uchar2 v = cur[x + y * pitch];
+    if (prev[x + y * pitch].y <= thresh && v.y <= thresh) {
+      v.x = 0;
+    }
+    dst[x + y * pitch] = v;
+  }
+}
+
+void cpu_clean_super(uchar2* __restrict__ dst,
+  const uchar2* __restrict__ prev, const uchar2* __restrict__ cur,
+  int width, int height, int pitch, int thresh)
+{
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      uchar2 v = cur[x + y * pitch];
+      if (prev[x + y * pitch].y <= thresh && v.y <= thresh) {
+        v.x = 0;
+      }
+      dst[x + y * pitch] = v;
+    }
+  }
+}
+
+class KCleanSuper : public KFMFilterBase
+{
+  int thY;
+  int thC;
+
+  void CleanSuper(Frame& prev, Frame& cur, Frame& dst, PNeoEnv env)
+  {
+    const uchar2* prevY = prev.GetReadPtr<uchar2>(PLANAR_Y);
+    const uchar2* curY = cur.GetReadPtr<uchar2>(PLANAR_Y);
+    const uchar2* prevU = prev.GetReadPtr<uchar2>(PLANAR_U);
+    const uchar2* curU = cur.GetReadPtr<uchar2>(PLANAR_U);
+    const uchar2* prevV = prev.GetReadPtr<uchar2>(PLANAR_V);
+    const uchar2* curV = cur.GetReadPtr<uchar2>(PLANAR_V);
+    uchar2* dstY = dst.GetWritePtr<uchar2>(PLANAR_Y);
+    uchar2* dstU = dst.GetWritePtr<uchar2>(PLANAR_U);
+    uchar2* dstV = dst.GetWritePtr<uchar2>(PLANAR_V);
+
+    int pitchY = cur.GetPitch<uchar2>(PLANAR_Y);
+    int pitchUV = cur.GetPitch<uchar2>(PLANAR_U);
+    int width = cur.GetWidth<uchar2>(PLANAR_Y);
+    int widthUV = cur.GetWidth<uchar2>(PLANAR_U);
+    int height = cur.GetHeight(PLANAR_Y);
+    int heightUV = cur.GetHeight(PLANAR_U);
+
+    int shift = srcvi.BitsPerComponent() - 8 + 4;
+
+    if (IS_CUDA) {
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width, 32), nblocks(height, 16));
+      dim3 blocksUV(nblocks(widthUV, 32), nblocks(heightUV, 16));
+      kl_clean_super << <blocks, threads >> >(
+        dstY, prevY, curY, width, height, pitchY, thY);
+      DEBUG_SYNC;
+      kl_clean_super << <blocksUV, threads >> >(
+        dstU, prevU, curU, widthUV, heightUV, pitchUV, thC);
+      DEBUG_SYNC;
+      kl_clean_super << <blocksUV, threads >> >(
+        dstV, prevV, curV, widthUV, heightUV, pitchUV, thC);
+      DEBUG_SYNC;
+    }
+    else {
+      cpu_clean_super(
+        dstY, prevY, curY, width, height, pitchY, thY);
+      cpu_clean_super(
+        dstU, prevU, curU, widthUV, heightUV, pitchUV, thC);
+      cpu_clean_super(
+        dstV, prevV, curV, widthUV, heightUV, pitchUV, thC);
+    }
+  }
+
+public:
+  KCleanSuper(PClip clip, int thY, int thC, IScriptEnvironment* env)
+    : KFMFilterBase(clip)
+    , thY(thY)
+    , thC(thC)
+  { }
+
+  PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+
+    Frame prev = child->GetFrame(n60 - 1, env);
+    Frame cur = child->GetFrame(n60, env);
+    Frame dst = env->NewVideoFrame(vi);
+    CleanSuper(prev, cur, dst, env);
+
+    return dst.frame;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KCleanSuper(
+      args[0].AsClip(),       // clip
+      args[1].AsInt(10),       // thY
+      args[2].AsInt(8),       // thC
       env
     );
   }
@@ -1045,10 +782,10 @@ public:
   {
     return new KFMSuperShow(
       args[0].AsClip(),       // combe
-      args[1].AsInt(15),      // threshMY
-      args[2].AsInt(7),       // threshSY
-      args[3].AsInt(20),      // threshMC
-      args[4].AsInt(8),       // threshSC
+      args[1].AsInt(20),      // threshMY
+      args[2].AsInt(12),       // threshSY
+      args[3].AsInt(24),      // threshMC
+      args[4].AsInt(16),       // threshSC
       env
     );
   }
@@ -1195,19 +932,15 @@ class KTelecine : public KFMFilterBase
   {
     int cycleIndex = n / 4;
     int parity = child->GetParity(cycleIndex * 5);
-    Frame fm = fmclip->GetFrame(cycleIndex, env);
-    int pattern = fm.GetProperty("KFM_Pattern", -1);
-    if (pattern == -1) {
-      env->ThrowError("[KTelecine] Failed to get frame info. Check fmclip");
-    }
-    float cost = (float)fm.GetProperty("KFM_Cost", 1.0);
-    Frame24Info frameInfo = patterns.GetFrame24(pattern, n);
+    PDevice cpuDevice = env->GetDevice(DEV_TYPE_CPU, 0);
+    KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpuDevice)).GetReadPtr<KFMResult>());
+    Frame24Info frameInfo = patterns.GetFrame24(fm.pattern, n);
 
     int fstart = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex;
     Frame out = CreateWeaveFrame<pixel_t>(child, 0, fstart, frameInfo.numFields, parity, env);
 
     if (show) {
-      DrawInfo<pixel_t>(out, pattern, cost, frameInfo.numFields, env);
+      DrawInfo<pixel_t>(out, fm.pattern, fm.cost, frameInfo.numFields, env);
     }
 
     return out.frame;
@@ -1219,6 +952,9 @@ public:
     , fmclip(fmclip)
     , show(show)
   {
+    // チェック
+    CycleAnalyzeInfo::GetParam(fmclip->GetVideoInfo(), env);
+
     // フレームレート
     vi.MulDivFPS(4, 5);
     vi.num_frames = (vi.num_frames / 5 * 4) + (vi.num_frames % 5);
@@ -1317,6 +1053,9 @@ public:
     : KFMFilterBase(child)
     , fmclip(fmclip)
   {
+    // チェック
+    CycleAnalyzeInfo::GetParam(fmclip->GetVideoInfo(), env);
+
     // フレームレート
     vi.MulDivFPS(2, 5);
     vi.num_frames >>= 1;
@@ -1329,12 +1068,9 @@ public:
 
     int cycleIndex = n / 4;
     int parity = child->GetParity(cycleIndex * 10);
-    Frame fm = fmclip->GetFrame(cycleIndex, env);
-    int pattern = fm.GetProperty("KFM_Pattern", -1);
-    if (pattern == -1) {
-      env->ThrowError("[KTelecineCombe] Failed to get frame info. Check fmclip");
-    }
-    Frame24Info frameInfo = patterns.GetFrame24(pattern, n);
+    PDevice cpuDevice = env->GetDevice(DEV_TYPE_CPU, 0);
+    KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpuDevice)).GetReadPtr<KFMResult>());
+    Frame24Info frameInfo = patterns.GetFrame24(fm.pattern, n);
 
     int fstart = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex;
     Frame out = CreateWeaveFrame(child, fstart, frameInfo.numFields, env);
@@ -2177,12 +1913,8 @@ public:
 
 void AddFuncCombingAnalyze(IScriptEnvironment* env)
 {
-  env->AddFunction("KFMFrameAnalyzeShow", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i[pad]c", KFMFrameAnalyzeShow::Create, 0);
-  env->AddFunction("KFMFrameAnalyze", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i[pad]c", KFMFrameAnalyze::Create, 0);
-
-  env->AddFunction("KFMFrameAnalyzeCheck", "cc", KFMFrameAnalyzeCheck::Create, 0);
-
   env->AddFunction("KFMSuper", "cc", KFMSuper::Create, 0);
+  env->AddFunction("KCleanSuper", "c[thY]i[thC]i", KCleanSuper::Create, 0);
   env->AddFunction("KPreCycleAnalyze", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KPreCycleAnalyze::Create, 0);
   env->AddFunction("KPreCycleAnalyzeShow", "cc", KPreCycleAnalyzeShow::Create, 0);
   env->AddFunction("KFMSuperShow", "c[threshMY]i[threshSY]i[threshMC]i[threshSC]i", KFMSuperShow::Create, 0);

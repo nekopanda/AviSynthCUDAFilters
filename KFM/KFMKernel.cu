@@ -37,12 +37,8 @@ class KPatchCombe : public KFMFilterBase
     }
 
     int cycleIndex = n / 4;
-    Frame fmframe = env->GetFrame(fmclip, cycleIndex, cpuDevice);
-    int kfmPattern = fmframe.GetProperty("KFM_Pattern", -1);
-    if (kfmPattern == -1) {
-      env->ThrowError("[KPatchCombe] Failed to get frame info. Check fmclip");
-    }
-    Frame24Info frameInfo = patterns.GetFrame24(kfmPattern, n);
+    KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpuDevice)).GetReadPtr<KFMResult>());
+    Frame24Info frameInfo = patterns.GetFrame24(fm.pattern, n);
 
     int fieldIndex[] = { 1, 3, 6, 8 };
     // 標準位置
@@ -70,7 +66,8 @@ public:
     , containscombeclip(containscombeclip)
     , fmclip(fmclip)
   {
-    //
+    // チェック
+    CycleAnalyzeInfo::GetParam(fmclip->GetVideoInfo(), env);
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -138,6 +135,8 @@ class KFMSwitch : public KFMFilterBase
   int mode; // 0:通常 1:通常(FrameDurationあり) 2:FrameDurationのみ
 	bool show;
 	bool showflag;
+
+  int analyzeMode;
 
 	int logUVx;
 	int logUVy;
@@ -376,18 +375,14 @@ class KFMSwitch : public KFMFilterBase
 	}
 #endif
 
-	FrameInfo GetFrameInfo(int n60, Frame& fmframe, PNeoEnv env)
+	FrameInfo GetFrameInfo(int n60, KFMResult fm, PNeoEnv env)
 	{
 		int cycleIndex = n60 / 10;
-		int kfmPattern = fmframe.GetProperty("KFM_Pattern", -1);
-    if (kfmPattern == -1) {
-      env->ThrowError("[KFMSwitch] Failed to get frame info. Check fmclip");
-    }
-		float kfmCost = (float)fmframe.GetProperty("KFM_Cost", 1.0);
     Frame baseFrame;
     FrameInfo info = { 0 };
 
-		if (kfmCost > thswitch) {
+    // 60p判定は 1パスの場合はコスト 2パスの場合はKFMCycleAnalyzeの結果 を使う
+		if ((analyzeMode == 0 && fm.cost > thswitch) || (analyzeMode != 0 && fm.is60p)) {
 			// コストが高いので60pと判断
       info.baseType = ucfclip ? FRAME_UCF : FRAME_60;
 
@@ -419,7 +414,7 @@ class KFMSwitch : public KFMFilterBase
 
     // ここでのtypeは 24 or 30 or UCF
 
-    if (PulldownPatterns::Is30p(kfmPattern)) {
+    if (PulldownPatterns::Is30p(fm.pattern)) {
       // 30p
       int n30 = n60 >> 1;
 
@@ -432,7 +427,7 @@ class KFMSwitch : public KFMFilterBase
     }
     else {
       // 24pフレーム番号を取得
-      Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
+      Frame24Info frameInfo = patterns.GetFrame60(fm.pattern, n60);
       // fieldShiftでサイクルをまたぐこともあるので、frameIndexはfieldShift込で計算
       int frameIndex = frameInfo.frameIndex + frameInfo.fieldShift;
       int n24 = frameInfo.cycleIndex * 4 + frameIndex;
@@ -443,9 +438,9 @@ class KFMSwitch : public KFMFilterBase
       }
       else if (frameIndex >= 4) {
         // 後ろのサイクルのパターンを取得
-        Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-        int nextPattern = nextfmframe.GetProperty("KFM_Pattern", -1);
-        int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
+        PDevice cpudev = env->GetDevice(DEV_TYPE_CPU, 0);
+        auto nextfm = *(Frame(env->GetFrame(fmclip, cycleIndex + 1, cpudev)).GetReadPtr<KFMResult>());
+        int fstart = patterns.GetFrame24(nextfm.pattern, 0).fieldStartIndex;
         if (fstart > 0) {
           // 前に空きがあるので前のサイクル
           n24 = frameInfo.cycleIndex * 4 + 3;
@@ -510,8 +505,8 @@ class KFMSwitch : public KFMFilterBase
           break;
         }
         int cycleIndex = (n60 + i) / 10;
-        Frame fmframe = env->GetFrame(fmclip, cycleIndex, cpudev);
-        FrameInfo next = GetFrameInfo(n60 + i, fmframe, env);
+        KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
+        FrameInfo next = GetFrameInfo(n60 + i, fm, env);
         if (next.baseType != info.baseType) {
           // ベースタイプが違ったら同じフレームでない
           duration = i;
@@ -543,8 +538,8 @@ class KFMSwitch : public KFMFilterBase
   {
     PDevice cpudev = env->GetDevice(DEV_TYPE_CPU, 0);
     int cycleIndex = n60 / 10;
-    Frame fmframe = env->GetFrame(fmclip, cycleIndex, cpudev);
-    FrameInfo info = GetFrameInfo(n60, fmframe, env);
+    KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
+    FrameInfo info = GetFrameInfo(n60, fm, env);
     
     Frame dst;
     if (mode != ONLY_FRAME_DURATION) {
@@ -561,9 +556,8 @@ class KFMSwitch : public KFMFilterBase
     }
 
     if (show) {
-      const std::pair<int, float>* pfm = fmframe.GetReadPtr<std::pair<int, float>>();
       const char* fps = FrameTypeStr(info.baseType);
-      char buf[100]; sprintf(buf, "KFMSwitch: %s dur: %d pattern:%2d cost:%.3f", fps, duration, pfm->first, pfm->second);
+      char buf[100]; sprintf(buf, "KFMSwitch: %s dur: %d pattern:%2d cost:%.3f", fps, duration, fm.pattern, fm.cost);
       DrawText<pixel_t>(dst.frame, srcvi.BitsPerComponent(), 0, 0, buf, env);
       return dst.frame;
     }
@@ -599,6 +593,13 @@ public:
 
 		nBlkX = nblocks(vi.width, OVERLAP);
 		nBlkY = nblocks(vi.height, OVERLAP);
+
+    if (mode < 0 || mode > 2) {
+      env->ThrowError("[KFMSwitch] mode(%d) must be in range 0-2", mode);
+    }
+
+    auto info = CycleAnalyzeInfo::GetParam(fmclip->GetVideoInfo(), env);
+    analyzeMode = info->mode;
 
     // check clip device
     if (!(GetDeviceTypes(fmclip) & DEV_TYPE_CPU)) {

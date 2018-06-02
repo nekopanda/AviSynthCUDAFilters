@@ -58,6 +58,33 @@ struct FMData {
 struct FMMatch {
   float shima[NUM_PATTERNS];
   float costs[NUM_PATTERNS];
+  float reliability[NUM_PATTERNS];
+};
+
+struct KFMResult {
+  int pattern;
+  int is60p;
+  float score;
+  float cost;
+  float reliability;
+
+  KFMResult() { }
+
+  KFMResult(int pattern, float score, float cost, float reliability)
+    : pattern(pattern)
+    , is60p()
+    , score(score)
+    , cost(cost)
+    , reliability(reliability)
+  { }
+
+  KFMResult(FMMatch& match, int pattern)
+    : pattern(pattern)
+    , is60p()
+    , score(match.shima[pattern])
+    , cost(match.costs[pattern])
+    , reliability(match.reliability[pattern])
+  { }
 };
 
 class PulldownPatterns
@@ -86,7 +113,45 @@ public:
 
   FMMatch Matching(const FMData& data, int width, int height, float costth, float adj2224, float adj30) const;
 
-	static bool Is30p(int patternIndex) { return patternIndex == NUM_PATTERNS - 1; }
+  static bool Is30p(int patternIndex) { return patternIndex == NUM_PATTERNS - 1; }
+  static bool Is60p(int patternIndex) { return patternIndex == NUM_PATTERNS; }
+};
+
+struct CycleAnalyzeInfo {
+  enum
+  {
+    VERSION = 1,
+    MAGIC_KEY = 0x6180EDF8,
+  };
+  int nMagicKey;
+  int nVersion;
+
+  int mode;
+
+  CycleAnalyzeInfo(int mode)
+    : nMagicKey(MAGIC_KEY)
+    , nVersion(VERSION)
+    , mode(mode)
+  { }
+
+  static const CycleAnalyzeInfo* GetParam(const VideoInfo& vi, PNeoEnv env)
+  {
+    if (vi.sample_type != MAGIC_KEY) {
+      env->ThrowError("Invalid source (sample_type signature does not match)");
+    }
+    const CycleAnalyzeInfo* param = (const CycleAnalyzeInfo*)(void*)vi.num_audio_samples;
+    if (param->nMagicKey != MAGIC_KEY) {
+      env->ThrowError("Invalid source (magic key does not match)");
+    }
+    return param;
+  }
+
+  static void SetParam(VideoInfo& vi, const CycleAnalyzeInfo* param)
+  {
+    vi.audio_samples_per_second = 0; // kill audio
+    vi.sample_type = MAGIC_KEY;
+    vi.num_audio_samples = (size_t)param;
+  }
 };
 
 enum {

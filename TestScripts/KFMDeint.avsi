@@ -1,26 +1,30 @@
 # KFMとKTGMCを使ったインタレース解除
 # requires AvisynthNeo
 
-function KFMDeint(clip src, int "mode", string "preset", float "thswitch", bool "ucf", bool "nr", bool "gentime", bool "cuda", int "dev", bool "show") {
+function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thswitch", bool "ucf", bool "nr", string "filepath", bool "cuda", int "dev", bool "show") {
 
     mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps
+    pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2) 2:only timing(mode:0) 3:generate images
     preset = default(preset, "Faster") # QTGMC preset
     thswitch = default(thswitch, 0.5)
     ucf = default(ucf, false) # Enable DecombUCF
     nr = default(nr, false) # Enable Noise Reduction with (K)SMDegrain
-    gentime = default(gentime, false) # generate VFR timecode (returns timecode clip)
+    filepath = default(filepath, "cycle.dat")
     cuda = default(cuda, false) # Enable CUDA
     dev = default(dev, 0) # CUDA device index
     show = default(show, false) # Show information
     
     ivtc = Select(mode, true, false, true) # Enable Inverse Telecine
     out24 = Select(mode, false, false, true) # output 24fps
+    
+    Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
+    Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
 
-	# CUDAデバイスチェック
-	if(cuda) {
-		cc = CUDAComputeCapability(dev)
-		Assert(cc >= 35, "[KFM CUDA Error] Specified GPU: " + CUDADeviceName(dev) + " is not usable. (CC=" + string(cc) + " < 35)")
-	}
+    # CUDAデバイスチェック
+    if(cuda) {
+        cc = CUDAComputeCapability(dev)
+        Assert(cc >= 35, "[KFM CUDA Error] Specified GPU: " + CUDADeviceName(dev) + " is not usable. (CC=" + string(cc) + " < 35)")
+    }
     
     OnDEV = cuda ? function[dev](clip c) { c.OnCUDA(2, dev) } : function(clip c) { c }
 
@@ -103,13 +107,19 @@ function KFMDeint(clip src, int "mode", string "preset", float "thswitch", bool 
         ## 逆テレシネ解析 ##
 
         # KFM解析用クリップ
-        super = src.KFMSuper(pad)
+        super = src.KFMSuper(pad).KCleanSuper()
 
         # 30fpsのKFM解析用クリップ
         super30 = super.SelectEven()
 
         # テレシネ解析判定 KFMCycleAnalyzeはCUDA非対応なので注意
-        fmclip = super.KPreCycleAnalyze().OnDEV().KFMCycleAnalyze(src).OnCPU(0)
+        mode = (pass >= 3) ? 2 : pass
+        fmclip = super.KPreCycleAnalyze().OnDEV()
+        fmclip = fmclip.KFMCycleAnalyze(src, mode=mode, filepath=filepath).OnCPU(0)
+        
+        if(pass == 1) {
+            return fmclip
+        }
 
         # 逆テレシネしたKFM解析用クリップ
         super24 = super.KTelecineSuper(fmclip)
@@ -178,9 +188,9 @@ function KFMDeint(clip src, int "mode", string "preset", float "thswitch", bool 
             # DecombUCFを適用(60fps)
             ucfc = ucf ? clip60.KDecombUCF60(ucfparam, noise30, before60, after60) : Undefined()
 
-            result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, show=show, gentime=gentime)
+            mode = (pass == 3) ? 1 : pass
+            result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, show=show)
 
-            #(show && gentime) ? clip60.AMTVFRShow(result) : result
             result
         }
     }
@@ -189,11 +199,9 @@ function KFMDeint(clip src, int "mode", string "preset", float "thswitch", bool 
     }
     
     if(cuda) {
-		if(!gentime) {
-			OnDEV()
-		}
-	}
-	else {
-		Prefetch(4)
-	}
+        OnDEV()
+    }
+    else {
+        Prefetch(4)
+    }
 }

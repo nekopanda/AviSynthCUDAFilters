@@ -1563,6 +1563,9 @@ public:
     VideoInfo vidw = dweaveclip->GetVideoInfo();
     VideoInfo vinr = nrclip ? nrclip->GetVideoInfo() : VideoInfo();
 
+    // チェック
+    CycleAnalyzeInfo::GetParam(fmclip->GetVideoInfo(), env);
+
     // fpsチェック
     vi24.MulDivFPS(5, 2);
     vinoise.MulDivFPS(2, 1);
@@ -1649,25 +1652,20 @@ public:
   PVideoFrame __stdcall GetFrame(int n24, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
-    PDevice cpu_device = env->GetDevice(DEV_TYPE_CPU, 0);
+    PDevice cpuDevice = env->GetDevice(DEV_TYPE_CPU, 0);
 
     int cycleIndex = n24 / 4;
-    Frame fmframe = env->GetFrame(fmclip, cycleIndex, cpu_device);
-    int pattern = fmframe.GetProperty("KFM_Pattern", -1);
-
-    if (pattern == -1) {
-      env->ThrowError("[KDecombUCF24] Failed to get frame info. Check fmclip");
-    }
+    KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpuDevice)).GetReadPtr<KFMResult>());
 
     // 24pフレーム番号を取得
-    Frame24Info frameInfo = patterns.GetFrame24(pattern, n24);
+    Frame24Info frameInfo = patterns.GetFrame24(fm.pattern, n24);
     std::string message;
 
     bool cleanField[] = { true, true, true, true, true, true };
     for (int i = 0; i < frameInfo.numFields - 1; ++i) {
       int n60 = frameInfo.cycleIndex * 10 + frameInfo.fieldStartIndex + i;
-      Frame f0 = env->GetFrame(noiseclip, n60 / 2 + 0, cpu_device);
-      Frame f1 = env->GetFrame(noiseclip, n60 / 2 + 1, cpu_device);
+      Frame f0 = env->GetFrame(noiseclip, n60 / 2 + 0, cpuDevice);
+      Frame f1 = env->GetFrame(noiseclip, n60 / 2 + 1, cpuDevice);
       const NoiseResult* result0 = f0.GetReadPtr<NoiseResult>();
       const NoiseResult* result1 = f1.GetReadPtr<NoiseResult>();
 
