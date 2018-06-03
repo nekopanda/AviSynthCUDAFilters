@@ -8,7 +8,6 @@
 #include "CommonFunctions.h"
 #include "KFM.h"
 #include "TextOut.h"
-#include "AMTGenTime.hpp"
 
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
@@ -142,7 +141,6 @@ class KFMSwitch : public KFMFilterBase
 	int logUVy;
 	int nBlkX, nBlkY;
 
-  AMTGenTime amtgentime;
 	PulldownPatterns patterns;
 
 	template <typename pixel_t>
@@ -176,14 +174,6 @@ class KFMSwitch : public KFMFilterBase
 			}
 		}
 	}
-
-  Frame MakeFrameFps(int fps, int source, PNeoEnv env) {
-    Frame frame = env->NewVideoFrame(vi);
-    auto ptr = frame.GetWritePtr<AMTFrameFps>();
-    ptr->fps = fps;
-    ptr->source = source;
-    return frame;
-  }
 
   struct FrameInfo {
     int baseType;
@@ -240,140 +230,6 @@ class KFMSwitch : public KFMFilterBase
 
 		return dst;
   }
-
-#if 0
-	template <typename pixel_t>
-	Frame InternalGetFrame(int n60, Frame& fmframe, int& type, PNeoEnv env)
-	{
-		int cycleIndex = n60 / 10;
-		int kfmPattern = fmframe.GetProperty("KFM_Pattern", -1);
-    if (kfmPattern == -1) {
-      env->ThrowError("[KFMSwitch] Failed to get frame info. Check fmclip");
-    }
-		float kfmCost = (float)fmframe.GetProperty("KFM_Cost", 1.0);
-    Frame baseFrame;
-
-		if (kfmCost > thswitch) {
-			// コストが高いので60pと判断
-      type = FRAME_60;
-
-      if (gentime) {
-        return MakeFrameFps(AMT_FPS_60, n60, env);
-      }
-
-      if (ucfclip) {
-        baseFrame = ucfclip->GetFrame(n60, env);
-        auto prop = baseFrame.GetProperty(DECOMB_UCF_FLAG_STR);
-        if (prop == nullptr) {
-          env->ThrowError("Invalid UCF clip");
-        }
-        auto flag = (DECOMB_UCF_FLAG)prop->GetInt();
-        if (flag == DECOMB_UCF_NEXT || flag == DECOMB_UCF_PREV) {
-          // フレーム置換がされた場合は、60p部分マージ処理を実行する
-          type = FRAME_UCF;
-        }
-        else {
-          return baseFrame;
-        }
-      }
-      else {
-        return child->GetFrame(n60, env);
-      }
-		}
-
-    // ここでのtypeは 24 or 30 or UCF
-    Frame mflag;
-
-    if (PulldownPatterns::Is30p(kfmPattern)) {
-      // 30p
-      int n30 = n60 >> 1;
-
-      if (!baseFrame) {
-        if (!gentime) {
-          baseFrame = clip30->GetFrame(n30, env);
-        }
-        type = FRAME_30;
-      }
-
-      Frame containsframe = env->GetFrame(cc30, n30, env->GetDevice(DEV_TYPE_CPU, 0));
-      if (*containsframe.GetReadPtr<int>() == 0) {
-        // ダメなブロックはないのでそのまま返す
-        if (gentime) {
-          return MakeFrameFps(AMT_FPS_30, n30, env);
-        }
-        return baseFrame;
-      }
-      else if (gentime) {
-        // ダメなブロックがあるときは60fps
-        return MakeFrameFps(AMT_FPS_60, n60, env);
-      }
-
-      mflag = mask30->GetFrame(n30, env);
-    }
-    else {
-      // 24pフレーム番号を取得
-      Frame24Info frameInfo = patterns.GetFrame60(kfmPattern, n60);
-      // fieldShiftでサイクルをまたぐこともあるので、frameIndexはfieldShift込で計算
-      int frameIndex = frameInfo.frameIndex + frameInfo.fieldShift;
-      int n24 = frameInfo.cycleIndex * 4 + frameIndex;
-
-      if (frameIndex < 0) {
-        // 前に空きがあるので前のサイクル
-        n24 = frameInfo.cycleIndex * 4 - 1;
-      }
-      else if (frameIndex >= 4) {
-        // 後ろのサイクルのパターンを取得
-        Frame nextfmframe = fmclip->GetFrame(cycleIndex + 1, env);
-        int nextPattern = nextfmframe.GetProperty("KFM_Pattern", -1);
-        int fstart = patterns.GetFrame24(nextPattern, 0).fieldStartIndex;
-        if (fstart > 0) {
-          // 前に空きがあるので前のサイクル
-          n24 = frameInfo.cycleIndex * 4 + 3;
-        }
-        else {
-          // 前に空きがないので後ろのサイクル
-          n24 = frameInfo.cycleIndex * 4 + 4;
-        }
-      }
-
-      if (!baseFrame) {
-        if (!gentime) {
-          baseFrame = clip24->GetFrame(n24, env);
-        }
-        type = FRAME_24;
-      }
-
-      Frame containsframe = env->GetFrame(cc24, n24, env->GetDevice(DEV_TYPE_CPU, 0));
-      if (*containsframe.GetReadPtr<int>() == 0) {
-        // ダメなブロックはないのでそのまま返す
-        if (gentime) {
-          return MakeFrameFps(AMT_FPS_24, n24, env);
-        }
-        return baseFrame;
-      }
-      else if (gentime) {
-        // ダメなブロックがあるときは60fps
-        return MakeFrameFps(AMT_FPS_60, n60, env);
-      }
-
-      mflag = mask24->GetFrame(n24, env);
-    }
-
-    Frame frame60 = child->GetFrame(n60, env);
-
-		if (!IS_CUDA && srcvi.ComponentSize() == 1 && showflag) {
-			env->MakeWritable(&baseFrame.frame);
-			VisualizeFlag<pixel_t>(baseFrame, mflag, env);
-			return baseFrame;
-		}
-
-		// ダメなブロックはbobフレームからコピー
-		Frame dst = env->NewVideoFrame(srcvi);
-		MergeBlock<pixel_t>(baseFrame, frame60, mflag, dst, env);
-
-		return dst;
-	}
-#endif
 
 	FrameInfo GetFrameInfo(int n60, KFMResult fm, PNeoEnv env)
 	{
@@ -734,73 +590,6 @@ public:
 	}
 };
 
-class AMTVFRShow : public GenericVideoFilter
-{
-  PClip vfrclip;
-
-  const AMTGenTime* gentime_;
-
-  const char* FrameTypeStr(int fps) {
-    switch (fps) {
-    case AMT_FPS_24: return "24p";
-    case AMT_FPS_30: return "30p";
-    case AMT_FPS_60: return "60p";
-    }
-    return "Unknown";
-  }
-
-  template <typename pixel_t>
-  PVideoFrame GetFrameT(int n60, PNeoEnv env)
-  {
-    Frame timeframe = env->GetFrame(vfrclip, n60, env->GetDevice(DEV_TYPE_CPU, 0));
-    const AMTFrameFps* frameFps = timeframe.GetReadPtr<AMTFrameFps>();
-    char buf[100]; sprintf(buf, "KFM VFR: %s %d", 
-      FrameTypeStr(frameFps->fps), frameFps->source);
-    Frame dst = child->GetFrame(n60, env);
-    env->MakeWritable(&dst.frame);
-    DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
-    return dst.frame;
-  }
-
-public:
-  AMTVFRShow(PClip bob, PClip vfrclip, PNeoEnv env)
-    : GenericVideoFilter(bob)
-    , vfrclip(vfrclip)
-    , gentime_(AMTGenTime::GetParam(vfrclip->GetVideoInfo()))
-  {
-    if (gentime_ == nullptr) {
-      env->ThrowError("vfrクリップが不正");
-    }
-  }
-
-  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-  {
-    PNeoEnv env = env_;
-
-    int pixelSize = vi.ComponentSize();
-    switch (pixelSize) {
-    case 1:
-      return GetFrameT<uint8_t>(n, env);
-    case 2:
-      return GetFrameT<uint16_t>(n, env);
-    default:
-      env->ThrowError("[AMTVFRShow] Unsupported pixel format");
-      break;
-    }
-
-    return PVideoFrame();
-  }
-
-  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-  {
-    return new AMTVFRShow(
-      args[0].AsClip(),           // clip60
-      args[1].AsClip(),           // vfrclip
-      env
-    );
-  }
-};
-
 class KFMPad : public KFMFilterBase
 {
   VideoInfo srcvi;
@@ -881,7 +670,6 @@ void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
   env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[show]b[showflag]b", KFMSwitch::Create, 0);
-  env->AddFunction("AMTVFRShow", "cc", AMTVFRShow::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
 	env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

@@ -71,52 +71,6 @@ private:
   FILE * fp_;
 };
 
-int64_t GetPerfFrequency();
-int64_t GetPerfCounter();
-
-class Stopwatch
-{
-  int64_t sum;
-  int64_t prev;
-  int64_t freq;
-public:
-  Stopwatch()
-    : sum(0)
-  {
-    freq = GetPerfFrequency();
-  }
-
-  void reset() {
-    sum = 0;
-  }
-
-  void start() {
-    prev = GetPerfCounter();
-  }
-
-  double current() {
-    int64_t cur = GetPerfCounter();
-    return (double)(cur - prev) / freq;
-  }
-
-  void stop() {
-    int64_t cur = GetPerfCounter();
-    sum += cur - prev;
-    prev = cur;
-  }
-
-  double getTotal() const {
-    return (double)sum / freq;
-  }
-
-  double getAndReset() {
-    stop();
-    double ret = getTotal();
-    sum = 0;
-    return ret;
-  }
-};
-
 int GetDeviceTypes(const PClip& clip)
 {
   int devtypes = (clip->GetVersion() >= 5) ? clip->SetCacheHints(CACHE_GET_DEV_TYPE, 0) : 0;
@@ -878,25 +832,12 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
 #define NOMINMAX
 #include <Windows.h>
 
-int64_t GetPerfFrequency() {
-  int64_t freq;
-  QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
-  return freq;
-}
-
-int64_t GetPerfCounter() {
-  int64_t counter;
-  QueryPerformanceCounter((LARGE_INTEGER*)&counter);
-  return counter;
-}
-
 std::string GetFullPath(const std::string& path)
 {
   char buf[MAX_PATH];
   int sz = GetFullPathNameA(path.c_str(), sizeof(buf), buf, nullptr);
-  if (sz >= sizeof(buf)) {
-  }
-  if (sz == 0) {
+  if (sz == 0 || sz >= sizeof(buf)) {
+    return path;
   }
   return buf;
 }
