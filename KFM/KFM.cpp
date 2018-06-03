@@ -756,12 +756,14 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
+    PClip src = args[1].AsClip();
+    float costthDef = (src->GetVideoInfo().height >= 720) ? 1.5f : 1.0f;
     return new KFMCycleAnalyze(
       args[0].AsClip(),       // fmframe
-      args[1].AsClip(),       // source
+      src,                    // source
       args[2].AsInt(0),       // mode
       (float)args[3].AsFloat(5.0f), // lscale
-      (float)args[4].AsFloat(1.5f), // costth
+      (float)args[4].AsFloat(costthDef), // costth
       (float)args[5].AsFloat(0.5f), // adj2224
       (float)args[6].AsFloat(1.5f), // adj30
       args[7].AsInt(5),             // range

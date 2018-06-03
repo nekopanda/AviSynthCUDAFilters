@@ -5,7 +5,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
 
     mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps
     pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2) 2:only timing(mode:0) 3:generate images
-    preset = default(preset, "Faster") # QTGMC preset
+    preset = default(preset, (Height(src) >= 720) ? "Faster" : "Slower") # QTGMC preset
     thswitch = default(thswitch, 0.5)
     ucf = default(ucf, false) # Enable DecombUCF
     nr = default(nr, false) # Enable Noise Reduction with (K)SMDegrain
