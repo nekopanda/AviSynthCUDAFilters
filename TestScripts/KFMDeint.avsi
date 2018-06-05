@@ -145,13 +145,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
 
         if(nr) {
             if(cuda) {
-                if(out24) {
-                    # 24fpso—Í‚Ì‚Í‚‘¬‰»‚·‚é‚½‚ßŒy‚ß‚Ìİ’è‚É‚·‚é
-                    clip24 = clip24.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
-                }
-                else {
-                    clip24 = clip24.KSMDegrain(binomial=True, dev=dev)
-                }
+                clip24 = clip24.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
             }
             else {
                 clip24 = clip24.SMDegrain(tr=1)
@@ -173,7 +167,6 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
                 clip30 = clip30.KDecombUCF(ucfparam, noise30, before60, after60)
             }
             if(nr) {
-                # 30fps‚ÍŒy‚ß‚Ìİ’è‚Ås‚¤
                 if(cuda) {
                     clip30 = clip30.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
                 }
