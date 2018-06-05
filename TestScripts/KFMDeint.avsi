@@ -17,6 +17,8 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     ivtc = Select(mode, true, false, true) # Enable Inverse Telecine
     out24 = Select(mode, false, false, true) # output 24fps
     
+    flagcrop = 6 # 上下のノイズ部分は除外する
+    
     Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
     Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
 
@@ -159,7 +161,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         # 24fps/60fps 切り替えマスク（maskとccをセットで使う）
         flag24 = super24.KSwitchFlag()
         mask24 = clip24.KCombeMask(flag24)
-        cc24 = flag24.KContainsCombe().OnDEV() # CPUからアクセスされるのでOnCUDAしておく
+        cc24 = flag24.Crop(0,flagcrop,0,-flagcrop).KContainsCombe().OnDEV() # CPUからアクセスされるのでOnCUDAしておく
 
         if(out24) {
             clip24.KPatchCombe(clip60, fmclip, mask24, cc24)
@@ -183,7 +185,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             # 30fps/60fps 切り替えマスク（maskとccをセットで使う）
             flag30 = super30.KSwitchFlag()
             mask30 = clip30.KCombeMask(flag30)
-            cc30 = flag30.KContainsCombe().OnDEV() # CPUからアクセスされるのでOnCUDAしておく
+            cc30 = flag30.Crop(0,flagcrop,0,-flagcrop).KContainsCombe().OnDEV() # CPUからアクセスされるのでOnCUDAしておく
 
             # DecombUCFを適用(60fps)
             ucfc = ucf ? clip60.KDecombUCF60(ucfparam, noise30, before60, after60) : Undefined()
