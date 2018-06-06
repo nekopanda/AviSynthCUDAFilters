@@ -548,10 +548,10 @@ void KFMTest::TemporalNRTest(TEST_FRAMES tf)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
-    out << "srcuda = src.OnCPU(0)" << std::endl;
+    out << "srcuda = src.ConvertBits(14).OnCPU(0)" << std::endl;
 
-    out << "ref = src.KTemporalNR(3, 4)" << std::endl;
-    out << "cuda = srcuda.KTemporalNR(3, 4)" O_C(0) "" << std::endl;
+    out << "ref = src.KTemporalNR(3, 4).ConvertBits(8)" << std::endl;
+    out << "cuda = srcuda.KTemporalNR(3, 4)" O_C(0) ".ConvertBits(8)" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 

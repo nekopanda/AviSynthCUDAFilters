@@ -42,38 +42,33 @@ public:
 };
 
 enum {
-	TEMPORAL_NR_BATCH = 4,
 	MAX_TEMPORAL_DIST = 16
 };
 
 template<typename vpixel_t> struct TemporalNRPtrs {
-	vpixel_t* out[TEMPORAL_NR_BATCH];
-	const vpixel_t* in[MAX_TEMPORAL_DIST * 2 + TEMPORAL_NR_BATCH];
+	vpixel_t* out[1];
+	const vpixel_t* in[MAX_TEMPORAL_DIST * 2 + 1];
 };
 
-__host__ __device__ void count_pixel(int4 diff, int thresh, int4& cnt)
-{
-	if (diff.x <= thresh) cnt.x++;
-	if (diff.y <= thresh) cnt.y++;
-	if (diff.z <= thresh) cnt.z++;
-	if (diff.w <= thresh) cnt.w++;
-}
-
 template<typename vpixel_t>
-__host__ __device__ void sum_pixel(int4 diff, int thresh, vpixel_t ref, int4& sum)
+__host__ __device__ void sum_pixel(int4 diff, int thresh, vpixel_t ref, int4& cnt, int4& sum)
 {
-	if (diff.x <= thresh) sum.x += ref.x;
-	if (diff.y <= thresh) sum.y += ref.y;
-	if (diff.z <= thresh) sum.z += ref.z;
-	if (diff.w <= thresh) sum.w += ref.w;
+  cnt.x += (diff.x <= thresh);
+  cnt.y += (diff.y <= thresh);
+  cnt.z += (diff.z <= thresh);
+  cnt.w += (diff.w <= thresh);
+  sum.x += ref.x * (diff.x <= thresh);
+  sum.y += ref.y * (diff.y <= thresh);
+  sum.z += ref.z * (diff.z <= thresh);
+  sum.w += ref.w * (diff.w <= thresh);
 }
 
 template<typename vpixel_t>
 __host__ __device__ void average_pixel(int4 sum, int4 cnt, vpixel_t& out)
 {
-//#ifdef __CUDA_ARCH__
+#ifdef __CUDA_ARCH__
 	// CUDA版は __fdividef を使う
-#if 0 // あまり変わらないのでCPU版と同じにする
+//#if 0 // あまり変わらないのでCPU版と同じにする
 	out.x = (int)(__fdividef(sum.x, cnt.x) + 0.5f);
 	out.y = (int)(__fdividef(sum.y, cnt.y) + 0.5f);
 	out.z = (int)(__fdividef(sum.z, cnt.z) + 0.5f);
@@ -92,25 +87,17 @@ void cpu_temporal_nr(TemporalNRPtrs<vpixel_t>* data,
 {
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
-			for (int b = 0; b < TEMPORAL_NR_BATCH; ++b) {
-				vpixel_t center = data->in[b + mid][x + y * pitch];
+			vpixel_t center = data->in[mid][x + y * pitch];
 
-				int4 pixel_count = VHelper<int4>::make(0);
-				for (int i = 0; i < nframes; ++i) {
-					vpixel_t ref = data->in[b + i][x + y * pitch];
-					int4 diff = absdiff(ref, center);
-					count_pixel(diff, thresh, pixel_count);
-				}
-
-				int4 sum = VHelper<int4>::make(0);
-				for (int i = 0; i < nframes; ++i) {
-					vpixel_t ref = data->in[b + i][x + y * pitch];
-					int4 diff = absdiff(ref, center);
-					sum_pixel(diff, thresh, ref, sum);
-				}
-
-				average_pixel(sum, pixel_count, data->out[b][x + y * pitch]);
+			int4 pixel_count = VHelper<int4>::make(0);
+      int4 sum = VHelper<int4>::make(0);
+			for (int i = 0; i < nframes; ++i) {
+				vpixel_t ref = data->in[i][x + y * pitch];
+				int4 diff = absdiff(ref, center);
+        sum_pixel(diff, thresh, ref, pixel_count, sum);
 			}
+
+			average_pixel(sum, pixel_count, data->out[0][x + y * pitch]);
 		}
 	}
 }
@@ -122,63 +109,37 @@ __global__ void kl_temporal_nr(
 {
 	int tx = threadIdx.x;
 	int x = tx + blockIdx.x * blockDim.x;
-	int b = threadIdx.y;
+	//int b = threadIdx.y;
 	int y = blockIdx.y;
 
-	extern __shared__ void* s__[];
-	vpixel_t(*sbuf)[32] = (vpixel_t(*)[32])s__;
-
-	// pixel_cacheにデータを入れる
 	if (x < width) {
-		for (int i = b; i < nframes + TEMPORAL_NR_BATCH - 1; i += blockDim.y) {
-			sbuf[i][tx] = data->in[i][x + pitch * y];
-		}
-	}
-
-	__syncthreads();
-
-	if (x < width) {
-		vpixel_t center = sbuf[b + mid][tx];
+		vpixel_t center = data->in[mid][x + pitch * y];
 
 		int4 pixel_count = VHelper<int4>::make(0);
+    int4 sum = VHelper<int4>::make(0);
 		for (int i = 0; i < nframes; ++i) {
-			vpixel_t ref = sbuf[b + i][tx];
+			vpixel_t ref = data->in[i][x + pitch * y];
 			int4 diff = absdiff(ref, center);
-			count_pixel(diff, thresh, pixel_count);
+      sum_pixel(diff, thresh, ref, pixel_count, sum);
 		}
 
-		int4 sum = VHelper<int4>::make(0);
-		for (int i = 0; i < nframes; ++i) {
-			vpixel_t ref = sbuf[b + i][tx];
-			int4 diff = absdiff(ref, center);
-			sum_pixel(diff, thresh, ref, sum);
-		}
-
-		average_pixel(sum, pixel_count, data->out[b][x + y * pitch]);
+		average_pixel(sum, pixel_count, data->out[0][x + y * pitch]);
 	}
 }
 
 class KTemporalNR : public KDebandBase
 {
-	enum {
-		BATCH = TEMPORAL_NR_BATCH
-	};
-
 	int dist;
 	int thresh;
 
-	Frame cacheframes[BATCH];
-	int cached_cycle;
-
 	template <typename pixel_t>
-	void MakeFrames(int cycle, PNeoEnv env)
+	PVideoFrame MakeFrames(int n, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
 		int nframes = dist * 2 + 1;
-		int batchframes = nframes + BATCH - 1;
-		auto frames = std::unique_ptr<Frame[]>(new Frame[batchframes]);
-		for (int i = 0; i < batchframes; ++i) {
-			frames[i] = child->GetFrame(clamp(cycle * BATCH - dist + i, 0, vi.num_frames - 1), env);
+		auto frames = std::unique_ptr<Frame[]>(new Frame[nframes]);
+		for (int i = 0; i < nframes; ++i) {
+			frames[i] = child->GetFrame(clamp(n - dist + i, 0, vi.num_frames - 1), env);
 		}
 
 		TemporalNRPtrs<vpixel_t> *ptrs = new TemporalNRPtrs<vpixel_t>[3];
@@ -186,21 +147,18 @@ class KTemporalNR : public KDebandBase
 		TemporalNRPtrs<vpixel_t>& ptrsU = ptrs[1];
 		TemporalNRPtrs<vpixel_t>& ptrsV = ptrs[2];
 
-		for (int i = 0; i < BATCH; ++i) {
-			cacheframes[i] = env->NewVideoFrame(vi);
-			Frame& dst = cacheframes[i];
-			ptrsY.out[i] = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
-			ptrsU.out[i] = dst.GetWritePtr<vpixel_t>(PLANAR_U);
-			ptrsV.out[i] = dst.GetWritePtr<vpixel_t>(PLANAR_V);
-		}
-		for (int i = 0; i < batchframes; ++i) {
+		Frame dst = env->NewVideoFrame(vi);
+		ptrsY.out[0] = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
+		ptrsU.out[0] = dst.GetWritePtr<vpixel_t>(PLANAR_U);
+		ptrsV.out[0] = dst.GetWritePtr<vpixel_t>(PLANAR_V);
+		for (int i = 0; i < nframes; ++i) {
 			ptrsY.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_Y);
 			ptrsU.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_U);
 			ptrsV.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_V);
 		}
 
-		int pitchY = cacheframes[0].GetPitch<vpixel_t>(PLANAR_Y);
-		int pitchUV = cacheframes[0].GetPitch<vpixel_t>(PLANAR_U);
+		int pitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
+		int pitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
 		int width4 = vi.width >> 2;
 		int width4UV = width4 >> logUVx;
 		int heightUV = vi.height >> logUVy;
@@ -218,17 +176,16 @@ class KTemporalNR : public KDebandBase
 				work.GetWritePtr<TemporalNRPtrs<vpixel_t>>();
 			CUDA_CHECK(cudaMemcpyAsync(dptrs, ptrs, work_bytes, cudaMemcpyHostToDevice));
 
-			dim3 threads(32, TEMPORAL_NR_BATCH);
+			dim3 threads(64);
 			dim3 blocks(nblocks(width4, threads.x), vi.height);
 			dim3 blocksUV(nblocks(width4UV, threads.x), heightUV);
-			int sbufsize = batchframes * sizeof(vpixel_t) * 32;
-			kl_temporal_nr << <blocks, threads, sbufsize >> >(
+			kl_temporal_nr << <blocks, threads >> >(
 				&dptrs[0], nframes, mid, width4, vi.height, pitchY, thresh);
 			DEBUG_SYNC;
-			kl_temporal_nr << <blocksUV, threads, sbufsize >> >(
+			kl_temporal_nr << <blocksUV, threads >> >(
 				&dptrs[1], nframes, mid, width4UV, heightUV, pitchUV, thresh);
 			DEBUG_SYNC;
-			kl_temporal_nr << <blocksUV, threads, sbufsize >> >(
+			kl_temporal_nr << <blocksUV, threads >> >(
 				&dptrs[2], nframes, mid, width4UV, heightUV, pitchUV, thresh);
 			DEBUG_SYNC;
 
@@ -243,6 +200,8 @@ class KTemporalNR : public KDebandBase
 			cpu_temporal_nr(&ptrsV, nframes, mid, width4UV, heightUV, pitchUV, thresh);
 			delete [] ptrs;
 		}
+
+    return dst.frame;
 	}
 
 public:
@@ -250,7 +209,6 @@ public:
 		: KDebandBase(clip)
 		, dist(dist)
 		, thresh(scaleParam(thresh, vi.BitsPerComponent()))
-		, cached_cycle(-1)
 	{
 		if (dist > MAX_TEMPORAL_DIST) {
 			env->ThrowError("[KTemporalNR] maximum dist is 16");
@@ -260,24 +218,19 @@ public:
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
 	{
 		PNeoEnv env = env_;
-		int cycle = n / BATCH;
-		if (cached_cycle == cycle) {
-			return cacheframes[n % BATCH].frame;
-		}
+
 		int pixelSize = vi.ComponentSize();
 		switch (pixelSize) {
 		case 1:
-			MakeFrames<uint8_t>(cycle, env);
-			break;
+			return MakeFrames<uint8_t>(n, env);
 		case 2:
-			MakeFrames<uint16_t>(cycle, env);
-			break;
+      return MakeFrames<uint16_t>(n, env);
 		default:
 			env->ThrowError("[KTemporalNR] Unsupported pixel format");
 			break;
 		}
-		cached_cycle = cycle;
-		return cacheframes[n % BATCH].frame;
+
+    return PVideoFrame();
 	}
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
