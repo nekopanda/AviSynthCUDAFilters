@@ -2106,7 +2106,7 @@ void AddFuncUCF(IScriptEnvironment* env)
   env->AddFunction("KNoiseClip", "cc[nmin_y]i[range_y]i[nmin_uv]i[range_uv]i", KNoiseClip::Create, 0);
   env->AddFunction("KAnalyzeNoise", "cc[s4uper]c", KAnalyzeNoise::Create, 0);
   env->AddFunction("KDecombUCFParam", DecombUCF_PARAM_STR, KDecombUCFParam::Create, 0);
-  env->AddFunction("KDecombUCF", "cccc[nr]c", KDecombUCF::Create, 0);
+  env->AddFunction("KDecombUCF", "ccccc[nr]c", KDecombUCF::Create, 0);
   env->AddFunction("KDecombUCF24", "ccccccc[nr]c", KDecombUCF24::Create, 0);
   env->AddFunction("KDecombUCF60Flag", "cc[showclip]c[sc_thresh]f[dup_factor]f", KDecombUCF60Flag::Create, 0);
   env->AddFunction("KDecombUCF60", "ccccc[nr]c[sc_thresh]f[dup_factor]f", KDecombUCF60::Create, 0);
