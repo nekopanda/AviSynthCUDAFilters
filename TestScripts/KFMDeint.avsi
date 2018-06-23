@@ -18,6 +18,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     out24 = Select(mode, false, false, true) # output 24fps
     
     flagcrop = 6 # 上下のノイズ部分は除外する
+    nrblk = (Height(src) >= 720) ? 32 : 16 # SMDegrain block size
     
     Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
     Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
@@ -28,10 +29,13 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         Assert(cc >= 35, "[KFM CUDA Error] Specified GPU: " + CUDADeviceName(dev) + " is not usable. (CC=" + string(cc) + " < 35)")
     }
     
-    OnDEV = cuda ? function[dev](clip c) { c.OnCUDA(2, dev) } : function(clip c) { c }
+    OnDEV = cuda ? function[dev](clip c) { c.OnCUDA(1, dev) } : function(clip c) { c }
 
     # KFMPadは上下を4ピクセル（合計8ピクセル）拡張する
     pad = src.KFMPad()
+
+    # キャッシュ節約のためsrcはpadベースにする
+    src = pad.Crop(0,4,0,-4)
 
     ## 60fpsクリップを作る ##
 
@@ -145,10 +149,10 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
 
         if(nr) {
             if(cuda) {
-                clip24 = clip24.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
+                clip24 = clip24.KSMDegrain(tr=1, blksize=nrblk, binomial=True, dev=dev)
             }
             else {
-                clip24 = clip24.SMDegrain(tr=1)
+                clip24 = clip24.SMDegrain(tr=1, blksize=nrblk)
             }
         }
 
@@ -168,10 +172,10 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             }
             if(nr) {
                 if(cuda) {
-                    clip30 = clip30.KSMDegrain(tr=1, chroma=False, binomial=True, dev=dev)
+                    clip30 = clip30.KSMDegrain(tr=1, blksize=nrblk, binomial=True, dev=dev)
                 }
                 else {
-                    clip30 = clip30.SMDegrain(tr=1)
+                    clip30 = clip30.SMDegrain(tr=1, blksize=nrblk)
                 }
             }
 
