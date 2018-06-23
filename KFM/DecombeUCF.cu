@@ -1788,6 +1788,9 @@ public:
       vi = showclip->GetVideoInfo();
     }
     else {
+      // フレーム数、FPSを2倍
+      vi.num_frames *= 2;
+      vi.MulDivFPS(2, 1);
       // フレームは出力しないのでダミー
       vi.pixel_type = VideoInfo::CS_BGR32;
       vi.width = 4;
@@ -1948,17 +1951,9 @@ public:
     VideoInfo viafter = afterclip->GetVideoInfo();
     VideoInfo vinr = nrclip ? nrclip->GetVideoInfo() : VideoInfo();
 
-    // fpsチェック
-    vi60.MulDivFPS(1, 1);
-    viflag.MulDivFPS(2, 1);
-    vibefore.MulDivFPS(1, 1);
-    viafter.MulDivFPS(1, 1);
-    if (nrclip) {
-      vinr.MulDivFPS(1, 1);
-    }
-
     DecombUCFInfo::SetParam(vi, &info);
 
+    // fpsチェック
     if (vi60.fps_denominator != viflag.fps_denominator)
       env->ThrowError("[KDecombUCF60]: vi60.fps_denominator != viflag.fps_denominator");
     if (vi60.fps_numerator != viflag.fps_numerator)
