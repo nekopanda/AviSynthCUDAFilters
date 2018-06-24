@@ -29,7 +29,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         Assert(cc >= 35, "[KFM CUDA Error] Specified GPU: " + CUDADeviceName(dev) + " is not usable. (CC=" + string(cc) + " < 35)")
     }
     
-    OnDEV = cuda ? function[dev](clip c) { c.OnCUDA(1, dev) } : function(clip c) { c }
+    OnDEV = cuda ? function[dev](clip c, int "pre") { c.OnCUDA(default(pre, 1), dev) } : function(clip c) { c }
 
     # KFMPadは上下を4ピクセル（合計8ピクセル）拡張する
     pad = src.KFMPad()
@@ -121,7 +121,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         # テレシネ解析判定 KFMCycleAnalyzeはCUDA非対応なので注意
         mode = (pass >= 3) ? 2 : pass
         fmclip = super.KPreCycleAnalyze().OnDEV()
-        fmclip = fmclip.KFMCycleAnalyze(src, mode=mode, filepath=filepath).OnCPU(0)
+        fmclip = fmclip.KFMCycleAnalyze(src, mode=mode, filepath=filepath).OnCPU(1)
         
         if(pass == 1) {
             return fmclip
@@ -198,7 +198,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     }
     
     if(cuda) {
-        OnDEV()
+        OnDEV(2)
     }
     else {
         Prefetch(4)
