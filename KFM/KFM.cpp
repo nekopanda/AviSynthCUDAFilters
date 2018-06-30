@@ -415,23 +415,24 @@ FMMatch PulldownPatterns::Matching(const FMData& data, int width, int height, fl
 
 std::string GetFullPath(const std::string& path);
 
+class DumpTextFile
+{
+public:
+	FILE* fp;
+	DumpTextFile(const std::string& fname, IScriptEnvironment* env)
+		: fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
+	{
+		if (fp == nullptr) {
+			env->ThrowError("Failed to open file ... %s", fname);
+		}
+	}
+	~DumpTextFile() {
+		fclose(fp);
+	}
+};
+
 class KFMCycleAnalyze : public GenericVideoFilter
 {
-  class DebugFile
-  {
-  public:
-    FILE* fp;
-    DebugFile(const std::string& fname , IScriptEnvironment* env)
-      : fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
-    {
-      if (fp == nullptr) {
-        env->ThrowError("Failed to open debug dump file ... %s", fname);
-      }
-    }
-    ~DebugFile() {
-      fclose(fp);
-    }
-  };
 
   enum Mode {
     REALTIME = 0,
@@ -467,7 +468,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
   int debug;
 
   std::vector<KFMResult> results;
-  std::unique_ptr<DebugFile> debugFile;
+  std::unique_ptr<DumpTextFile> debugFile;
 
   // ƒeƒ“ƒ|ƒ‰ƒŠ
   std::deque<KFMResult> recentBest;
@@ -582,7 +583,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
       if (debug) {
         auto cur = results.back();
         auto best = recentBest[0];
-        fprintf(debugFile->fp, "%d,%d,%.2f,%.2f,%.2f,%d,%.2f,%.2f,%.2f", current, 
+        fprintf(debugFile->fp, "%d,%d,%.2f,%.2f,%.2f,%d,%.2f,%.2f,%.2f", current,
           cur.pattern, cur.score, cur.cost, cur.reliability,
           best.pattern, best.score, best.cost, best.reliability);
       }
@@ -628,8 +629,8 @@ class KFMCycleAnalyze : public GenericVideoFilter
         file.writeValue(results[i], env);
       }
       if (debug) {
-        debugFile = nullptr;
-        auto file = std::unique_ptr<DebugFile>(new DebugFile(filepath + ".pattern", env));
+				debugFile = nullptr;
+        auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".pattern", env));
         for (int i = 0; i < numCycles; ++i) {
           fprintf(file->fp, "%d\n", results[i].is60p ? NUM_PATTERNS : results[i].pattern);
         }
@@ -678,7 +679,7 @@ public:
 
     if (mode == GEN_PATTERN) {
       if (debug) {
-        debugFile = std::unique_ptr<DebugFile>(new DebugFile(filepath + ".debug", env));
+				debugFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".debug", env));
       }
     }
     else if (mode == READ_PATTERN) {
@@ -788,12 +789,69 @@ public:
   }
 };
 
+class KFMDumpFM : public GenericVideoFilter
+{
+	int nOut;
+	std::unique_ptr<DumpTextFile> outFile;
+public:
+	KFMDumpFM(PClip fmframe, const std::string& filepath, IScriptEnvironment* env)
+		: GenericVideoFilter(fmframe)
+		, nOut(0)
+	{
+		outFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath, env));
+		fprintf(outFile->fp, "#shima,large shima,move\n");
+	}
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+	{
+		if (n < nOut) {
+			return child->GetFrame(n, env);
+		}
+
+		FMMatch match = { 0 };
+		for (int current = n; current < n + 1; ++current) {
+			Frame frame = child->GetFrame(n, env);
+			const FMCount* ptr = frame.GetReadPtr<FMCount>();
+			for (int i = 0; i < 2; ++i) {
+				fprintf(outFile->fp, "%d,%d,%d\n", ptr[i].shima, ptr[i].lshima, ptr[i].move);
+			}
+			++nOut;
+		}
+
+		if (nOut == vi.num_frames) {
+			// ÅŒã‚Ü‚ÅGetFrame‚µ‚½
+			outFile = nullptr;
+		}
+
+		return child->GetFrame(n, env);
+	}
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_DEV_TYPE) {
+			return GetDeviceTypes(child) &
+				(DEV_TYPE_CPU | DEV_TYPE_CUDA);
+		}
+		return 0;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new KFMDumpFM(
+			args[0].AsClip(),      // clip
+			args[1].AsString("kfm.txt"),    // filepath
+			env
+		);
+	}
+};
+
 void AddFuncFM(IScriptEnvironment* env)
 {
-  env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
+	env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
   env->AddFunction("KFMCycleAnalyze", "cc[mode]i[lscale]f[costth]f[adj2224]f[adj30]f[range]i[thresh]f[past]i[th60]f[th24]f[rel24]f[filepath]s[debug]i", KFMCycleAnalyze::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
+
+	env->AddFunction("KFMDumpFM", "c[filepath]s", KFMDumpFM::Create, 0);
 }
 
 #define NOMINMAX
