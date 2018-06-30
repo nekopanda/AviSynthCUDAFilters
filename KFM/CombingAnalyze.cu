@@ -778,6 +778,10 @@ public:
     return dst.frame;
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		return 0;
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KFMSuperShow(
