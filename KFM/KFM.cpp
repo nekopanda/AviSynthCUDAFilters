@@ -724,9 +724,9 @@ public:
       args[7].AsInt(5),             // range
       (float)args[8].AsFloat(1.0f), // thresh
       args[9].AsInt(180),           // past
-      args[10].AsFloat(3.0f),           // th60
-      args[11].AsFloat(0.1f),           // th30
-      args[12].AsFloat(0.2f),           // rell24
+			(float)args[10].AsFloat(3.0f),           // th60
+			(float)args[11].AsFloat(0.1f),           // th30
+			(float)args[12].AsFloat(0.2f),           // rell24
       args[13].AsString("kfm_cycle.dat"),           // filepath
       args[14].AsInt(0),           // debug
       env

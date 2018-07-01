@@ -141,6 +141,9 @@ class KFMSwitch : public KFMFilterBase
 	int logUVy;
 	int nBlkX, nBlkY;
 
+	bool is30_60;
+	bool is24_60;
+
 	PulldownPatterns patterns;
 
 	template <typename pixel_t>
@@ -189,9 +192,9 @@ class KFMSwitch : public KFMFilterBase
     case FRAME_UCF:
       return ucfclip->GetFrame(n60, env);
     case FRAME_30:
-      return clip30->GetFrame(n60 >> 1, env);
+			return clip30->GetFrame(is30_60 ? n60 : (n60 >> 1), env);
     case FRAME_24:
-      return clip24->GetFrame(info.n24, env);
+      return clip24->GetFrame(is24_60 ? n60 : info.n24, env);
     }
     return Frame();
   }
@@ -496,58 +499,66 @@ public:
     VideoInfo vicc30 = cc30->GetVideoInfo();
     VideoInfo viucf = ucfclip ? ucfclip->GetVideoInfo() : VideoInfo();
 
+		// 24/30クリップは補間された60fpsか見る
+		is24_60 = (vi24.fps_numerator == vi60.fps_numerator) && (vi24.fps_denominator == vi60.fps_denominator);
+		is30_60 = (vi30.fps_numerator == vi60.fps_numerator) && (vi30.fps_denominator == vi60.fps_denominator);
+
     // fpsチェック
-    if (vi24.fps_denominator != vimask24.fps_denominator)
-      env->ThrowError("[KDecombUCF60]: vi24.fps_denominator != vimask24.fps_denominator");
-    if (vi24.fps_denominator != vicc24.fps_denominator)
-      env->ThrowError("[KDecombUCF60]: vi24.fps_denominator != vicc24.fps_denominator");
-    if (vi24.fps_numerator != vimask24.fps_numerator)
-      env->ThrowError("[KDecombUCF60]: vi24.fps_numerator != vimask24.fps_numerator");
-    if (vi24.fps_numerator != vicc24.fps_numerator)
-      env->ThrowError("[KDecombUCF60]: vi24.fps_numerator != vicc24.fps_numerator");
-    if (vi30.fps_denominator != vimask30.fps_denominator)
-      env->ThrowError("[KDecombUCF60]: vi30.fps_denominator != vimask30.fps_denominator");
-    if (vi30.fps_denominator != vicc30.fps_denominator)
-      env->ThrowError("[KDecombUCF60]: vi30.fps_denominator != vicc30.fps_denominator");
-    if (vi30.fps_numerator != vimask30.fps_numerator)
-      env->ThrowError("[KDecombUCF60]: vi30.fps_numerator != vimask30.fps_numerator");
-    if (vi30.fps_numerator != vicc30.fps_numerator)
-      env->ThrowError("[KDecombUCF60]: vi30.fps_numerator != vicc30.fps_numerator");
+		if (is24_60 == false) {
+			if (vi24.fps_denominator != vimask24.fps_denominator)
+				env->ThrowError("[KFMSwitch]: vi24.fps_denominator != vimask24.fps_denominator");
+			if (vi24.fps_numerator != vimask24.fps_numerator)
+				env->ThrowError("[KFMSwitch]: vi24.fps_numerator != vimask24.fps_numerator");
+		}
+		if (vicc24.fps_denominator != vimask24.fps_denominator)
+			env->ThrowError("[KFMSwitch]: vicc24.fps_denominator != vimask24.fps_denominator");
+		if (vicc24.fps_numerator != vimask24.fps_numerator)
+			env->ThrowError("[KFMSwitch]: vicc24.fps_numerator != vimask24.fps_numerator");
+		if (is30_60 == false) {
+			if (vi30.fps_denominator != vimask30.fps_denominator)
+				env->ThrowError("[KFMSwitch]: vi30.fps_denominator != vimask30.fps_denominator");
+			if (vi30.fps_numerator != vimask30.fps_numerator)
+				env->ThrowError("[KFMSwitch]: vi30.fps_numerator != vimask30.fps_numerator");
+		}
+		if (vicc30.fps_denominator != vimask30.fps_denominator)
+			env->ThrowError("[KFMSwitch]: vicc30.fps_denominator != vimask30.fps_denominator");
+		if (vicc30.fps_numerator != vimask30.fps_numerator)
+			env->ThrowError("[KFMSwitch]: vicc30.fps_numerator != vimask30.fps_numerator");
     if (ucfclip) {
       if (vi60.fps_denominator != viucf.fps_denominator)
-        env->ThrowError("[KDecombUCF60]: vi60.fps_denominator != viucf.fps_denominator");
+        env->ThrowError("[KFMSwitch]: vi60.fps_denominator != viucf.fps_denominator");
       if (vi60.fps_numerator != viucf.fps_numerator)
-        env->ThrowError("[KDecombUCF60]: vi60.fps_numerator != viucf.fps_numerator");
+        env->ThrowError("[KFMSwitch]: vi60.fps_numerator != viucf.fps_numerator");
     }
 
     // サイズチェック
     if (vi60.width != vi24.width)
-      env->ThrowError("[KDecombUCF60]: vi60.width != vi24.width");
+      env->ThrowError("[KFMSwitch]: vi60.width != vi24.width");
     if (vi60.height != vi24.height)
-      env->ThrowError("[KDecombUCF60]: vi60.height != vi24.height");
+      env->ThrowError("[KFMSwitch]: vi60.height != vi24.height");
     if (vi60.width != vimask24.width)
-      env->ThrowError("[KDecombUCF60]: vi60.width != vimask24.width");
+      env->ThrowError("[KFMSwitch]: vi60.width != vimask24.width");
     if (vi60.height != vimask24.height)
-      env->ThrowError("[KDecombUCF60]: vi60.height != vimask24.height");
+      env->ThrowError("[KFMSwitch]: vi60.height != vimask24.height");
     if (vi60.width != vi30.width)
-      env->ThrowError("[KDecombUCF60]: vi60.width != vi30.width");
+      env->ThrowError("[KFMSwitch]: vi60.width != vi30.width");
     if (vi60.height != vi30.height)
-      env->ThrowError("[KDecombUCF60]: vi60.height != vi30.height");
+      env->ThrowError("[KFMSwitch]: vi60.height != vi30.height");
     if (vi60.width != vimask30.width)
-      env->ThrowError("[KDecombUCF60]: vi60.width != vimask30.width");
+      env->ThrowError("[KFMSwitch]: vi60.width != vimask30.width");
     if (vi60.height != vimask30.height)
-      env->ThrowError("[KDecombUCF60]: vi60.height != vimask30.height");
+      env->ThrowError("[KFMSwitch]: vi60.height != vimask30.height");
     if (ucfclip) {
       if (vi60.width != viucf.width)
-        env->ThrowError("[KDecombUCF60]: vi60.width != viucf.width");
+        env->ThrowError("[KFMSwitch]: vi60.width != viucf.width");
       if (vi60.height != viucf.height)
-        env->ThrowError("[KDecombUCF60]: vi60.height != viucf.height");
+        env->ThrowError("[KFMSwitch]: vi60.height != viucf.height");
     }
 
     // UCFクリップチェック
     if (ucfclip) {
       if(DecombUCFInfo::GetParam(viucf, env)->fpsType != 60)
-        env->ThrowError("[KDecombUCF60]: Invalid UCF clip (KDecombUCF60 clip is required)");
+        env->ThrowError("[KFMSwitch]: Invalid UCF clip (KDecombUCF60 clip is required)");
     }
 	}
 
