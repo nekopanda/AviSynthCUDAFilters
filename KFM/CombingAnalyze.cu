@@ -1238,10 +1238,10 @@ void cpu_bilinear_v(
 {
   enum { HALF = SCALE / 2 };
   for (int y = 0; y < height; ++y) {
+		int y0 = ((y - HALF) >> SHIFT);
+		int c0 = ((y0 + 1) << SHIFT) - (y - HALF);
+		int c1 = SCALE - c0;
     for (int x = 0; x < width; ++x) {
-      int y0 = ((y - HALF) >> SHIFT);
-      int c0 = ((y0 + 1) << SHIFT) - (y - HALF);
-      int c1 = SCALE - c0;
       auto s0 = src[x + (y0 + 0) * spitch];
       auto s1 = src[x + (y0 + 1) * spitch];
       dst[x + y * dpitch] = (s0 * c0 + s1 * c1 + HALF) >> SHIFT;
