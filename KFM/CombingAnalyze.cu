@@ -53,7 +53,7 @@ __host__ __device__ int calc_diff(
 }
 
 template<typename pixel_t, bool parity>
-void cpu_analyze_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
+void cpu_analyze_frame(uchar2* __restrict__ flag, int fpitch,
   const pixel_t* __restrict__ f0, const pixel_t* __restrict__ f1,
   int pitch, int nBlkX, int nBlkY, int shift)
 {
@@ -134,16 +134,16 @@ void cpu_analyze_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, i
         }
       }
 
-      flag0[(bx + 1) + (by + 1) * fpitch].x = (uint8_t)clamp(sum[0] >> shift, 0, 255);
-      flag0[(bx + 1) + (by + 1) * fpitch].y = (uint8_t)clamp(sum[1] >> shift, 0, 255);
-      flag1[(bx + 1) + (by + 1) * fpitch].x = (uint8_t)clamp(sum[2] >> shift, 0, 255);
-      flag1[(bx + 1) + (by + 1) * fpitch].y = (uint8_t)clamp(sum[3] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 0) * fpitch].x = (uint8_t)clamp(sum[0] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 0) * fpitch].y = (uint8_t)clamp(sum[1] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 1) * fpitch].x = (uint8_t)clamp(sum[2] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 1) * fpitch].y = (uint8_t)clamp(sum[3] >> shift, 0, 255);
     }
   }
 }
 
 template<typename pixel_t, bool parity>
-__global__ void kl_analyze_frame(uchar2* __restrict__ flag0, uchar2* __restrict__ flag1, int fpitch,
+__global__ void kl_analyze_frame(uchar2* __restrict__ flag, int fpitch,
   const pixel_t* __restrict__ f0, const pixel_t* __restrict__ f1,
   int pitch, int nBlkX, int nBlkY, int shift)
 {
@@ -228,10 +228,10 @@ __global__ void kl_analyze_frame(uchar2* __restrict__ flag0, uchar2* __restrict_
     dev_reduceN_warp<int, 4, DC_BLOCK_SIZE, AddReducer<int>>(tx, sum);
 
     if (tx == 0) {
-      flag0[(bx + 1) + (by + 1) * fpitch].x = (uint8_t)clamp(sum[0] >> shift, 0, 255);
-      flag0[(bx + 1) + (by + 1) * fpitch].y = (uint8_t)clamp(sum[1] >> shift, 0, 255);
-      flag1[(bx + 1) + (by + 1) * fpitch].x = (uint8_t)clamp(sum[2] >> shift, 0, 255);
-      flag1[(bx + 1) + (by + 1) * fpitch].y = (uint8_t)clamp(sum[3] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 0) * fpitch].x = (uint8_t)clamp(sum[0] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 0) * fpitch].y = (uint8_t)clamp(sum[1] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 1) * fpitch].x = (uint8_t)clamp(sum[2] >> shift, 0, 255);
+      flag[(bx + 1) + (2 * (by + 1) + 1) * fpitch].y = (uint8_t)clamp(sum[3] >> shift, 0, 255);
     }
   }
 }
@@ -241,11 +241,8 @@ class KFMSuper : public KFMFilterBase
   PClip padclip;
   VideoInfo srcvi;
 
-  int cacheFrame;
-  Frame cache[2];
-
   template <typename pixel_t, bool parity>
-  void AnalyzeFrame(Frame& f0, Frame& f1, Frame& combe0, Frame& combe1, PNeoEnv env)
+  void AnalyzeFrame(Frame& f0, Frame& f1, Frame& combe, PNeoEnv env)
   {
     const pixel_t* f0Y = f0.GetReadPtr<pixel_t>(PLANAR_Y);
     const pixel_t* f1Y = f1.GetReadPtr<pixel_t>(PLANAR_Y);
@@ -253,21 +250,18 @@ class KFMSuper : public KFMFilterBase
     const pixel_t* f1U = f1.GetReadPtr<pixel_t>(PLANAR_U);
     const pixel_t* f0V = f0.GetReadPtr<pixel_t>(PLANAR_V);
     const pixel_t* f1V = f1.GetReadPtr<pixel_t>(PLANAR_V);
-    uchar2* combe0Y = combe0.GetWritePtr<uchar2>(PLANAR_Y);
-    uchar2* combe0U = combe0.GetWritePtr<uchar2>(PLANAR_U);
-    uchar2* combe0V = combe0.GetWritePtr<uchar2>(PLANAR_V);
-    uchar2* combe1Y = combe1.GetWritePtr<uchar2>(PLANAR_Y);
-    uchar2* combe1U = combe1.GetWritePtr<uchar2>(PLANAR_U);
-    uchar2* combe1V = combe1.GetWritePtr<uchar2>(PLANAR_V);
+    uchar2* combeY = combe.GetWritePtr<uchar2>(PLANAR_Y);
+    uchar2* combeU = combe.GetWritePtr<uchar2>(PLANAR_U);
+    uchar2* combeV = combe.GetWritePtr<uchar2>(PLANAR_V);
 
     int pitchY = f0.GetPitch<pixel_t>(PLANAR_Y);
     int pitchUV = f0.GetPitch<pixel_t>(PLANAR_U);
-    int fpitchY = combe0.GetPitch<uchar2>(PLANAR_Y);
-    int fpitchUV = combe0.GetPitch<uchar2>(PLANAR_U);
-    int width = combe0.GetWidth<uchar2>(PLANAR_Y);
-    int widthUV = combe0.GetWidth<uchar2>(PLANAR_U);
-    int height = combe0.GetHeight(PLANAR_Y);
-    int heightUV = combe0.GetHeight(PLANAR_U);
+    int fpitchY = combe.GetPitch<uchar2>(PLANAR_Y);
+    int fpitchUV = combe.GetPitch<uchar2>(PLANAR_U);
+    int width = combe.GetWidth<uchar2>(PLANAR_Y);
+    int widthUV = combe.GetWidth<uchar2>(PLANAR_U);
+    int height = combe.GetHeight(PLANAR_Y) >> 1;
+    int heightUV = combe.GetHeight(PLANAR_U) >> 1;
 
     int shift = srcvi.BitsPerComponent() - 8 + 4;
 
@@ -276,90 +270,90 @@ class KFMSuper : public KFMFilterBase
       dim3 blocks(nblocks(width, DC_BLOCK_TH_W), nblocks(height, DC_BLOCK_TH_H));
       dim3 blocksUV(nblocks(widthUV, DC_BLOCK_TH_W), nblocks(heightUV, DC_BLOCK_TH_H));
       kl_analyze_frame<pixel_t, parity> << <blocks, threads >> >(
-        combe0Y, combe1Y, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
+        combeY, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       DEBUG_SYNC;
       kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> >(
-        combe0U, combe1U, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
+        combeU, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
       kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> >(
-        combe0V, combe1V, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
+        combeV, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
     }
     else {
       cpu_analyze_frame<pixel_t, parity>(
-        combe0Y, combe1Y, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
+        combeY, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       cpu_analyze_frame<pixel_t, parity>(
-        combe0U, combe1U, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
+        combeU, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       cpu_analyze_frame<pixel_t, parity>(
-        combe0V, combe1V, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
+        combeV, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
     }
   }
 
   template <typename pixel_t>
-  void GetFrameT(int n, PNeoEnv env)
+  PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     int parity = child->GetParity(n);
     Frame f0 = Frame(padclip->GetFrame(n, env), VPAD);
     Frame f1 = Frame(padclip->GetFrame(n + 1, env), VPAD);
-    cache[0] = env->NewVideoFrame(vi);
-    cache[1] = env->NewVideoFrame(vi);
+    Frame dst = env->NewVideoFrame(vi);
 
     if (parity) {
-      AnalyzeFrame<pixel_t, true>(f0, f1, cache[0], cache[1], env);
+      AnalyzeFrame<pixel_t, true>(f0, f1, dst, env);
     }
     else {
-      AnalyzeFrame<pixel_t, false>(f0, f1, cache[0], cache[1], env);
+      AnalyzeFrame<pixel_t, false>(f0, f1, dst, env);
     }
 
-    cacheFrame = n;
+		return dst.frame;
   }
 public:
   KFMSuper(PClip clip, PClip pad, IScriptEnvironment* env)
     : KFMFilterBase(clip)
     , padclip(pad)
     , srcvi(vi)
-    , cacheFrame(-1)
   {
     if (vi.width & 7) env->ThrowError("[KFMSuper]: width must be multiple of 8");
     if (vi.height & 7) env->ThrowError("[KFMSuper]: height must be multiple of 8");
 
     vi.width = vi.width / DC_OVERLAP * 2;
-    vi.height = vi.height / DC_OVERLAP;
+    vi.height = vi.height / DC_OVERLAP * 2;
     vi.pixel_type = Get8BitType(vi);
-    vi.MulDivFPS(2, 1);
-    vi.num_frames *= 2;
   }
 
-  PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
-    int n = n60 >> 1;
 
-    if (n != cacheFrame) {
-      int pixelSize = srcvi.ComponentSize();
-      switch (pixelSize) {
-      case 1:
-        GetFrameT<uint8_t>(n, env);
-        break;
-      case 2:
-        GetFrameT<uint16_t>(n, env);
-        break;
-      default:
-        env->ThrowError("[KFMSuper] Unsupported pixel format");
-        break;
-      }
+    int pixelSize = srcvi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return GetFrameT<uint8_t>(n, env);
+    case 2:
+      return GetFrameT<uint16_t>(n, env);
+    default:
+      env->ThrowError("[KFMSuper] Unsupported pixel format");
+      break;
     }
 
-    return cache[n60 & 1].frame;
+		return PVideoFrame();
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
-    return new KFMSuper(
-      args[0].AsClip(),       // clip
-      args[1].AsClip(),       // pad
-      env
-    );
+		AVSValue clip = new KFMSuper(
+			args[0].AsClip(),       // clip
+			args[1].AsClip(),       // pad
+			env
+		);
+		clip = env->Invoke("SeparateFields", AVSValue(&clip, 1));
+		return env->Invoke("Align", AVSValue(&clip, 1));
   }
 };
 
@@ -462,6 +456,13 @@ public:
 
     return dst.frame;
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -613,6 +614,13 @@ public:
     return dst.frame;
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KPreCycleAnalyze(
@@ -654,6 +662,13 @@ public:
 
     return dst.frame;
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -779,6 +794,9 @@ public:
   }
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
 		return 0;
 	}
 
@@ -981,6 +999,13 @@ public:
     return PVideoFrame();
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KTelecine(
@@ -1081,6 +1106,13 @@ public:
 
     return out.frame;
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1536,6 +1568,13 @@ public:
     return flag.frame;
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KSwitchFlag(
@@ -1624,6 +1663,9 @@ public:
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
     return 0;
   }
 
@@ -1749,6 +1791,13 @@ public:
 
     return dst.frame;
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1902,6 +1951,13 @@ public:
 
     return PVideoFrame();
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {

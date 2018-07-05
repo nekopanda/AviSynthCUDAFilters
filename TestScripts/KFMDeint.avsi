@@ -140,7 +140,8 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
 
         # ƒeƒŒƒVƒl‰ðÍ”»’è KFMCycleAnalyze‚ÍCUDA”ñ‘Î‰ž‚È‚Ì‚Å’ˆÓ
         mode = (pass >= 3) ? 2 : pass
-        fmclip = super.KPreCycleAnalyze().OnDEV()
+        fmclip = super.KPreCycleAnalyze()
+        fmclip = cuda ? fmclip.OnDEV() : fmclip.Prefetch(4)
         fmclip = fmclip.KFMCycleAnalyze(src, mode=mode, filepath=filepath).OnCPU(1)
         
         if(pass == 1) {

@@ -234,7 +234,9 @@ public:
 	}
 
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) return MT_SERIALIZED;
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
 		return KDebandBase::SetCacheHints(cachehints, frame_range);
 	}
 
@@ -504,7 +506,13 @@ public:
 		if (sample_mode != 0 && sample_mode != 1 && sample_mode != 2) {
 			env->ThrowError("[KDeband] sample_mode must be 0,1,2");
 		}
-		
+	}
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KDebandBase::SetCacheHints(cachehints, frame_range);
 	}
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -1162,6 +1170,13 @@ public:
 			break;
 		}
 		return PVideoFrame();
+	}
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KDebandBase::SetCacheHints(cachehints, frame_range);
 	}
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)

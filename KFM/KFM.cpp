@@ -177,6 +177,13 @@ public:
     return dst.frame;
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return 0;
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
@@ -709,6 +716,13 @@ public:
     return PVideoFrame();
 	}
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_SERIALIZED;
+		}
+		return 0;
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     PClip src = args[1].AsClip();
@@ -774,6 +788,9 @@ public:
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
     return 0;
   }
 
@@ -830,6 +847,9 @@ public:
 		if (cachehints == CACHE_GET_DEV_TYPE) {
 			return GetDeviceTypes(child) &
 				(DEV_TYPE_CPU | DEV_TYPE_CUDA);
+		}
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_SERIALIZED;
 		}
 		return 0;
 	}

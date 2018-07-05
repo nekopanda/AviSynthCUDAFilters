@@ -86,6 +86,13 @@ public:
     return PVideoFrame();
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KPatchCombe(
@@ -580,6 +587,13 @@ public:
 		return PVideoFrame();
 	}
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
 	{
 		return new KFMSwitch(
@@ -645,6 +659,13 @@ public:
     return PVideoFrame();
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KFMPad(
@@ -667,6 +688,9 @@ public:
 	int __stdcall SetCacheHints(int cachehints, int frame_range) {
 		if (cachehints == CACHE_GET_DEV_TYPE) {
 			return devices;
+		}
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
 		}
 		return 0;
 	}

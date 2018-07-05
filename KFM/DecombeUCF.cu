@@ -159,6 +159,13 @@ public:
     workvi.height = nblocks(work_bytes, workvi.width * 4);
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   AVSValue ConditionalFieldDiff(int n, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
@@ -498,6 +505,13 @@ public:
     return 0;
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl CFunc(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     AVSValue cnt = env->GetVar("current_frame");
@@ -650,6 +664,13 @@ public:
 
     return PVideoFrame();
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1054,6 +1075,13 @@ public:
     return PVideoFrame();
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KAnalyzeNoise(
@@ -1240,6 +1268,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return DEV_TYPE_CPU | DEV_TYPE_CUDA;
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
     return 0;
   }
 
@@ -1507,6 +1538,13 @@ public:
     return child->GetFrame(n24, env);
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
     return new KDecombUCF(
@@ -1643,12 +1681,6 @@ public:
     }
   }
 
-  int __stdcall SetCacheHints(int cachehints, int frame_range) {
-    // CPU仮定のクリップがあるので
-    if (cachehints == CACHE_GET_CHILD_DEV_TYPE) return DEV_TYPE_ANY;
-    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-  }
-
   PVideoFrame __stdcall GetFrame(int n24, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
@@ -1729,6 +1761,13 @@ public:
 
     return child->GetFrame(n24, env);
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		// CPU仮定のクリップがあるので
+		if (cachehints == CACHE_GET_CHILD_DEV_TYPE) return DEV_TYPE_ANY;
+		else if (cachehints == CACHE_GET_MTMODE) return MT_NICE_FILTER;
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1906,6 +1945,9 @@ public:
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
     return 0;
   }
 
@@ -2061,6 +2103,13 @@ public:
     env->CopyFrameProps(centerFrame, res);
     return res;
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
