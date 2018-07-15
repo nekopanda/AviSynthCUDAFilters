@@ -39,6 +39,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return DEV_TYPE_CUDA;
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
     return 0;
   };
 };
@@ -385,6 +388,7 @@ class KTGMC_Bob : public CUDAFilterBase {
   int logUVy;
 
 	// 1フレーム分キャッシュしておく
+	std::mutex mtx_;
 	int cacheN;
 	PVideoFrame cache[2];
 
@@ -482,8 +486,12 @@ public:
 
 		int srcN = n >> 1;
 
-		if (cacheN >= 0 && srcN == cacheN) {
-			return cache[n % 2];
+		{
+			std::lock_guard<std::mutex> lock(mtx_);
+
+			if (cacheN >= 0 && srcN == cacheN) {
+				return cache[n % 2];
+			}
 		}
 
 		PVideoFrame src = child->GetFrame(srcN, env);
@@ -494,16 +502,27 @@ public:
 		MakeFrame(parity, src, bobE, program_e_y.get(), program_e_uv.get(), env);
 		MakeFrame(!parity, src, bobO, program_o_y.get(), program_o_uv.get(), env);
 
-		cacheN = n / 2;
-		cache[0] = bobE;
-		cache[1] = bobO;
+		{
+			std::lock_guard<std::mutex> lock(mtx_);
 
-		return cache[n % 2];
+			cacheN = n / 2;
+			cache[0] = bobE;
+			cache[1] = bobO;
+
+			return cache[n % 2];
+		}
 	}
 
   bool __stdcall GetParity(int n) {
     return child->GetParity(0);
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return CUDAFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
 		return new KTGMC_Bob(

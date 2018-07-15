@@ -1078,13 +1078,14 @@ function KTGMC_SetUserGlobal( string Prefix, string Name, val Value, bool "Repla
 
 	# Tricky logic to check global: enter catch block if Replace=true *or* globalName doesn't exist (i.e. need to set the global), the exception is not rethrown
 	# Not entering catch block means that Replace=false and global exists - so it throws an exception back to AviSynth
-	try { Assert( !Replace && defined(Eval(globalName)) ) }
-	catch (e)
-	{
+	# Nekopanda: Tricky logic is not needed at all because Replace is always True!!
+	#try { Assert( !Replace && defined(Eval(globalName)) ) }
+	#catch (e)
+	#{
 		Eval( "global " + globalName + " = Value" )
-		Replace = true
-	}
-	Assert( Replace, """Multiple calls to KTGMC, set PrevGlobals="Replace" or read documentation on 'Multiple KTGMC Calls'""" )
+	#	Replace = true
+	#}
+	#Assert( Replace, """Multiple calls to KTGMC, set PrevGlobals="Replace" or read documentation on 'Multiple KTGMC Calls'""" )
 }
 
 # Return value of global variable called "Prefix_Name". Returns NOP() if it doesn't exist or Reuse is false

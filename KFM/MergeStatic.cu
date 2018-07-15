@@ -162,7 +162,7 @@ public:
 		if (cachehints == CACHE_GET_MTMODE) {
 			return MT_NICE_FILTER;
 		}
-		return 0;
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
 	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
@@ -393,6 +393,13 @@ public:
     return PVideoFrame();
   }
 
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
@@ -536,6 +543,13 @@ public:
 
     return PVideoFrame();
   }
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {

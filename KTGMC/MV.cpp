@@ -786,6 +786,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_MULTI_INSTANCE;
+		}
     return 0;
   };
 
@@ -2829,12 +2832,12 @@ public:
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
-    if (cachehints == CACHE_GET_MTMODE) {
-      return MT_MULTI_INSTANCE;
-    }
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_MULTI_INSTANCE;
+		}
     return 0;
   }
 
@@ -2998,6 +3001,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_MULTI_INSTANCE;
+		}
     return 0;
   };
 
@@ -4753,6 +4759,9 @@ public:
       }
       return devtypes;
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_MULTI_INSTANCE;
+		}
     return 0;
   };
 
@@ -5283,6 +5292,9 @@ public:
         GetDeviceTypes(vectors) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_MULTI_INSTANCE;
+		}
     return 0;
   };
 

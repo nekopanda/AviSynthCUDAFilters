@@ -213,6 +213,15 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             if(svp) {
                 clip24 = clip24.OnDEV().SmoothFps(5, 2).OnCPU(1)
                 clip30 = clip30.OnDEV().SmoothFps(2, 1).OnCPU(1)
+                if(!cuda) {
+                    # SVPをマルチスレッドで呼び出すとバグるので代替措置
+                    clip60 = clip60.Prefetch(4)
+                    mask24 = mask24.Prefetch(2)
+                    cc24 = cc24.Prefetch(2)
+                    mask30 = mask30.Prefetch(2)
+                    cc30 = cc30.Prefetch(2)
+                    ucfc = ucf ? ucfc.Prefetch(2) : Undefined()
+                }
             }
 
             mode = (pass == 3) ? 1 : pass
@@ -229,7 +238,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         OnDEV(2)
     }
     else {
-        Prefetch(4)
+        Prefetch((!out24 && svp) ? 1 : 4)
     }
     
     # 24fps出力時のSVPはここで適用
