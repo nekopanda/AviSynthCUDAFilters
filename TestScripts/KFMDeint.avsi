@@ -6,7 +6,8 @@ SetFilterMTMode("SVSuper",1)
 SetFilterMTMode("SVAnalyse",1)
 SetFilterMTMode("SVSmoothFps",1)
 
-function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thswitch", bool "ucf", bool "nr", bool "svp", string "filepath", bool "cuda", int "dev", bool "show") {
+function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thswitch", bool "ucf", bool "nr", bool "svp",\
+                            string "filepath", bool "cuda", int "dev", int "threads", bool "show") {
 
     mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps
     pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2) 2:only timing(mode:0) 3:generate images
@@ -18,6 +19,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     filepath = default(filepath, "cycle.dat")
     cuda = default(cuda, false) # Enable CUDA
     dev = default(dev, 0) # CUDA device index
+    threads = default(threads, 6) # Number of CPU threads
     show = default(show, false) # Show information
     
     ivtc = Select(mode, true, false, true) # Enable Inverse Telecine
@@ -36,7 +38,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     }
     
     # SVP
-    SmoothFps = function(clip c, int num, int den) {
+    SmoothFps = function[threads](clip c, int num, int den) {
         c
         super_params="{pel:2,gpu:1}"
         analyse_params="""{block:{w:32,h:32}, 
@@ -45,7 +47,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         smoothfps_params="{rate:{num:"+string(num)+",den:"+string(den)+"},algo:21,cubic:1}"
 
         super = SVSuper(super_params)
-        vectors = SVAnalyse(super, analyse_params).Prefetch(4)
+        vectors = SVAnalyse(super, analyse_params).Prefetch(threads)
         SVSmoothFps(super, vectors, smoothfps_params, mt=1)
     }
     
@@ -64,7 +66,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     # 動きベクトルなどは再利用するので0を最初に呼び出してから1,2を呼び出すこと
     xTGMC = function[preset, cuda, dev](clip c, int useFlag) {
         prevGlobals = (useFlag == 0) ? "Replace" : "Reuse"
-        cuda ? c.KTGMC(Preset=preset, dev=dev, PrevGlobals=prevGlobals, useFlag=useFlag) : c.QTGMC(Preset=preset).Prefetch(4)
+        cuda ? c.KTGMC(Preset=preset, dev=dev, PrevGlobals=prevGlobals, useFlag=useFlag) : c.QTGMC(Preset=preset)
     }
 
     # 16 == (Blocksize - Overlap): ブロックサイズに合わせる
@@ -141,7 +143,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         # テレシネ解析判定 KFMCycleAnalyzeはCUDA非対応なので注意
         mode = (pass >= 3) ? 2 : pass
         fmclip = super.KPreCycleAnalyze()
-        fmclip = cuda ? fmclip.OnDEV() : fmclip.Prefetch(4)
+        fmclip = cuda ? fmclip.OnDEV() : fmclip.Prefetch(threads)
         fmclip = fmclip.KFMCycleAnalyze(src, mode=mode, filepath=filepath).OnCPU(1)
         
         if(pass == 1) {
@@ -211,19 +213,25 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             
             # SVPを適用
             if(svp) {
+                # SVPをマルチスレッドで呼び出すとバグるので注意
                 clip24 = clip24.OnDEV().SmoothFps(5, 2).OnCPU(1)
                 clip30 = clip30.OnDEV().SmoothFps(2, 1).OnCPU(1)
-                if(!cuda) {
-                    # SVPをマルチスレッドで呼び出すとバグるので代替措置
-                    clip60 = clip60.Prefetch(4)
-                    mask24 = mask24.Prefetch(2)
-                    cc24 = cc24.Prefetch(2)
-                    mask30 = mask30.Prefetch(2)
-                    cc30 = cc30.Prefetch(2)
-                    ucfc = ucf ? ucfc.Prefetch(2) : Undefined()
-                }
             }
-
+            else if(!cuda) {
+                clip24 = clip24.Prefetch(threads)
+                clip30 = clip30.Prefetch(threads)
+            }
+            
+            if(!cuda) {
+                # KFMSwitch後にPrefetchすると効率が落ちるのでここでやる
+                clip60 = clip60.Prefetch(threads)
+                mask24 = mask24.Prefetch(threads / 2)
+                cc24 = cc24.Prefetch(mode == 2 ? threads : (threads / 2))
+                mask30 = mask30.Prefetch(threads / 2)
+                cc30 = cc30.Prefetch(mode == 2 ? threads : (threads / 2))
+                ucfc = ucf ? ucfc.Prefetch(threads / 2) : Undefined()
+            }
+            
             mode = (pass == 3) ? 1 : pass
             result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, show=show)
 
@@ -237,12 +245,11 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     if(cuda) {
         OnDEV(2)
     }
-    else {
-        Prefetch((!out24 && svp) ? 1 : 4)
+    else if(out24) {
+        # 24fps出力時のSVPはここで適用
+        svp ? SmoothFps(5, 2) : Prefetch(threads)
     }
-    
-    # 24fps出力時のSVPはここで適用
-    if(out24 && svp) {
-        SmoothFps(5, 2)
+    else {
+        Prefetch(1, 4)
     }
 }
