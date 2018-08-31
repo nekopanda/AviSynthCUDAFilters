@@ -9,7 +9,7 @@ SetFilterMTMode("SVSmoothFps",1)
 function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thswitch", bool "ucf", bool "nr", bool "svp",\
                             string "filepath", bool "cuda", int "dev", int "threads", bool "show") {
 
-    mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps
+    mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps, 3:3clips(24p,30p,60p)
     pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2) 2:only timing(mode:0) 3:generate images
     preset = default(preset, (Height(src) >= 720) ? "Faster" : "Slower") # QTGMC preset
     thswitch = default(thswitch, 0.5)
@@ -22,14 +22,16 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     threads = default(threads, 6) # Number of CPU threads
     show = default(show, false) # Show information
     
-    ivtc = Select(mode, true, false, true) # Enable Inverse Telecine
-    out24 = Select(mode, false, false, true) # output 24fps
+    ivtc = Select(mode, true, false, true, true) # Enable Inverse Telecine
+    out24 = (mode == 2) # output 24fps
+    out3clips = (mode == 3) # output 3 clips
     
     flagcrop = 6 # 上下のノイズ部分は除外する
     nrblk = (Height(src) >= 720) ? 32 : 16 # SMDegrain block size
     
     Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
     Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
+    Assert(!(mode == 3 && svp), "SVP cannot be used when output 3 clips")
 
     # CUDAデバイスチェック
     if(cuda) {
@@ -211,6 +213,13 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             # DecombUCFを適用(60fps)
             ucfc = ucf ? clip60.KDecombUCF60(ucfparam, noise30, before60, after60) : Undefined()
             
+            if(out3clips) {
+                # クリップを3つ用意
+                clip24 = clip24.KPatchCombe(clip60, fmclip, mask24, cc24)
+                clip30 = clip30.KPatchCombe(clip60, fmclip, mask30, cc30)
+                clip60 = ucf ? ucfc : clip60
+            }
+            else {
             # SVPを適用
             if(svp) {
                 # SVPをマルチスレッドで呼び出すとバグるので注意
@@ -236,6 +245,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, show=show)
 
             result
+            }
         }
     }
     else {
@@ -243,13 +253,41 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     }
     
     if(cuda) {
-        OnDEV(2)
+        if(out3clips) {
+            clip24 = clip24.OnDEV(2)
+            clip30 = clip30.OnDEV(2)
+            clip60 = clip60.OnDEV(2)
+        }
+        else {
+			OnDEV(2)
+        }
     }
     else if(out24) {
         # 24fps出力時のSVPはここで適用
         svp ? SmoothFps(5, 2) : Prefetch(threads)
     }
     else {
-        Prefetch(1, 4)
+        if(out3clips) {
+            clip24 = clip24.Prefetch(4)
+            clip30 = clip30.Prefetch(4)
+            clip60 = clip60.Prefetch(4)
+        }
+        else {
+			Prefetch(1, 4)
+        }
+    }
+    if(out3clips) {
+        return function[clip24, clip30, clip60](int fps) {
+            if(fps == 24) {
+                return clip24
+            }
+            else if(fps == 30) {
+                return clip30
+            }
+            else if(fps == 60) {
+                return clip60
+            }
+            Assert(false, "fps must be 24 or 30 or 60")
+        }
     }
 }
