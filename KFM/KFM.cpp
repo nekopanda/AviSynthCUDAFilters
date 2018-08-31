@@ -636,10 +636,15 @@ class KFMCycleAnalyze : public GenericVideoFilter
         file.writeValue(results[i], env);
       }
       if (debug) {
-				debugFile = nullptr;
+        debugFile = nullptr;
         auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".pattern", env));
+        int cur = -1;
         for (int i = 0; i < numCycles; ++i) {
-          fprintf(file->fp, "%d\n", results[i].is60p ? NUM_PATTERNS : results[i].pattern);
+          int next = results[i].is60p ? NUM_PATTERNS : results[i].pattern;
+          if (cur != next) {
+            fprintf(file->fp, "%d,%d\n", i * 5, next);
+            cur = next;
+          }
         }
       }
     }
