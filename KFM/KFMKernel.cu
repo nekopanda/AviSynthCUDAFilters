@@ -20,6 +20,7 @@ class KPatchCombe : public KFMFilterBase
   PClip containscombeclip;
   PClip fmclip;
 
+  bool is24; // 24p or 30p
   PulldownPatterns patterns;
 
   template <typename pixel_t>
@@ -35,16 +36,23 @@ class KPatchCombe : public KFMFilterBase
       }
     }
 
-    int cycleIndex = n / 4;
-    KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpuDevice)).GetReadPtr<KFMResult>());
-    Frame24Info frameInfo = patterns.GetFrame24(fm.pattern, n);
+    int n60;
 
-    int fieldIndex[] = { 1, 3, 6, 8 };
-    // 標準位置
-    int n60 = fieldIndex[n % 4];
-    // フィールド対象範囲に補正
-    n60 = clamp(n60, frameInfo.fieldStartIndex, frameInfo.fieldStartIndex + frameInfo.numFields - 1);
-    n60 += cycleIndex * 10;
+    if (is24) {
+      int cycleIndex = n / 4;
+      KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpuDevice)).GetReadPtr<KFMResult>());
+      Frame24Info frameInfo = patterns.GetFrame24(fm.pattern, n);
+
+      int fieldIndex[] = { 1, 3, 6, 8 };
+      // 標準位置
+      n60 = fieldIndex[n % 4];
+      // フィールド対象範囲に補正
+      n60 = clamp(n60, frameInfo.fieldStartIndex, frameInfo.fieldStartIndex + frameInfo.numFields - 1);
+      n60 += cycleIndex * 10;
+    }
+    else {
+      n60 = n * 2;
+    }
 
     Frame baseFrame = child->GetFrame(n, env);
     Frame frame60 = clip60->GetFrame(n60, env);
@@ -65,6 +73,15 @@ public:
     , containscombeclip(containscombeclip)
     , fmclip(fmclip)
   {
+    auto vi24 = child->GetVideoInfo();
+    auto vi60 = clip60->GetVideoInfo();
+
+    auto rate = (double)(vi60.fps_numerator * vi24.fps_denominator) / (vi60.fps_denominator * vi24.fps_numerator);
+    if (rate != 2.5 && rate != 2.0) {
+      env->ThrowError("[KPatchCombe] Unsupported frame rate combination: %f", rate);
+    }
+    is24 = (rate == 2.5);
+
     // チェック
     CycleAnalyzeInfo::GetParam(fmclip->GetVideoInfo(), env);
   }

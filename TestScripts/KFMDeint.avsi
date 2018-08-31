@@ -276,6 +276,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
 			Prefetch(1, 4)
         }
     }
+    
     if(out3clips) {
         return function[clip24, clip30, clip60](int fps) {
             if(fps == 24) {
