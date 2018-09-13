@@ -59,5 +59,8 @@
     <CudaCompile Include="..\common\Copy.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
+    <CudaCompile Include="Deblock.cu">
+      <Filter>ソース ファイル</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>
