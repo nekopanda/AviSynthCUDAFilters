@@ -255,8 +255,8 @@ inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, 
 	add_to_block_avx(&dst[dst_pitch * 7], row7, half, shift, maxv);
 }
 
-inline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv,
-	__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
+__forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv,
+	__m256 row0, __m256 row1, __m256 row2, __m256 row3, __m256 row4, __m256 row5, __m256 row6, __m256 row7)
 {
 	// dct
 	dct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
@@ -267,10 +267,10 @@ inline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, b
 
 	// requantize
 	if (is_soft) {
-		hardthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
+		softthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
 	}
 	else {
-		softthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
+		hardthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
 	}
 
 	// idct
@@ -361,7 +361,7 @@ void cpu_store_slice_avx_tmpl(
 {
 	for (int y = 0; y < height; ++y) {
 		int x = 0;
-		for (; x <= (width - 16); ++x) {
+		for (; x <= (width - 16); x += 16) {
 			store_u16_to(&dst[x + y * dst_pitch],
 				make_store_value_avx<shift>(&tmp[x + y * tmp_pitch], y, maxv));
 		}
@@ -379,7 +379,7 @@ void cpu_store_slice_avx(
 	int width, int height, pixel_t* dst, int dst_pitch,
 	const uint16_t* tmp, int tmp_pitch, int shift, int maxv)
 {
-	void(*table[])(
+	static void(*table[])(
 		int width, int height, pixel_t* dst, int dst_pitch,
 		const uint16_t* tmp, int tmp_pitch, int maxv) = {
 		cpu_store_slice_avx_tmpl<pixel_t, 0>,

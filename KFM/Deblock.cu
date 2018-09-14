@@ -552,7 +552,7 @@ void cpu_deblock_avx(
 	pixel_t* dst, int dst_pitch, int mergeShift, int mergeMaxV)
 {
 	for (int by = 0; by < bh; ++by) {
-		memset(&tmp[(by + 1) * 8 * tmp_pitch], 0, tmp_pitch * 8); // dst‰Šú‰»
+		memset(&tmp[(by + 1) * 8 * tmp_pitch], 0, tmp_pitch * 8 * sizeof(uint16_t)); // dst‰Šú‰»
 		for (int bx = 0; bx < bw; ++bx) {
 			for (int ty = 0; ty <= count_minus_1; ++ty) {
 				const uchar2 offset = g_deblock_offset[count_minus_1 + ty];
@@ -664,7 +664,7 @@ class KDeblock : public KFMFilterBase
 				tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
 				qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
 				deblockShift, deblockMaxV, strength, qp_bias, is_soft,
-				vi.width, vi.height, dst, dstPitch, mergeShift, mergeMaxV);
+				width, height, dst, dstPitch, mergeShift, mergeMaxV);
 		}
 		else {
 			VideoInfo tmpvi = vi;
