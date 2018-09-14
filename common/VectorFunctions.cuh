@@ -196,6 +196,12 @@ static __device__ __host__ int4 min(int4 a, int4 b) {
   return r;
 }
 
+// min(float4, float)
+static __device__ __host__ float4 min(float4 a, float b) {
+	float4 r = { min(a.x, b), min(a.y, b), min(a.z, b), min(a.w, b) };
+	return r;
+}
+
 // max(uchar4, uchar4)
 static __device__ __host__ uchar4 max(uchar4 a, uchar4 b) {
   uchar4 r = { (unsigned char)max(a.x, b.x), (unsigned char)max(a.y, b.y), (unsigned char)max(a.z, b.z), (unsigned char)max(a.w, b.w) };

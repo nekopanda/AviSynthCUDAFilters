@@ -12,6 +12,43 @@
 #include "VectorFunctions.cuh"
 #include "KFMFilterBase.cuh"
 
+struct CPUInfo {
+	bool initialized, avx, avx2;
+};
+
+static CPUInfo g_cpuinfo;
+
+static inline void InitCPUInfo() {
+	if (g_cpuinfo.initialized == false) {
+		int cpuinfo[4];
+		__cpuid(cpuinfo, 1);
+		g_cpuinfo.avx = cpuinfo[2] & (1 << 28) || false;
+		bool osxsaveSupported = cpuinfo[2] & (1 << 27) || false;
+		g_cpuinfo.avx2 = false;
+		if (osxsaveSupported && g_cpuinfo.avx)
+		{
+			// _XCR_XFEATURE_ENABLED_MASK = 0
+			unsigned long long xcrFeatureMask = _xgetbv(0);
+			g_cpuinfo.avx = (xcrFeatureMask & 0x6) == 0x6;
+			if (g_cpuinfo.avx) {
+				__cpuid(cpuinfo, 7);
+				g_cpuinfo.avx2 = cpuinfo[1] & (1 << 5) || false;
+			}
+		}
+		g_cpuinfo.initialized = true;
+	}
+}
+
+bool IsAVXAvailable() {
+	InitCPUInfo();
+	return g_cpuinfo.avx;
+}
+
+bool IsAVX2Available() {
+	InitCPUInfo();
+	return g_cpuinfo.avx2;
+}
+
 // got from the following command in python. (do "from math import *" before)
 #define S1    0.19509032201612825f   // sin(1*pi/(2*8))
 #define C1    0.9807852804032304f    // cos(1*pi/(2*8))
@@ -162,10 +199,8 @@ __host__ void cpu_idct8x8(float* data)
 		dev_idct8<1>(data + i * 8); // row
 }
 
-__device__ void dev_hardthresh(int tx, float *data, float qp, float strength)
+__device__ void dev_hardthresh(int tx, float *data, float threshold)
 {
-  float threshold = qp * ((1 << 4) + strength) - 1;
-
   for (int i = tx; i < 72; i += 8) {
     if (i == 0) continue;
     float level = data[i];
@@ -175,10 +210,8 @@ __device__ void dev_hardthresh(int tx, float *data, float qp, float strength)
   }
 }
 
-__device__ void dev_softthresh(int tx, float *data, float qp, float strength)
+__device__ void dev_softthresh(int tx, float *data, float threshold)
 {
-  float threshold = qp * ((1 << 4) + strength) - 1;
-
   for (int i = tx; i < 72; i += 8) {
     if (i == 0) continue;
     float level = data[i];
@@ -188,10 +221,8 @@ __device__ void dev_softthresh(int tx, float *data, float qp, float strength)
   }
 }
 
-__host__ void cpu_hardthresh(float *data, float qp, float strength)
+__host__ void cpu_hardthresh(float *data, float threshold)
 {
-	float threshold = qp * ((1 << 4) + strength) - 1;
-
 	for (int i = 1; i < 64; ++i) {
 		float level = data[i];
 		if (abs(level) <= threshold) {
@@ -200,10 +231,8 @@ __host__ void cpu_hardthresh(float *data, float qp, float strength)
 	}
 }
 
-__host__ void cpu_softthresh(float *data, float qp, float strength)
+__host__ void cpu_softthresh(float *data, float threshold)
 {
-	float threshold = qp * ((1 << 4) + strength) - 1;
-
 	for (int i = 1; i < 64; ++i) {
 		float level = data[i];
 		if (abs(level) <= threshold) data[i] = 0;
@@ -283,12 +312,13 @@ __global__ void kl_deblock(
   dev_dct8x8(tx, dct_tmp);
 
   // requantize
-	float qp = (float)qp_table[blockIdx.x + blockIdx.y * qp_pitch];
+	uint16_t qp = qp_table[blockIdx.x + blockIdx.y * qp_pitch];
+	float thresh = (qp + qp_bias) * ((1 << 4) + strength) - 1;
   if (is_soft) {
-    dev_softthresh(tx, dct_tmp, qp + qp_bias, strength);
+    dev_softthresh(tx, dct_tmp, thresh);
   }
   else {
-    dev_hardthresh(tx, dct_tmp, qp + qp_bias, strength);
+    dev_hardthresh(tx, dct_tmp, thresh);
   }
 #if CUDART_VERSION >= 9000
   __syncwarp();
@@ -349,12 +379,13 @@ void cpu_deblock(
 				cpu_dct8x8(dct_tmp);
 
         // requantize
-				int qp = qp_table[bx + by * qp_pitch];
+				uint16_t qp = qp_table[bx + by * qp_pitch];
+				float thresh = (qp + qp_bias) * ((1 << 4) + strength) - 1;
 				if (is_soft) {
-					cpu_softthresh(dct_tmp, qp + qp_bias, strength);
+					cpu_softthresh(dct_tmp, thresh);
 				}
 				else {
-					cpu_hardthresh(dct_tmp, qp + qp_bias, strength);
+					cpu_hardthresh(dct_tmp, thresh);
 				}
         
 				// idct
@@ -476,7 +507,7 @@ __global__ void kl_merge_deblock(
       to_int(tmp[x + (tmp_ipitch * 3 + y) * tmp_pitch]);
     auto tmp = to_float(sum) * (1.0f / (1 << shift)) +
       to_float(g_ldither[y & 7][x & 1]) * (1.0f / 64.0f);
-    out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(clamp(tmp, 0.0f, maxv));
+    out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(min(tmp, maxv));
   }
 }
 
@@ -494,11 +525,59 @@ void cpu_merge_deblock(
         to_int(tmp[x + (tmp_ipitch * 3 + y) * tmp_pitch]);
       auto tmp = to_float(sum) * (1.0f / (1 << shift)) +
         to_float(g_ldither[y & 7][x & 1]) * (1.0f / 64.0f);
-      out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(clamp(tmp, 0.0f, maxv));
+      out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(min(tmp, maxv));
     }
   }
 }
 
+template <typename pixel_t>
+void cpu_deblock_kernel_avx(const pixel_t* src, int src_pitch,
+	uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv);
+
+template <typename pixel_t>
+void cpu_store_slice_avx(
+	int width, int height, pixel_t* dst, int dst_pitch,
+	const uint16_t* tmp, int tmp_pitch, int shift, int maxv);
+
+template <typename pixel_t>
+void cpu_deblock_avx(
+	const pixel_t* src, int src_pitch,
+	int bw, int bh,
+	uint16_t* tmp, int tmp_pitch,
+	const uint16_t* qp_table, int qp_pitch,
+	int count_minus_1, int deblockShift, int deblockMaxV,
+	float strength, float qp_bias, bool is_soft,
+	
+	int width, int height,
+	pixel_t* dst, int dst_pitch, int mergeShift, int mergeMaxV)
+{
+	for (int by = 0; by < bh; ++by) {
+		memset(&tmp[(by + 1) * 8 * tmp_pitch], 0, tmp_pitch * 8); // dst‰Šú‰»
+		for (int bx = 0; bx < bw; ++bx) {
+			for (int ty = 0; ty <= count_minus_1; ++ty) {
+				const uchar2 offset = g_deblock_offset[count_minus_1 + ty];
+				int off_x = bx * 8 + offset.x;
+				int off_y = by * 8 + offset.y;
+				uint16_t qp = qp_table[bx + by * qp_pitch];
+				float thresh = (qp + qp_bias) * ((1 << 4) + strength) - 1;
+				const int half = (1 << deblockShift) >> 1;
+				const pixel_t* src_block = &src[off_x + off_y * src_pitch];
+				uint16_t* tmp_block = &tmp[off_x + off_y * tmp_pitch];
+
+				cpu_deblock_kernel_avx(src_block, src_pitch,
+					tmp_block, tmp_pitch, thresh, is_soft, (float)half, deblockShift, deblockMaxV);
+			}
+		}
+		if (by) {
+			int y_start = (by - 1) * 8;
+			cpu_store_slice_avx(
+				width, min(8, height - y_start), &dst[y_start * dst_pitch], dst_pitch,
+				&tmp[by * 8 * tmp_pitch + 8], tmp_pitch, mergeShift, mergeMaxV);
+		}
+	}
+}
+
+bool IsAVX2Available();
 
 class KDeblock : public KFMFilterBase
 {
@@ -565,53 +644,70 @@ class KDeblock : public KFMFilterBase
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 		}
 
-		VideoInfo tmpvi = vi;
-		tmpvi.width = (width + 7 + 8 * 2) & ~7;
-		tmpvi.height = (height + 7 + 8 * 2) & ~7;
-		tmpvi.height *= 4;
-		tmpvi.pixel_type = VideoInfo::CS_Y16;
-		Frame tmpOut = env->NewVideoFrame(tmpvi);
-
 		int bits = vi.BitsPerComponent();
 		int deblockShift = max(0, quality + bits - 10);
 		int deblockMaxV = (1 << (bits + 6 - deblockShift)) - 1;
 		int mergeShift = quality + 6 - deblockShift;
 		int mergeMaxV = (1 << bits) - 1;
-
 		int count = 1 << quality;
-		if (IS_CUDA) {
-			dim3 threads(8, count);
-			dim3 blocks(qpvi.width, qpvi.height);
-			kl_deblock<<<blocks, threads, sizeof(float) * 72 * count>>>(
-				pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
-				qpvi.width, qpvi.height,
-				tmpOut.GetWritePtr<ushort2>(), tmpOut.GetPitch<ushort2>(),
-				qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
-				deblockShift, deblockMaxV, strength, qp_bias, is_soft);
-			DEBUG_SYNC;
-		}
-		else {
-			cpu_deblock(pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
+
+		if (!IS_CUDA && IsAVX2Available()) {
+			// CPU‚ÅAVX2‚ªŽg‚¦‚é‚È‚çAVX2”Å
+			VideoInfo tmpvi = vi;
+			tmpvi.width = (width + 7 + 8 * 2) & ~7;
+			tmpvi.height = (height + 7 + 8 * 2) & ~7;
+			tmpvi.pixel_type = VideoInfo::CS_Y16;
+			Frame tmpOut = env->NewVideoFrame(tmpvi);
+
+			cpu_deblock_avx(pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
 				qpvi.width, qpvi.height,
 				tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
 				qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
-				deblockShift, deblockMaxV, strength, qp_bias, is_soft);
-		}
-
-		if (IS_CUDA) {
-			dim3 threads(32, 8);
-			dim3 blocks(nblocks(width >> 2, threads.x), nblocks(height, threads.y));
-			kl_merge_deblock << <blocks, threads >> >(width >> 2, height,
-				tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
-				tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
-				(vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
-			DEBUG_SYNC;
+				deblockShift, deblockMaxV, strength, qp_bias, is_soft,
+				vi.width, vi.height, dst, dstPitch, mergeShift, mergeMaxV);
 		}
 		else {
-			cpu_merge_deblock(width >> 2, height,
-				tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
-				tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
-				(vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
+			VideoInfo tmpvi = vi;
+			tmpvi.width = (width + 7 + 8 * 2) & ~7;
+			tmpvi.height = (height + 7 + 8 * 2) & ~7;
+			tmpvi.height *= 4;
+			tmpvi.pixel_type = VideoInfo::CS_Y16;
+			Frame tmpOut = env->NewVideoFrame(tmpvi);
+
+			if (IS_CUDA) {
+				dim3 threads(8, count);
+				dim3 blocks(qpvi.width, qpvi.height);
+				kl_deblock << <blocks, threads, sizeof(float) * 72 * count >> >(
+					pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
+					qpvi.width, qpvi.height,
+					tmpOut.GetWritePtr<ushort2>(), tmpOut.GetPitch<ushort2>(),
+					qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
+					deblockShift, deblockMaxV, strength, qp_bias, is_soft);
+				DEBUG_SYNC;
+			}
+			else {
+				cpu_deblock(pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
+					qpvi.width, qpvi.height,
+					tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
+					qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
+					deblockShift, deblockMaxV, strength, qp_bias, is_soft);
+			}
+
+			if (IS_CUDA) {
+				dim3 threads(32, 8);
+				dim3 blocks(nblocks(width >> 2, threads.x), nblocks(height, threads.y));
+				kl_merge_deblock << <blocks, threads >> >(width >> 2, height,
+					tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
+					tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
+					(vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
+				DEBUG_SYNC;
+			}
+			else {
+				cpu_merge_deblock(width >> 2, height,
+					tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
+					tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
+					(vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
+			}
 		}
 	}
 
