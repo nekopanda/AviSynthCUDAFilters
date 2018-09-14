@@ -96,3 +96,28 @@ TEST_F(MiscTest, KFMPerf)
   }
 }
 
+
+TEST_F(MiscTest, GenericScriptTest)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+
+		out << "Import(\"G:\\tmp\\amt10182764\\test.avs\")" << std::endl;
+
+		out.close();
+
+		{
+			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+			GetFrames(clip, TF_100, env.get());
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
