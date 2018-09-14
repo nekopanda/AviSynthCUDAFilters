@@ -202,7 +202,8 @@ inline __m256 softthresh_ps(__m256 row, __m256 threshold)
 	const __m256 signmask = _mm256_set1_ps(-0.0f); // 0x80000000
 	
 	// sign(row) | max(0, abs(row) - threshold)
-	auto a = _mm256_sub_ps(_mm256_andnot_ps(signmask, row), threshold);
+	auto a = _mm256_max_ps(_mm256_setzero_ps(),
+		_mm256_sub_ps(_mm256_andnot_ps(signmask, row), threshold));
 	return _mm256_or_ps(a, _mm256_and_ps(row, signmask));
 }
 
@@ -229,7 +230,7 @@ inline void softthresh_avx(float threshold_,
 inline void add_to_block_avx(uint16_t* dst, __m256 row, __m256 half, int shift, __m256i maxv)
 {
 	// a = (int)(row + half) >> shift
-	auto a = _mm256_srl_epi32(
+	auto a = _mm256_sra_epi32(
 		_mm256_cvttps_epi32(_mm256_add_ps(row, half)),
 		_mm_cvtsi32_si128(shift));
 	// b = clamp(a, 0, maxv)

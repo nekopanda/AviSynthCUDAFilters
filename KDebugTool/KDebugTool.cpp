@@ -71,8 +71,8 @@ class ImageCompare : GenericVideoFilter
     int width, int height, PNeoEnv env)
   {
     pixel_t thresh = (pixel_t)this->thresh;
-    //DebugWriteBitmap("bob-ref-%d.bmp", (const uint8_t*)a, width, height, pitch, 1);
-    //DebugWriteBitmap("bob-cuda-%d.bmp", (const uint8_t*)b, width, height, pitch, 1);
+    //DebugWriteBitmap("bob-ref-%d.bmp", (const uint8_t*)a, width, height, apitch, 1);
+    //DebugWriteBitmap("bob-cuda-%d.bmp", (const uint8_t*)b, width, height, bpitch, 1);
 
     for (int y = offY; y < height; ++y) {
       for (int x = offX; x < width; ++x) {

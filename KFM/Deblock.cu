@@ -397,6 +397,11 @@ void cpu_deblock(
 					for (int x = 0; x < 8; ++x) {
 						auto tmp = clamp((int)(dct_tmp[x + y * 8] + half) >> shift, 0, maxv);
 						local_out[offset.y + y][offset.x + x] += tmp;
+#if 0
+						if ((bx - 1) * 8 + offset.x + x == 723 && (by - 1) * 8 + offset.y + y == 590) {
+							printf("REF: %d (%d)\n", tmp, local_out[offset.y + y][offset.x + x]);
+						}
+#endif
 					}
 				}
       }
@@ -566,6 +571,13 @@ void cpu_deblock_avx(
 
 				cpu_deblock_kernel_avx(src_block, src_pitch,
 					tmp_block, tmp_pitch, thresh, is_soft, (float)half, deblockShift, deblockMaxV);
+#if 0
+				int x_start = (bx - 1) * 8 + offset.x;
+				int y_start = (by - 1) * 8 + offset.y;
+				if (x_start <= 723 && x_start + 8 > 723 && y_start <= 590 && y_start + 8 > 590) {
+					printf("AVX: ? (%d)\n", tmp[(723 + 8) + (590 + 8) * tmp_pitch]);
+				}
+#endif
 			}
 		}
 		if (by) {
@@ -634,13 +646,15 @@ class KDeblock : public KFMFilterBase
 			dim3 blocks(nblocks(qpvi.width, threads.x), nblocks(qpvi.height, threads.y));
 			kl_make_qp_table<<<blocks, threads >>>((
 				vi.width + 15) >> 4, (vi.height + 15) >> 4,
-				qpTable, qpStride, qpScaleType, qpShiftX, qpShiftY, qpvi.width, qpvi.height,
+				qpTable, qpStride, qpTable ? qpScaleType : force_qp,
+				qpShiftX, qpShiftY, qpvi.width, qpvi.height,
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 			DEBUG_SYNC;
 		}
 		else {
 			cpu_make_qp_table((vi.width + 15) >> 4, (vi.height + 15) >> 4,
-				qpTable, qpStride, qpScaleType, qpShiftX, qpShiftY, qpvi.width, qpvi.height,
+				qpTable, qpStride, qpTable ? qpScaleType : force_qp,
+				qpShiftX, qpShiftY, qpvi.width, qpvi.height,
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 		}
 
@@ -652,6 +666,7 @@ class KDeblock : public KFMFilterBase
 		int count = 1 << quality;
 
 		if (!IS_CUDA && IsAVX2Available()) {
+		//if(false) {
 			// CPU‚ÅAVX2‚ªŽg‚¦‚é‚È‚çAVX2”Å
 			VideoInfo tmpvi = vi;
 			tmpvi.width = (width + 7 + 8 * 2) & ~7;
@@ -738,7 +753,7 @@ class KDeblock : public KFMFilterBase
 	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		Frame src = child->GetFrame(n, env);
-		if (force_qp != -1) {
+		if (force_qp > 0) {
 			// QPŽw’è‚ ‚è
 			return DeblockEntry<pixel_t>(src, nullptr, 0, 0, env);
 		}

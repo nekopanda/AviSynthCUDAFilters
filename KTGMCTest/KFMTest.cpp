@@ -14,6 +14,8 @@ protected:
   void CFrameDiffDupTest(int blocksize, bool chroma);
 
   void DecombUCF24Test(TEST_FRAMES tf, int chroma, bool show);
+
+	void DeblockTest(TEST_FRAMES tf, int quality, bool is_soft);
 };
 
 #pragma region MergeStatic
@@ -915,6 +917,77 @@ TEST_F(KFMTest, DecombUCF_C2NoShow)
 TEST_F(KFMTest, DecombUCF_C1Show)
 {
   DecombUCF24Test(TF_MID, 1, true);
+}
+
+#pragma endregion
+
+#pragma region Deblock
+
+void KFMTest::DeblockTest(TEST_FRAMES tf, int quality, bool is_soft)
+{
+	PEnv env;
+	try {
+		env = PEnv(CreateScriptEnvironment2());
+
+		AVSValue result;
+		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+		std::string ktgmcPath = modulePath + "\\KFM.dll";
+		env->LoadPlugin(ktgmcPath.c_str(), true, &result);
+
+		std::string scriptpath = workDirPath + "\\script.avs";
+
+		std::ofstream out(scriptpath);
+
+		out << "src = LWLibavVideoSource(\"test.ts\").OnCPU(0)" << std::endl;
+		out << "ref = src.KDeblock(quality=" << quality << ",force_qp=10,is_soft="<< (is_soft ? "true" : "false") <<")" << std::endl;
+		out << "cuda = src.KDeblock(quality=" << quality << ",force_qp=10,is_soft=" << (is_soft ? "true" : "false") << ")" O_C(0) << std::endl;
+
+		out << "ImageCompare(ref, cuda, 1)" << std::endl;
+
+		out.close();
+
+		{
+			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+			GetFrames(clip, tf, env.get());
+		}
+	}
+	catch (const AvisynthError& err) {
+		printf("%s\n", err.msg);
+		GTEST_FAIL();
+	}
+}
+
+TEST_F(KFMTest, Deblock_Hard)
+{
+	printf("Deblock Hard Quality 1\n");
+	DeblockTest(TF_MID, 1, false);
+	printf("Deblock Hard Quality 2\n");
+	DeblockTest(TF_MID, 2, false);
+	printf("Deblock Hard Quality 3\n");
+	DeblockTest(TF_MID, 3, false);
+	printf("Deblock Hard Quality 4\n");
+	DeblockTest(TF_MID, 4, false);
+	printf("Deblock Hard Quality 5\n");
+	DeblockTest(TF_MID, 5, false);
+	printf("Deblock Hard Quality 6\n");
+	DeblockTest(TF_MID, 6, false);
+}
+
+TEST_F(KFMTest, Deblock_Soft)
+{
+	printf("Deblock Soft Quality 1\n");
+	DeblockTest(TF_MID, 1, true);
+	printf("Deblock Soft Quality 2\n");
+	DeblockTest(TF_MID, 2, true);
+	printf("Deblock Soft Quality 3\n");
+	DeblockTest(TF_MID, 3, true);
+	printf("Deblock Soft Quality 4\n");
+	DeblockTest(TF_MID, 4, true);
+	printf("Deblock Soft Quality 5\n");
+	DeblockTest(TF_MID, 5, true);
+	printf("Deblock Soft Quality 6\n");
+	DeblockTest(TF_MID, 6, true);
 }
 
 #pragma endregion
