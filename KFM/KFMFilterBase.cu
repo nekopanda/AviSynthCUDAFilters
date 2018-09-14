@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "CommonFunctions.h"
 #include "KFM.h"
+#include "Copy.h"
 #include "VectorFunctions.cuh"
 #include "KFMFilterBase.cuh"
 
@@ -20,6 +21,14 @@ int Get8BitType(VideoInfo& vi) {
   else if (vi.Is444()) return VideoInfo::CS_YV24;
   // これ以外は知らん
   return VideoInfo::CS_BGR24;
+}
+
+int Get16BitType(VideoInfo& vi) {
+	if (vi.Is420()) return VideoInfo::CS_YUV420P16;
+	else if (vi.Is422()) return VideoInfo::CS_YUV422P16;
+	else if (vi.Is444()) return VideoInfo::CS_YUV444P16;
+	// これ以外は知らん
+	return VideoInfo::CS_BGR48;
 }
 
 Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
@@ -159,6 +168,7 @@ void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
 }
 
 template void cpu_padv(uint8_t* dst, int width, int height, int pitch, int vpad);
+template void cpu_padv(uint16_t* dst, int width, int height, int pitch, int vpad);
 
 template <typename pixel_t>
 __global__ void kl_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
@@ -173,6 +183,7 @@ __global__ void kl_padv(pixel_t* dst, int width, int height, int pitch, int vpad
 }
 
 template __global__ void kl_padv(uint8_t* dst, int width, int height, int pitch, int vpad);
+template __global__ void kl_padv(uint16_t* dst, int width, int height, int pitch, int vpad);
 
 template <typename pixel_t>
 void cpu_padh(pixel_t* dst, int width, int height, int pitch, int hpad)
@@ -186,6 +197,7 @@ void cpu_padh(pixel_t* dst, int width, int height, int pitch, int hpad)
 }
 
 template void cpu_padh(uint8_t* dst, int width, int height, int pitch, int hpad);
+template void cpu_padh(uint16_t* dst, int width, int height, int pitch, int hpad);
 
 template <typename pixel_t>
 __global__ void kl_padh(pixel_t* dst, int width, int height, int pitch, int hpad)
@@ -200,6 +212,7 @@ __global__ void kl_padh(pixel_t* dst, int width, int height, int pitch, int hpad
 }
 
 template __global__ void kl_padh(uint8_t* dst, int width, int height, int pitch, int hpad);
+template __global__ void kl_padh(uint16_t* dst, int width, int height, int pitch, int hpad);
 
 template <typename pixel_t>
 void cpu_copy_border(pixel_t* dst,
@@ -469,28 +482,17 @@ void KFMFilterBase::CopyFrame(Frame& src, Frame& dst, PNeoEnv env)
   vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
   vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
-  int pitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
-  int pitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
-  int width4 = srcvi.width >> 2;
-  int width4UV = width4 >> logUVx;
+  int srcPitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
+  int srcPitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
+	int dstPitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
+	int dstPitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
+
+  int widthUV = srcvi.width >> logUVx;
   int heightUV = srcvi.height >> logUVy;
 
-  if (IS_CUDA) {
-    dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height, threads.y));
-    dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-    kl_copy << <blocks, threads >> >(dstY, srcY, width4, srcvi.height, pitchY);
-    DEBUG_SYNC;
-    kl_copy << <blocksUV, threads >> >(dstU, srcU, width4UV, heightUV, pitchUV);
-    DEBUG_SYNC;
-    kl_copy << <blocksUV, threads >> >(dstV, srcV, width4UV, heightUV, pitchUV);
-    DEBUG_SYNC;
-  }
-  else {
-    cpu_copy<vpixel_t>(dstY, srcY, width4, srcvi.height, pitchY);
-    cpu_copy<vpixel_t>(dstU, srcU, width4UV, heightUV, pitchUV);
-    cpu_copy<vpixel_t>(dstV, srcV, width4UV, heightUV, pitchUV);
-  }
+	Copy(dstY, dstPitchY, srcY, srcPitchY, srcvi.width, srcvi.height, env);
+	Copy(dstU, dstPitchUV, srcU, srcPitchUV, widthUV, heightUV, env);
+	Copy(dstV, dstPitchUV, srcV, srcPitchUV, widthUV, heightUV, env);
 }
 
 template void KFMFilterBase::CopyFrame<uint8_t>(Frame& src, Frame& dst, PNeoEnv env);

@@ -9,23 +9,20 @@
 #include "TextOut.h"
 
 #include "Copy.h"
-
 #include "VectorFunctions.cuh"
-
-typedef uint8_t pixel_t;
-typedef uchar4 vpixel_t;
+#include "KFMFilterBase.cuh"
 
 // got from the following command in python. (do "from math import *" before)
-const float S1 = 0.19509032201612825f;   // sin(1*pi/(2*8))
-const float C1 = 0.9807852804032304f;    // cos(1*pi/(2*8))
-const float S3 = 0.5555702330196022f;    // sin(3*pi/(2*8))
-const float C3 = 0.8314696123025452f;    // cos(3*pi/(2*8))
-const float S2S6 = 1.3065629648763766f;  // sqrt(2)*sin(6*pi/(2*8))
-const float S2C6 = 0.5411961001461971f;  // sqrt(2)*cos(6*pi/(2*8))
-const float S2 = 1.4142135623730951f;    // sqrt(2)
+#define S1    0.19509032201612825f   // sin(1*pi/(2*8))
+#define C1    0.9807852804032304f    // cos(1*pi/(2*8))
+#define S3    0.5555702330196022f    // sin(3*pi/(2*8))
+#define C3    0.8314696123025452f    // cos(3*pi/(2*8))
+#define S2S6  1.3065629648763766f    // sqrt(2)*sin(6*pi/(2*8))
+#define S2C6  0.5411961001461971f    // sqrt(2)*cos(6*pi/(2*8))
+#define S2    1.4142135623730951f    // sqrt(2)
 
 template <int stride>
-__device__ void dev_dct8(float* data)
+__device__ __host__ void dev_dct8(float* data)
 {
   // stage 1
   float a0 = data[7 * stride] + data[0 * stride];
@@ -79,7 +76,7 @@ __device__ void dev_dct8(float* data)
 }
 
 template <int stride>
-__device__ void dev_idct8(float* data)
+__device__ __host__ void dev_idct8(float* data)
 {
   float c0 = data[0 * stride];
   float c1 = data[4 * stride];
@@ -139,17 +136,33 @@ __device__ void dev_dct8x8(int tx, float* data)
 
 __device__ void dev_idct8x8(int tx, float* data)
 {
-  dev_idct8<1>(data + tx * 8); // row
+	dev_idct8<8>(data + tx);  // column
 #if CUDART_VERSION >= 9000
-  __syncwarp();
+	__syncwarp();
 #endif
-  dev_idct8<8>(data + tx);  // column
+  dev_idct8<1>(data + tx * 8); // row
 #if CUDART_VERSION >= 9000
   __syncwarp();
 #endif
 }
 
-__device__ void dev_hardthresh(int tx, float *data, int qp, float strength)
+__host__ void cpu_dct8x8(float* data)
+{
+	for (int i = 0; i < 8; ++i)
+		dev_dct8<1>(data + i * 8); // row
+	for (int i = 0; i < 8; ++i)
+		dev_dct8<8>(data + i);  // column
+}
+
+__host__ void cpu_idct8x8(float* data)
+{
+	for (int i = 0; i < 8; ++i)
+		dev_idct8<8>(data + i);  // column
+	for (int i = 0; i < 8; ++i)
+		dev_idct8<1>(data + i * 8); // row
+}
+
+__device__ void dev_hardthresh(int tx, float *data, float qp, float strength)
 {
   float threshold = qp * ((1 << 4) + strength) - 1;
 
@@ -162,7 +175,7 @@ __device__ void dev_hardthresh(int tx, float *data, int qp, float strength)
   }
 }
 
-__device__ void dev_softthresh(int tx, float *data, int qp, float strength)
+__device__ void dev_softthresh(int tx, float *data, float qp, float strength)
 {
   float threshold = qp * ((1 << 4) + strength) - 1;
 
@@ -175,7 +188,34 @@ __device__ void dev_softthresh(int tx, float *data, int qp, float strength)
   }
 }
 
-__constant__ __host__ uchar2 g_deblock_offset[127] = {
+__host__ void cpu_hardthresh(float *data, float qp, float strength)
+{
+	float threshold = qp * ((1 << 4) + strength) - 1;
+
+	for (int i = 1; i < 64; ++i) {
+		float level = data[i];
+		if (abs(level) <= threshold) {
+			data[i] = 0;
+		}
+	}
+}
+
+__host__ void cpu_softthresh(float *data, float qp, float strength)
+{
+	float threshold = qp * ((1 << 4) + strength) - 1;
+
+	for (int i = 1; i < 64; ++i) {
+		float level = data[i];
+		if (abs(level) <= threshold) data[i] = 0;
+		else if (level > 0) data[i] -= threshold;
+		else                data[i] += threshold;
+	}
+}
+
+#ifdef __CUDA_ARCH__
+__constant__
+#endif
+uchar2 g_deblock_offset[127] = {
   { 0,0 },
   { 0,0 },{ 4,4 },                                           // quality = 1
   { 0,0 },{ 2,2 },{ 6,4 },{ 4,6 },                             // quality = 2
@@ -205,47 +245,49 @@ __constant__ __host__ uchar2 g_deblock_offset[127] = {
 // offsets: ブロックオフセットテーブル
 // shift: min(3, 16 - quality - bits)
 // maxv: (1 << (11 - shift)) - 1
+template <typename pixel_t>
 __global__ void kl_deblock(
   const pixel_t* src, int src_pitch,
   int bw, int bh,
-  uint16_t* out, int out_pitch,
-  const short* qp_table, int qp_pitch,
+  ushort2* out, int out_pitch,
+  const uint16_t* qp_table, int qp_pitch,
   int count_minus_1, int shift, int maxv,
-  float strength, bool is_soft)
+  float strength, float qp_bias, bool is_soft)
 {
   int tx = threadIdx.x; // 8
   int ty = threadIdx.y; // count
 
-  __shared__ int16_t local_out[16][16];
+  __shared__ ushort2 local_out[16][8];
   extern __shared__ float dct_tmp_buf[];
 
   float* dct_tmp = dct_tmp_buf + 64 * ty;
 
   // local_out初期化
   for (int y = ty; y < 16; y += blockDim.y) {
-    local_out[y][tx] = 0;
-    local_out[y][tx + 8] = 0;
+		local_out[y][tx] = ushort2();
   }
   __syncthreads();
 
   // getpixel
-  const char2 offset = g_deblock_offset[count_minus_1 + ty];
-  int off_x = blockIdx.x * 8 + offset.x;
-  int off_y = blockIdx.y * 8 + offset.y;
-  for (int y = 0; y < 8; ++y) {
-    dct_tmp[tx + y * 8] = src[(off_x + tx) + (off_y + y) * src_pitch];
-  }
+	const uchar2 offset = g_deblock_offset[count_minus_1 + ty];
+	{
+		int off_x = blockIdx.x * 8 + offset.x;
+		int off_y = blockIdx.y * 8 + offset.y;
+		for (int y = 0; y < 8; ++y) {
+			dct_tmp[tx + y * 8] = src[(off_x + tx) + (off_y + y) * src_pitch];
+		}
+	}
 
   // dct
   dev_dct8x8(tx, dct_tmp);
 
   // requantize
-  int qp = qp_table[blockIdx.x + blockIdx.y * qp_pitch];
+	float qp = (float)qp_table[blockIdx.x + blockIdx.y * qp_pitch];
   if (is_soft) {
-    dev_softthresh(tx, dct_tmp, qp, strength);
+    dev_softthresh(tx, dct_tmp, qp + qp_bias, strength);
   }
   else {
-    dev_hardthresh(tx, dct_tmp, qp, strength);
+    dev_hardthresh(tx, dct_tmp, qp + qp_bias, strength);
   }
 #if CUDART_VERSION >= 9000
   __syncwarp();
@@ -255,46 +297,88 @@ __global__ void kl_deblock(
   dev_idct8x8(tx, dct_tmp);
 
   // add
-  for (int y = 0; y < 8; ++y) {
-    int tmp = clamp((int)(dct_tmp[tx + y * 8] + 4) >> shift, 0, maxv);
-    atomicAdd(&local_out[offset.y + y][offset.x + tx], tmp);
+	// 16bitのatomicAddはないので、2つの16bitを1つの32bitとして扱う
+	//（オーバーフローしない前提）
+	const int half = (1 << shift) >> 1;
+	int ttx = (tx & 3);
+  for (int y = (tx >> 2); y < 8; y += 2) {
+		int tmp0 = clamp((int)(dct_tmp[2 * ttx + 0 + y * 8] + half) >> shift, 0, maxv);
+		int tmp1 = clamp((int)(dct_tmp[2 * ttx + 1 + y * 8] + half) >> shift, 0, maxv);
+    atomicAdd((int32_t*)&local_out[offset.y + y][offset.x + ttx], tmp0 + (tmp1 << 16));
   }
   __syncthreads();
 
   // store
   int off_z = (blockIdx.x & 1) + (blockIdx.y & 1) * 2;
-  off_x = blockIdx.x * 8;
-  off_y = (gridDim.y * off_z + blockIdx.y) * 8;
+  int off_x = blockIdx.x * 4;
+  int off_y = (bh * off_z + blockIdx.y) * 8;
   for (int y = ty; y < 16; y += blockDim.y) {
-    out[(off_x + 0) + (off_y + y) * out_pitch] = local_out[y][tx];
-    out[(off_x + 8) + (off_y + y) * out_pitch] = local_out[y][tx + 8];
+    out[(off_x + tx) + (off_y + y) * out_pitch] = local_out[y][tx];
   }
 }
 
+template <typename pixel_t>
 void cpu_deblock(
   const pixel_t* src, int src_pitch,
   int bw, int bh,
   uint16_t* out, int out_pitch,
-  const short* qp_table, int qp_pitch,
+  const uint16_t* qp_table, int qp_pitch, 
   int count_minus_1, int shift, int maxv,
-  float strength, bool is_soft)
+  float strength, float qp_bias, bool is_soft)
 {
   for (int by = 0; by < bh; ++by) {
     for (int bx = 0; bx < bw; ++bx) {
-      int16_t local_out[16][16];
+			uint16_t local_out[16][16];
 
       // local_out初期化
       memset(local_out, 0, sizeof(local_out));
 
       for (int ty = 0; ty <= count_minus_1; ++ty) {
         // getpixel
+				const uchar2 offset = g_deblock_offset[count_minus_1 + ty];
+				int off_x = bx * 8 + offset.x;
+				int off_y = by * 8 + offset.y;
+				float dct_tmp[64];
+				for (int y = 0; y < 8; ++y) {
+					for (int x = 0; x < 8; ++x) {
+						dct_tmp[x + y * 8] = src[(off_x + x) + (off_y + y) * src_pitch];
+					}
+				}
 
         // dct
+				cpu_dct8x8(dct_tmp);
+
         // requantize
-        // idct
+				int qp = qp_table[bx + by * qp_pitch];
+				if (is_soft) {
+					cpu_softthresh(dct_tmp, qp + qp_bias, strength);
+				}
+				else {
+					cpu_hardthresh(dct_tmp, qp + qp_bias, strength);
+				}
+        
+				// idct
+				cpu_idct8x8(dct_tmp);
+
         // add
+				const int half = (1 << shift) >> 1;
+				for (int y = 0; y < 8; ++y) {
+					for (int x = 0; x < 8; ++x) {
+						auto tmp = clamp((int)(dct_tmp[x + y * 8] + half) >> shift, 0, maxv);
+						local_out[offset.y + y][offset.x + x] += tmp;
+					}
+				}
       }
+
       // store
+			int off_z = (bx & 1) + (by & 1) * 2;
+			int off_x = bx * 8;
+			int off_y = (bh * off_z + by) * 8;
+			for (int y = 0; y < 16; ++y) {
+				for (int x = 0; x < 16; ++x) {
+					out[(off_x + x) + (off_y + y) * out_pitch] = local_out[y][x];
+				}
+			}
     }
   }
 }
@@ -314,9 +398,10 @@ __device__ __host__ inline int norm_qscale(int qscale, int type)
 
 __global__ void kl_make_qp_table(
   int in_width, int in_height,
-  const int8_t* in_table, int in_pitch, int qp_scale,
+  const uint8_t* in_table, int in_pitch, int qp_scale,
+	int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
-  short* out_table, int out_pitch)
+	uint16_t* out_table, int out_pitch)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -324,7 +409,9 @@ __global__ void kl_make_qp_table(
   if (x < out_width && y < out_height) {
     int qp;
     if (in_table) {
-      qp = in_table[min(x, in_width - 1) + min(y, in_height - 1) * in_pitch];
+			int qp_x = min(x >> qp_shift_x, in_width - 1);
+			int qp_y = min(y >> qp_shift_y, in_height - 1);
+      qp = in_table[qp_x + qp_y * in_pitch];
       qp = max(1, norm_qscale(qp, qp_scale));
     }
     else {
@@ -336,15 +423,18 @@ __global__ void kl_make_qp_table(
 
 void cpu_make_qp_table(
   int in_width, int in_height,
-  const int8_t* in_table, int in_pitch, int qp_scale,
+  const uint8_t* in_table, int in_pitch, int qp_scale,
+	int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
-  short* out_table, int out_pitch)
+  uint16_t* out_table, int out_pitch)
 {
   for (int y = 0; y < out_height; ++y) {
     for (int x = 0; x < out_width; ++x) {
       int qp;
       if (in_table) {
-        qp = in_table[min(x, in_width - 1) + min(y, in_height - 1) * in_pitch];
+				int qp_x = min(x >> qp_shift_x, in_width - 1);
+				int qp_y = min(y >> qp_shift_y, in_height - 1);
+				qp = in_table[qp_x + qp_y * in_pitch];
         qp = max(1, norm_qscale(qp, qp_scale));
       }
       else {
@@ -355,7 +445,10 @@ void cpu_make_qp_table(
   }
 }
 
-__constant__ __host__ uchar4 g_ldither[8][2] = {
+#ifdef __CUDA_ARCH__
+__constant__
+#endif
+uchar4 g_ldither[8][2] = {
   { {  0,  48,  12,  60 }, {  3,  51,  15,  63 } },
   { { 32,  16,  44,  28 }, { 35,  19,  47,  31 } },
   { {  8,  56,   4,  52 }, { 11,  59,   7,  55 } },
@@ -367,10 +460,11 @@ __constant__ __host__ uchar4 g_ldither[8][2] = {
 };
 
 // shift: quality - (3 - deblock_shift)
+template <typename vpixel_t>
 __global__ void kl_merge_deblock(
   int width, int height,
-  const short4 *tmp, int tmp_pitch,
-  vpixel_t* out, int out_pitch, int shift, int maxv)
+  const ushort4 *tmp, int tmp_pitch, int tmp_ipitch,
+  vpixel_t* out, int out_pitch, int shift, float maxv)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -381,25 +475,192 @@ __global__ void kl_merge_deblock(
       to_int(tmp[x + (height * 2 + y) * tmp_pitch]) +
       to_int(tmp[x + (height * 3 + y) * tmp_pitch]);
     auto tmp = to_float(sum) * (1.0f / (1 << shift)) +
-      to_float(g_ldither[y & 3][x & 1]) * (1.0f / 64.0f);
-    out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(clamp(tmp, 0, maxv));
+      to_float(g_ldither[y & 7][x & 1]) * (1.0f / 64.0f);
+    out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(clamp(tmp, 0.0f, maxv));
   }
 }
 
+template <typename vpixel_t>
 void cpu_merge_deblock(
   int width, int height,
-  const short4 *tmp, int tmp_pitch,
-  vpixel_t* out, int out_pitch, int shift, int maxv)
+  const ushort4 *tmp, int tmp_pitch, int tmp_ipitch,
+  vpixel_t* out, int out_pitch, int shift, float maxv)
 {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-      auto sum = to_int(tmp[x + (height * 0 + y) * tmp_pitch]) +
-        to_int(tmp[x + (height * 1 + y) * tmp_pitch]) +
-        to_int(tmp[x + (height * 2 + y) * tmp_pitch]) +
-        to_int(tmp[x + (height * 3 + y) * tmp_pitch]);
+      auto sum = to_int(tmp[x + (tmp_ipitch * 0 + y) * tmp_pitch]) +
+        to_int(tmp[x + (tmp_ipitch * 1 + y) * tmp_pitch]) +
+        to_int(tmp[x + (tmp_ipitch * 2 + y) * tmp_pitch]) +
+        to_int(tmp[x + (tmp_ipitch * 3 + y) * tmp_pitch]);
       auto tmp = to_float(sum) * (1.0f / (1 << shift)) +
-        to_float(g_ldither[y & 3][x & 1]) * (1.0f / 64.0f);
-      out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(clamp(tmp, 0, maxv));
+        to_float(g_ldither[y & 7][x & 1]) * (1.0f / 64.0f);
+      out[x + y * out_pitch] = VHelper<vpixel_t>::cast_to(clamp(tmp, 0.0f, maxv));
     }
   }
+}
+
+
+class KDeblock : public KFMFilterBase
+{
+	int quality;
+	float strength;
+	float qp_bias;
+	int force_qp;
+	bool is_soft;
+
+	template <typename pixel_t>
+	void DeblockPlane(
+		int width, int height,
+		pixel_t* dst, int dstPitch, const pixel_t* src, int srcPitch, 
+		const uint8_t* qpTable, int qpStride, int qpScaleType,
+		int qpShiftX, int qpShiftY, PNeoEnv env)
+	{
+		typedef typename VectorType<pixel_t>::type vpixel_t;
+
+		VideoInfo padvi = vi;
+		padvi.width = width + 8 * 2;
+		padvi.height = height + 8 * 2;
+		Frame pad = env->NewVideoFrame(padvi);
+
+		Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(), 
+			pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
+
+		cpu_padv<vpixel_t>(
+			pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+			width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
+		cpu_padh<pixel_t>(
+			pad.GetWritePtr<pixel_t>() + 8, width, height + 8 * 2, 
+			pad.GetPitch<pixel_t>(), 8);
+
+		VideoInfo qpvi = vi;
+		qpvi.width = (width + 7 + 8) >> 3;
+		qpvi.height = (height + 7 + 8) >> 3;
+		qpvi.pixel_type = VideoInfo::CS_Y16;
+		Frame qpTmp = env->NewVideoFrame(qpvi);
+
+		cpu_make_qp_table((vi.width + 15) >> 4, (vi.height + 15) >> 4, 
+			qpTable, qpStride, qpScaleType, qpShiftX, qpShiftY, qpvi.width, qpvi.height,
+			qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
+
+		VideoInfo tmpvi = vi;
+		tmpvi.width = (width + 7 + 8 * 2) & ~7;
+		tmpvi.height = (height + 7 + 8 * 2) & ~7;
+		tmpvi.height *= 4;
+		tmpvi.pixel_type = VideoInfo::CS_Y16;
+		Frame tmpOut = env->NewVideoFrame(tmpvi);
+
+		int bits = vi.BitsPerComponent();
+		int deblockShift = max(0, quality + bits - 10);
+		int deblockMaxV = (1 << (bits + 6 - deblockShift)) - 1;
+		int mergeShift = quality + 6 - deblockShift;
+		int mergeMaxV = (1 << bits) - 1;
+
+		int count = 1 << quality;
+		cpu_deblock(pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
+			qpvi.width, qpvi.height,
+			tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
+			qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
+			deblockShift, deblockMaxV, strength, qp_bias, is_soft);
+
+		cpu_merge_deblock(width >> 2, height, 
+			tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(), 
+			tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
+			(vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
+	}
+
+	template <typename pixel_t>
+	PVideoFrame DeblockEntry(Frame& src, const uint8_t* qpTable, int qpStride, int qpScaleType, PNeoEnv env)
+	{
+		Frame dst = env->NewVideoFrame(vi);
+
+		DeblockPlane(vi.width, vi.height, 
+			dst.GetWritePtr<pixel_t>(PLANAR_Y), dst.GetPitch<pixel_t>(PLANAR_Y), 
+			src.GetReadPtr<pixel_t>(PLANAR_Y), src.GetPitch<pixel_t>(PLANAR_Y), 
+			qpTable, qpStride, qpScaleType, 1, 1, env);
+
+		DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
+			dst.GetWritePtr<pixel_t>(PLANAR_U), dst.GetPitch<pixel_t>(PLANAR_U),
+			src.GetReadPtr<pixel_t>(PLANAR_U), src.GetPitch<pixel_t>(PLANAR_U),
+			qpTable, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+
+		DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
+			dst.GetWritePtr<pixel_t>(PLANAR_V), dst.GetPitch<pixel_t>(PLANAR_V),
+			src.GetReadPtr<pixel_t>(PLANAR_V), src.GetPitch<pixel_t>(PLANAR_V),
+			qpTable, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+
+		return dst.frame;
+	}
+
+	template <typename pixel_t>
+	PVideoFrame GetFrameT(int n, PNeoEnv env)
+	{
+		Frame src = child->GetFrame(n, env);
+		if (force_qp != -1) {
+			// QP指定あり
+			return DeblockEntry<pixel_t>(src, nullptr, 0, 0, env);
+		}
+		if (src.GetProperty("QP_Table_Non_B")) {
+			// QPテーブルあり
+			Frame qpTable = src.GetProperty("QP_Table_Non_B")->GetFrame();
+			int qpStride = (int)src.GetProperty("QP_Stride")->GetInt();
+			int qpScaleType = (int)src.GetProperty("QP_ScaleType")->GetInt();
+			return DeblockEntry<pixel_t>(src, qpTable.GetReadPtr<uint8_t>(), qpStride, qpScaleType, env);
+		}
+		return src.frame;
+	}
+
+public:
+	KDeblock(PClip source, int quality, float strength, float qp_bias, int force_qp, bool is_soft, IScriptEnvironment* env)
+		: KFMFilterBase(source)
+		, quality(quality)
+		, strength(strength)
+		, qp_bias(qp_bias)
+		, force_qp(force_qp)
+		, is_soft(is_soft)
+	{
+		if (vi.width & 7) env->ThrowError("[KDeblock]: width must be multiple of 8");
+		if (vi.height & 7) env->ThrowError("[KDeblock]: height must be multiple of 8");
+	}
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+	{
+		PNeoEnv env = env_;
+
+		int pixelSize = vi.ComponentSize();
+		switch (pixelSize) {
+		case 1:
+			return GetFrameT<uint8_t>(n, env);
+		case 2:
+			return GetFrameT<uint16_t>(n, env);
+		default:
+			env->ThrowError("[KDeblock] Unsupported pixel format");
+		}
+
+		return PVideoFrame();
+	}
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new KDeblock(
+			args[0].AsClip(),          // source
+			args[1].AsInt(3),          // quality
+			(float)args[2].AsFloat(0), // strength
+			(float)args[3].AsFloat(0), // qp_bias
+			args[4].AsInt(-1),         // force_qp
+			args[5].AsBool(false),     // is_soft
+			env
+		);
+	}
+};
+
+void AddFuncDeblock(IScriptEnvironment* env)
+{
+	env->AddFunction("KDeblock", "c[quality]i[str]f[bias]f[force_qp]i[is_soft]b", KDeblock::Create, 0);
 }

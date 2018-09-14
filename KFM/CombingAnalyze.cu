@@ -1751,14 +1751,14 @@ class KCombeMask : public KFMFilterBase
       }
       {
         dim3 threads(1, 32);
-        dim3 blocks(1, nblocks(fheight, threads.y));
-        kl_padh << <blocks, threads >> > (flagp, fwidth, fheight + 1 * 2, fpitch, 1);
+        dim3 blocks(1, nblocks(fheight + 1 * 2, threads.y));
+        kl_padh << <blocks, threads >> > (flagp - fpitch, fwidth, fheight + 1 * 2, fpitch, 1);
         DEBUG_SYNC;
       }
     }
     else {
       cpu_padv(flagp, fwidth, fheight, fpitch, 1);
-      cpu_padh(flagp, fwidth, fheight + 1 * 2, fpitch, 1);
+      cpu_padh(flagp - fpitch, fwidth, fheight + 1 * 2, fpitch, 1);
     }
 
     BilinearImage(dstY, dsttmpY, pitchY, DC_BLOCK_SIZE, DC_BLOCK_SIZE, flagp, fpitch, fwidth, fheight, env);

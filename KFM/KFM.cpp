@@ -887,6 +887,7 @@ void AddFuncMergeStatic(IScriptEnvironment* env);
 void AddFuncCombingAnalyze(IScriptEnvironment* env);
 void AddFuncDebandKernel(IScriptEnvironment* env);
 void AddFuncUCF(IScriptEnvironment* env);
+void AddFuncDeblock(IScriptEnvironment* env);
 
 static void init_console()
 {
@@ -907,7 +908,8 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   AddFuncMergeStatic(env);
   AddFuncCombingAnalyze(env);
   AddFuncDebandKernel(env);
-  AddFuncUCF(env);
+	AddFuncUCF(env);
+	AddFuncDeblock(env);
 
   return "K Field Matching Plugin";
 }

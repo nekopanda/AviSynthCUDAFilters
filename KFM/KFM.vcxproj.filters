@@ -29,9 +29,6 @@
     <ClInclude Include="KFMFilterBase.cuh">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="Frame.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="..\common\Copy.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>

@@ -182,7 +182,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\common\Copy.h" />
-    <ClInclude Include="Frame.h" />
     <ClInclude Include="KFM.h" />
     <ClInclude Include="KFMFilterBase.cuh" />
     <ClInclude Include="TextOut.h" />
