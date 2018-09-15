@@ -64,6 +64,9 @@ void cpu_fill(pixel_t* dst, int width, int height, int pitch)
   }
 }
 
+template void cpu_fill<uint8_t, 0>(uint8_t* dst, int width, int height, int pitch);
+template void cpu_fill<uint16_t, 0>(uint16_t* dst, int width, int height, int pitch);
+
 template <typename pixel_t, int fill_v>
 __global__ void kl_fill(pixel_t* dst, int width, int height, int pitch)
 {
@@ -74,6 +77,9 @@ __global__ void kl_fill(pixel_t* dst, int width, int height, int pitch)
     dst[x + y * pitch] = VHelper<pixel_t>::make(fill_v);
   }
 }
+
+template __global__ void kl_fill<uint8_t, 0>(uint8_t* dst, int width, int height, int pitch);
+template __global__ void kl_fill<uint16_t, 0>(uint16_t* dst, int width, int height, int pitch);
 
 template <typename pixel_t>
 void cpu_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width, int height, int pitch)

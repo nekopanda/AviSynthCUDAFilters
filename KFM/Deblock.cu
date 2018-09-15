@@ -313,7 +313,7 @@ __global__ void kl_deblock(
 
   // requantize
 	uint16_t qp = qp_table[blockIdx.x + blockIdx.y * qp_pitch];
-	float thresh = (qp + qp_bias) * ((1 << 4) + strength) - 1;
+	float thresh = (qp + qp_bias) * ((1 << 2) + strength) - 1;
   if (is_soft) {
     dev_softthresh(tx, dct_tmp, thresh);
   }
@@ -380,7 +380,7 @@ void cpu_deblock(
 
         // requantize
 				uint16_t qp = qp_table[bx + by * qp_pitch];
-				float thresh = (qp + qp_bias) * ((1 << 4) + strength) - 1;
+				float thresh = (qp + qp_bias) * ((1 << 2) + strength) - 1;
 				if (is_soft) {
 					cpu_softthresh(dct_tmp, thresh);
 				}
@@ -420,13 +420,15 @@ void cpu_deblock(
 }
 
 // normalize the qscale factor
+// ffmpegはmpeg1に合わせているが値が小さいのでh264に合わせるようにした
+//（ffmpegの4倍の値が返る）
 __device__ __host__ inline int norm_qscale(int qscale, int type)
 {
   switch (type) {
-  case 0/*FF_QSCALE_TYPE_MPEG1*/: return qscale;
-  case 1/*FF_QSCALE_TYPE_MPEG2*/: return qscale >> 1;
-  case 2/*FF_QSCALE_TYPE_H264*/:  return qscale >> 2;
-  case 3/*FF_QSCALE_TYPE_VP56*/:  return (63 - qscale + 2) >> 2;
+  case 0/*FF_QSCALE_TYPE_MPEG1*/: return qscale << 2;
+  case 1/*FF_QSCALE_TYPE_MPEG2*/: return qscale << 1;
+  case 2/*FF_QSCALE_TYPE_H264*/:  return qscale;
+  case 3/*FF_QSCALE_TYPE_VP56*/:  return (63 - qscale + 2);
   }
   return qscale;
 }
@@ -434,7 +436,8 @@ __device__ __host__ inline int norm_qscale(int qscale, int type)
 
 __global__ void kl_make_qp_table(
   int in_width, int in_height,
-  const uint8_t* in_table, int in_pitch, int qp_scale,
+	const uint8_t* in_table, const uint8_t* nonb_table,
+	int in_pitch, int qp_scale, float b_ratio,
 	int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
 	uint16_t* out_table, int out_pitch)
@@ -447,8 +450,9 @@ __global__ void kl_make_qp_table(
     if (in_table) {
 			int qp_x = min(x >> qp_shift_x, in_width - 1);
 			int qp_y = min(y >> qp_shift_y, in_height - 1);
-      qp = in_table[qp_x + qp_y * in_pitch];
-      qp = max(1, norm_qscale(qp, qp_scale));
+			int b = norm_qscale(in_table[qp_x + qp_y * in_pitch], qp_scale);
+			int nonb = norm_qscale(nonb_table[qp_x + qp_y * in_pitch], qp_scale);
+			qp = max(1, (int)(b * b_ratio + nonb * (1 - b_ratio) + 0.5f));
     }
     else {
       qp = qp_scale;
@@ -459,7 +463,8 @@ __global__ void kl_make_qp_table(
 
 void cpu_make_qp_table(
   int in_width, int in_height,
-  const uint8_t* in_table, int in_pitch, int qp_scale,
+  const uint8_t* in_table, const uint8_t* nonb_table, 
+	int in_pitch, int qp_scale, float b_ratio,
 	int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
   uint16_t* out_table, int out_pitch)
@@ -470,8 +475,9 @@ void cpu_make_qp_table(
       if (in_table) {
 				int qp_x = min(x >> qp_shift_x, in_width - 1);
 				int qp_y = min(y >> qp_shift_y, in_height - 1);
-				qp = in_table[qp_x + qp_y * in_pitch];
-        qp = max(1, norm_qscale(qp, qp_scale));
+				int b = norm_qscale(in_table[qp_x + qp_y * in_pitch], qp_scale);
+				int nonb = norm_qscale(nonb_table[qp_x + qp_y * in_pitch], qp_scale);
+        qp = max(1, (int)(b * b_ratio + nonb * (1 - b_ratio) + 0.5f));
       }
       else {
         qp = qp_scale;
@@ -564,7 +570,7 @@ void cpu_deblock_avx(
 				int off_x = bx * 8 + offset.x;
 				int off_y = by * 8 + offset.y;
 				uint16_t qp = qp_table[bx + by * qp_pitch];
-				float thresh = (qp + qp_bias) * ((1 << 4) + strength) - 1;
+				float thresh = (qp + qp_bias) * ((1 << 2) + strength) - 1;
 				const int half = (1 << deblockShift) >> 1;
 				const pixel_t* src_block = &src[off_x + off_y * src_pitch];
 				uint16_t* tmp_block = &tmp[off_x + off_y * tmp_pitch];
@@ -596,14 +602,16 @@ class KDeblock : public KFMFilterBase
 	int quality;
 	float strength;
 	float qp_bias;
+	float b_ratio;
 	int force_qp;
 	bool is_soft;
+	bool show;
 
 	template <typename pixel_t>
 	void DeblockPlane(
 		int width, int height,
 		pixel_t* dst, int dstPitch, const pixel_t* src, int srcPitch, 
-		const uint8_t* qpTable, int qpStride, int qpScaleType,
+		const uint8_t* qpTable, const uint8_t* qpTableNonB, int qpStride, int qpScaleType,
 		int qpShiftX, int qpShiftY, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -646,14 +654,14 @@ class KDeblock : public KFMFilterBase
 			dim3 blocks(nblocks(qpvi.width, threads.x), nblocks(qpvi.height, threads.y));
 			kl_make_qp_table<<<blocks, threads >>>((
 				vi.width + 15) >> 4, (vi.height + 15) >> 4,
-				qpTable, qpStride, qpTable ? qpScaleType : force_qp,
+				qpTable, qpTableNonB, qpStride, qpTable ? qpScaleType : force_qp, b_ratio,
 				qpShiftX, qpShiftY, qpvi.width, qpvi.height,
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 			DEBUG_SYNC;
 		}
 		else {
 			cpu_make_qp_table((vi.width + 15) >> 4, (vi.height + 15) >> 4,
-				qpTable, qpStride, qpTable ? qpScaleType : force_qp,
+				qpTable, qpTableNonB, qpStride, qpTable ? qpScaleType : force_qp, b_ratio, 
 				qpShiftX, qpShiftY, qpvi.width, qpvi.height,
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 		}
@@ -727,24 +735,30 @@ class KDeblock : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame DeblockEntry(Frame& src, const uint8_t* qpTable, int qpStride, int qpScaleType, PNeoEnv env)
+	PVideoFrame DeblockEntry(Frame& src, const uint8_t* qpTable, const uint8_t* qpTableNonB, int qpStride, int qpScaleType, PNeoEnv env)
 	{
 		Frame dst = env->NewVideoFrame(vi);
 
 		DeblockPlane(vi.width, vi.height, 
 			dst.GetWritePtr<pixel_t>(PLANAR_Y), dst.GetPitch<pixel_t>(PLANAR_Y), 
 			src.GetReadPtr<pixel_t>(PLANAR_Y), src.GetPitch<pixel_t>(PLANAR_Y), 
-			qpTable, qpStride, qpScaleType, 1, 1, env);
+			qpTable, qpTableNonB, qpStride, qpScaleType, 1, 1, env);
 
 		DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
 			dst.GetWritePtr<pixel_t>(PLANAR_U), dst.GetPitch<pixel_t>(PLANAR_U),
 			src.GetReadPtr<pixel_t>(PLANAR_U), src.GetPitch<pixel_t>(PLANAR_U),
-			qpTable, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+			qpTable, qpTableNonB, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
 		DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
 			dst.GetWritePtr<pixel_t>(PLANAR_V), dst.GetPitch<pixel_t>(PLANAR_V),
 			src.GetReadPtr<pixel_t>(PLANAR_V), src.GetPitch<pixel_t>(PLANAR_V),
-			qpTable, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+			qpTable, qpTableNonB, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+
+		if (show) {
+			char buf[100];
+			sprintf_s(buf, "KDeblock: %s", qpTable ? "Using QP table" : "Constant QP");
+			DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
+		}
 
 		return dst.frame;
 	}
@@ -755,26 +769,34 @@ class KDeblock : public KFMFilterBase
 		Frame src = child->GetFrame(n, env);
 		if (force_qp > 0) {
 			// QP指定あり
-			return DeblockEntry<pixel_t>(src, nullptr, 0, 0, env);
+			return DeblockEntry<pixel_t>(src, nullptr, nullptr, 0, 0, env);
 		}
 		if (src.GetProperty("QP_Table_Non_B")) {
 			// QPテーブルあり
-			Frame qpTable = src.GetProperty("QP_Table_Non_B")->GetFrame();
+			Frame qpTable = src.GetProperty("QP_Table")->GetFrame();
+			Frame qpTableNonB = src.GetProperty("QP_Table_Non_B")->GetFrame();
 			int qpStride = (int)src.GetProperty("QP_Stride")->GetInt();
 			int qpScaleType = (int)src.GetProperty("QP_ScaleType")->GetInt();
-			return DeblockEntry<pixel_t>(src, qpTable.GetReadPtr<uint8_t>(), qpStride, qpScaleType, env);
+			return DeblockEntry<pixel_t>(src, qpTable.GetReadPtr<uint8_t>(),
+				qpTableNonB.GetReadPtr<uint8_t>(), qpStride, qpScaleType, env);
+		}
+		if (show) {
+			DrawText<pixel_t>(src.frame, vi.BitsPerComponent(), 0, 0, "Disabled", env);
 		}
 		return src.frame;
 	}
 
 public:
-	KDeblock(PClip source, int quality, float strength, float qp_bias, int force_qp, bool is_soft, IScriptEnvironment* env)
+	KDeblock(PClip source, int quality, float strength, float qp_bias, float b_ratio, 
+		int force_qp, bool is_soft, bool show, IScriptEnvironment* env)
 		: KFMFilterBase(source)
 		, quality(quality)
 		, strength(strength)
 		, qp_bias(qp_bias)
+		, b_ratio(b_ratio)
 		, force_qp(force_qp)
 		, is_soft(is_soft)
+		, show(show)
 	{
 		if (vi.width & 7) env->ThrowError("[KDeblock]: width must be multiple of 8");
 		if (vi.height & 7) env->ThrowError("[KDeblock]: height must be multiple of 8");
@@ -811,14 +833,127 @@ public:
 			args[1].AsInt(3),          // quality
 			(float)args[2].AsFloat(0), // strength
 			(float)args[3].AsFloat(0), // qp_bias
-			args[4].AsInt(-1),         // force_qp
-			args[5].AsBool(false),     // is_soft
+			(float)args[4].AsFloat(0.5f), // b_ratio
+			args[5].AsInt(-1),         // force_qp
+			args[6].AsBool(false),     // is_soft
+			args[7].AsBool(false),     // show
 			env
 		);
 	}
 };
 
+__global__ void kl_scale_qp(int width, int height, 
+	uint8_t* dst, int dst_pitch, const uint8_t* src, int src_pitch, int scale_type)
+{
+	int x = threadIdx.x + blockIdx.x * blockDim.x;
+	int y = threadIdx.y + blockIdx.y * blockDim.y;
+	if (x < width && y < height) {
+		dst[x + y * dst_pitch] = norm_qscale(src[x + y * src_pitch], scale_type);
+	}
+}
+
+void cpu_scale_qp(int width, int height, 
+	uint8_t* dst, int dst_pitch, const uint8_t* src, int src_pitch, int scale_type)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			dst[x + y * dst_pitch] = norm_qscale(src[x + y * src_pitch], scale_type);
+		}
+	}
+}
+
+class QPClip : public GenericVideoFilter
+{
+	int mode;
+	bool nonB;
+public:
+	QPClip(PClip clip, bool nonB, IScriptEnvironment* env)
+		: GenericVideoFilter(clip)
+		, nonB(nonB)
+	{
+		vi.pixel_type = VideoInfo::CS_Y8;
+		vi.width = (vi.width + 15) >> 4;
+		vi.height = (vi.height + 15) >> 4;
+	}
+
+	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+	{
+		PNeoEnv env = env_;
+		Frame src = child->GetFrame(n, env);
+		Frame dst = env->NewVideoFrame(vi);
+
+		const AVSMapValue* prop = src.GetProperty(nonB ? "QP_Table_Non_B" : "QP_Table");
+		if (prop == nullptr) {
+			cpu_fill<uint8_t, 0>(dst.GetWritePtr<uint8_t>(), vi.width, vi.height, dst.GetPitch<uint8_t>());
+			DrawText<uint8_t>(dst.frame, 8, 0, 0, "No QP table ...", env);
+		}
+		else {
+			Frame qpTable = prop->GetFrame();
+			int qpStride = (int)src.GetProperty("QP_Stride")->GetInt();
+			int qpScaleType = (int)src.GetProperty("QP_ScaleType")->GetInt();
+			if (IS_CUDA) {
+				dim3 threads(32, 8);
+				dim3 blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
+				kl_scale_qp<<<blocks, threads>>>(vi.width, vi.height,
+					dst.GetWritePtr<uint8_t>(), dst.GetPitch<uint8_t>(),
+					qpTable.GetReadPtr<uint8_t>(), qpStride, qpScaleType);
+				DEBUG_SYNC;
+			}
+			else {
+				cpu_scale_qp(vi.width, vi.height,
+					dst.GetWritePtr<uint8_t>(), dst.GetPitch<uint8_t>(),
+					qpTable.GetReadPtr<uint8_t>(), qpStride, qpScaleType);
+			}
+		}
+
+		return dst.frame;
+	}
+
+	int __stdcall SetCacheHints(int cachehints, int frame_range) {
+		if (cachehints == CACHE_GET_DEV_TYPE) {
+			return GetDeviceTypes(child) &
+				(DEV_TYPE_CPU | DEV_TYPE_CUDA);
+		}
+		else if (cachehints == CACHE_GET_MTMODE) {
+			return MT_NICE_FILTER;
+		}
+		return 0;
+	}
+
+	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+	{
+		return new QPClip(
+			args[0].AsClip(),      // clip
+			args[1].AsBool(true),  // nonB
+			env
+		);
+	}
+};
+
+static AVSValue __cdecl FrameType(AVSValue args, void* user_data, IScriptEnvironment* env)
+{
+	AVSValue clip = args[0];
+	PClip child = clip.AsClip();
+	VideoInfo vi = child->GetVideoInfo();
+
+	AVSValue cn = env->GetVarDef("current_frame");
+	if (!cn.IsInt())
+		env->ThrowError("FrameType: This filter can only be used within run-time filters");
+
+	int n = cn.AsInt();
+	n = min(max(n, 0), vi.num_frames - 1);
+
+	auto entry = child->GetFrame(n, env)->GetProperty("FrameType");
+	if (entry) {
+		return (int)entry->GetInt();
+	}
+	return 0;
+}
+
 void AddFuncDeblock(IScriptEnvironment* env)
 {
-	env->AddFunction("KDeblock", "c[quality]i[str]f[bias]f[force_qp]i[is_soft]b", KDeblock::Create, 0);
+	env->AddFunction("KDeblock", "c[quality]i[str]f[bias]f[bratio]f[force_qp]i[is_soft]b[show]b", KDeblock::Create, 0);
+	env->AddFunction("QPClip", "c[nonb]b", QPClip::Create, 0);
+
+	env->AddFunction("FrameType", "c", FrameType, 0);
 }
