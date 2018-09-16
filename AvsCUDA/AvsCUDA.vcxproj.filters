@@ -36,6 +36,21 @@
     <ClInclude Include="..\common\Copy.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="filters\convert_avx.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\convert_avx2.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\resample.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\resample_avx2.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
+    <ClInclude Include="filters\resample_functions.h">
+      <Filter>ヘッダー ファイル\filters</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AvsCUDA.cpp">
@@ -53,6 +68,24 @@
     <ClCompile Include="filters\merge_avx2.cpp">
       <Filter>ソース ファイル\filters</Filter>
     </ClCompile>
+    <ClCompile Include="filters\convert_avx.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\convert_avx2.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\resample_avx2.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\resample_functions.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="filters\turn.cpp">
+      <Filter>ソース ファイル\filters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\common\DeviceLocalData.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="filters\ConditionalFunctions.cu">
@@ -64,6 +97,12 @@
     <CudaCompile Include="filters\merge.cu" />
     <CudaCompile Include="..\common\Copy.cu">
       <Filter>ソース ファイル</Filter>
+    </CudaCompile>
+    <CudaCompile Include="filters\Convert.cu">
+      <Filter>ソース ファイル\filters</Filter>
+    </CudaCompile>
+    <CudaCompile Include="filters\resample.cu">
+      <Filter>ソース ファイル\filters</Filter>
     </CudaCompile>
   </ItemGroup>
 </Project>

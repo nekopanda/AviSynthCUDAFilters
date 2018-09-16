@@ -501,6 +501,10 @@ struct ScriptGen
       out << "cuda = src." << fname << std::endl;
     }
   }
+	virtual double Thresh(
+		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+		return 1;
+	}
 };
 
 class GenericTest : public AvsCUDATest
@@ -536,7 +540,7 @@ void GenericTest::Test_(const char* fname, bool is_cuda, FORMAT format, int bits
     gen.Ref(out, fname, is_cuda);
     out << "LoadPlugin(\"" << pluginPath.c_str() << "\")" << std::endl;
     gen.Test(out, fname, is_cuda);
-    out << "ImageCompare(ref, cuda, 1)" << std::endl;
+    out << "ImageCompare(ref, cuda, "<< gen.Thresh(out, fname, is_cuda, bits) <<")" << std::endl;
 
     out.close();
 
@@ -735,3 +739,128 @@ TEST_F(GenericTest, Crop_2468)
   Test("Crop(2,4,-6,-8)", formats, CropGen());
 }
 
+struct ConvBitsGen : ScriptGen
+{
+	virtual double Thresh(
+		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+		return (bits == 32) ? 1 : 0;
+	}
+};
+
+struct ConvBits32Gen : ScriptGen
+{
+	virtual double Thresh(
+		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+		return 1;
+	}
+};
+
+TEST_F(GenericTest, ConvBitsTo8)
+{
+	// ビット変換はパターンとして full scale と shifted scale がある
+	// full scale は 0-255 を 0-65535 にマッピングする変換
+	// shifted scale は 0-255 を 0-65280 にマッピングする変換
+	// CUDA版はshifted scaleしかサポートしていない
+	// オプションなしだとRGBがfull scale変換されるので値が合わなくなるので注意
+
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	int bits[] = { 8, 16, 10, 12, 14, 32 };
+	for (int i = 0; i < (int)formats.size(); ++i) {
+		int nbits = IsRGB(formats[i]) ? 2 : 6;
+		const char* fname = IsRGB(formats[i]) ? "ConvertBits(8,fulls=false,dither=-1)" : "ConvertBits(8,dither=-1)";
+		for (int b = 0; b < nbits; ++b) {
+			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+		}
+	}
+}
+
+TEST_F(GenericTest, ConvBitsTo8Dither)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	int bits[] = { 16, 10, 12, 14 };
+	for (int i = 0; i < (int)formats.size(); ++i) {
+		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+			const char* fname = "ConvertBits(8,dither=0)";
+			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+		}
+	}
+}
+
+TEST_F(GenericTest, ConvBitsTo10)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	Test("ConvertBits(10,dither=-1)", formats, ConvBitsGen());
+}
+
+TEST_F(GenericTest, ConvBitsTo10Dither)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	int bits[] = { 16, 12, 14 };
+	for (int i = 0; i < (int)formats.size(); ++i) {
+		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+			const char* fname = "ConvertBits(10,dither=0)";
+			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+		}
+	}
+}
+
+TEST_F(GenericTest, ConvBitsTo12)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	Test("ConvertBits(12,dither=-1)", formats, ConvBitsGen());
+}
+
+TEST_F(GenericTest, ConvBitsTo12Dither)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	int bits[] = { 16, 14 };
+	for (int i = 0; i < (int)formats.size(); ++i) {
+		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+			const char* fname = "ConvertBits(12,dither=0)";
+			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+		}
+	}
+}
+
+TEST_F(GenericTest, ConvBitsTo14)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	Test("ConvertBits(14,dither=-1)", formats, ConvBitsGen());
+}
+
+TEST_F(GenericTest, ConvBitsTo14Dither)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	int bits[] = { 16 };
+	for (int i = 0; i < (int)formats.size(); ++i) {
+		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+			const char* fname = "ConvertBits(14,dither=0)";
+			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+		}
+	}
+}
+
+TEST_F(GenericTest, ConvBitsTo16)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	int bits[] = { 8, 16, 10, 12, 14, 32 };
+	for (int i = 0; i < (int)formats.size(); ++i) {
+		int nbits = IsRGB(formats[i]) ? 2 : 6;
+		const char* fname = IsRGB(formats[i]) ? "ConvertBits(16,fulls=false,dither=-1)" : "ConvertBits(16,dither=-1)";
+		for (int b = 0; b < nbits; ++b) {
+			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+		}
+	}
+}
+
+TEST_F(GenericTest, ConvBitsTo32)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+	Test("ConvertBits(32,dither=-1)", formats, ConvBits32Gen());
+}
