@@ -285,19 +285,19 @@ template <typename TGT_TYPE, int TGT_BITS, bool CHROMA>
 __global__ void kl_convert_from_float(int width, int height,
 	TGT_TYPE* dst, int dst_pitch, const float* src, int src_pitch)
 {
-	constexpr float MAX_VAL = (1 << TGT_BITS) - 1;
-	constexpr float HALF = 1 << (TGT_BITS - 1);
+	constexpr float MAX_VAL = 255 << (TGT_BITS - 8);
+	constexpr float HALF = 128 << (TGT_BITS - 8);
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x < width && y < height) {
 		float tmp;
 		if (CHROMA) {
-			tmp = (src[x + y * src_pitch] - 0.5f) * MAX_VAL + HALF + 0.5f;
+			tmp = src[x + y * src_pitch] * MAX_VAL + HALF + 0.5f;
 		}
 		else {
 			tmp = src[x + y * src_pitch] * MAX_VAL + 0.5f;
 		}
-		dst[x + y * dst_pitch] = (TGT_TYPE)min(tmp, (float)MAX_VAL);
+		dst[x + y * dst_pitch] = (TGT_TYPE)clamp(tmp, 0.0f, (float)MAX_VAL);
 	}
 }
 
@@ -322,16 +322,24 @@ template <> struct ConvertBitsKernel<4> {
 	}
 };
 
-template <typename SRC_TYPE, int SRC_BITS>
+template <typename SRC_TYPE, int SRC_BITS, bool CHROMA>
 __global__ void kl_convert_to_float(int width, int height,
 	float* dst, int dst_pitch, const SRC_TYPE* src, int src_pitch)
 {
-	constexpr float MAX_VAL = (1 << SRC_BITS) - 1;
+	constexpr float MAX_VAL = 255 << (SRC_BITS - 8);
 	constexpr float FACTOR = 1.0f / MAX_VAL;
+	constexpr float HALF = 128 << (SRC_BITS - 8);
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	if (x < width && y < height) {
-		dst[x + y * dst_pitch] = (float)src[x + y * src_pitch] * FACTOR;
+		float tmp;
+		if (CHROMA) {
+			tmp = (float)(src[x + y * src_pitch] - HALF) * FACTOR;
+		}
+		else {
+			tmp = (float)src[x + y * src_pitch] * FACTOR;
+		}
+		dst[x + y * dst_pitch] = tmp;
 	}
 }
 
@@ -347,7 +355,7 @@ template <> struct ConvertBitsKernel<5> {
 		dim3 threads(32, 16);
 		dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
 		kl_convert_to_float
-			<SRC_TYPE, SRC_BITS>
+			<SRC_TYPE, SRC_BITS, CHROMA>
 			<< <blocks, threads >> > (
 				width, height,
 				(TGT_TYPE*)dstp, dst_pitch / sizeof(TGT_TYPE),

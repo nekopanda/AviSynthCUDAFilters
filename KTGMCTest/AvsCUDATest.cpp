@@ -751,7 +751,7 @@ struct ConvBits32Gen : ScriptGen
 {
 	virtual double Thresh(
 		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		return 1;
+		return 0.25;
 	}
 };
 

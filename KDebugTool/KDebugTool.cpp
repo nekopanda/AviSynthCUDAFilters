@@ -169,10 +169,10 @@ class ImageCompare : GenericVideoFilter
   }
 
 public:
-  ImageCompare(PClip child1, PClip child2, int thresh, bool chroma, bool alpha, int offX, int offY, PNeoEnv env)
+  ImageCompare(PClip child1, PClip child2, double thresh, bool chroma, bool alpha, int offX, int offY, PNeoEnv env)
     : GenericVideoFilter(child1)
     , child2(child2)
-    , thresh(thresh)
+    , thresh((vi.ComponentSize() == 4) ? thresh / 65536 : thresh)
     , chroma(chroma)
     , alpha(alpha)
     , offX(offX)
@@ -180,9 +180,6 @@ public:
   {
     if (vi.IsYUY2()) {
       env->ThrowError("[ImageCompare] YUY2 is not supported");
-    }
-    if (vi.ComponentSize() == 4) {
-      thresh /= 65536;
     }
 
     VideoInfo vi2 = child2->GetVideoInfo();
@@ -233,7 +230,7 @@ public:
     return new ImageCompare(
       args[0].AsClip(),
       args[1].AsClip(),
-      args[2].AsInt(2), // thresh
+      args[2].AsFloat(2), // thresh
       args[3].AsBool(true), // chroma
       args[4].AsBool(true), // alpha
       args[5].AsInt(0), // offX
@@ -249,7 +246,7 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   //init_console();
   
   env->AddFunction("Time", "c[name]s", Create_Time, 0);
-  env->AddFunction("ImageCompare", "cc[thresh]i[chroma]b[alpha]b[offX]i[offY]i", ImageCompare::Create, 0);
+  env->AddFunction("ImageCompare", "cc[thresh]f[chroma]b[alpha]b[offX]i[offY]i", ImageCompare::Create, 0);
 
   return "K Debug Plugin";
 }
