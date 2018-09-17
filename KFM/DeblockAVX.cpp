@@ -242,7 +242,7 @@ inline void add_to_block_avx(uint16_t* dst, __m256 row, __m256 half, int shift, 
 }
 
 inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, int maxv_,
-	__m256 row0, __m256 row1, __m256 row2, __m256 row3, __m256 row4, __m256 row5, __m256 row6, __m256 row7)
+	__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
 {
 	auto half = _mm256_set1_ps(half_);
 	auto maxv = _mm256_set1_epi32(maxv_);
@@ -257,7 +257,7 @@ inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, 
 }
 
 __forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv,
-	__m256 row0, __m256 row1, __m256 row2, __m256 row3, __m256 row4, __m256 row5, __m256 row6, __m256 row7)
+	__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
 {
 	// dct
 	dct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
@@ -281,6 +281,12 @@ __forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float th
 
 	add_block_avx(dst, dst_pitch, half, shift, maxv, row0, row1, row2, row3, row4, row5, row6, row7);
 }
+
+#ifndef _WIN64
+inline __m128i _mm_cvtsi64_si128(int64_t a) {
+	return _mm_set_epi32(0, 0, (unsigned int)(a >> 32), (unsigned int)a);
+}
+#endif
 
 inline __m256 load_to_float_avx(const uint8_t* src) {
 	return _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_cvtsi64_si128(*(const int64_t*)src)));
