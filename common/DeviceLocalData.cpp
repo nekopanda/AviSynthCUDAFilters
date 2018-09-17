@@ -9,8 +9,18 @@ DeviceLocalBase::DeviceLocalBase(const void* init_data, size_t length, PNeoEnv e
 {
   numDevices = (int)env->GetProperty(AEP_NUM_DEVICES);
   dataPtrs = new std::atomic<void*>[numDevices]();
+#if 1
+	if (dataPtrs == nullptr) {
+		printf("!!!!\n");
+	}
+#endif
   void* ptr = new uint8_t[length];
   memcpy(ptr, init_data, length);
+#if 1
+	if (dataPtrs == nullptr) {
+		printf("!!!!\n");
+	}
+#endif
   dataPtrs[0].store(ptr, std::memory_order_relaxed);
 }
 

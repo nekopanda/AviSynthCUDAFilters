@@ -9,6 +9,7 @@
 // 20170310: new MT mode: MT_SPECIAL_MT
 // 20171103: (test with SIZETMOD define: Videoframe offsets to size_t, may affect x64)
 // 20171207: C++ Standard Conformance (no change for plugin writers)
+// 20180525: AVS_UNUSED define to supress parameter not used warnings
 
 // http://www.avisynth.org
 
@@ -1110,7 +1111,7 @@ enum CachePolicyHint {
   CACHE_AVSPLUS_CUDA_CONSTANTS = 600,
 
   CACHE_GET_DEV_TYPE,           // Device types a filter can return
-  CACHE_GET_CHILD_DEV_TYPE,    // Device types a fitler can receive (internal use only)
+  CACHE_GET_CHILD_DEV_TYPE,    // Device types a fitler can receive
 
   CACHE_USER_CONSTANTS = 1000       // Smaller values are reserved for the core
 
@@ -1284,6 +1285,9 @@ public:
 #endif
 }; // end class AVSValue
 
+
+#define AVS_UNUSED(x) (void)x
+
 // instantiable null filter
 class GenericVideoFilter : public IClip {
 protected:
@@ -1295,8 +1299,7 @@ public:
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) { child->GetAudio(buf, start, count, env); }
   const VideoInfo& __stdcall GetVideoInfo() { return vi; }
   bool __stdcall GetParity(int n) { return child->GetParity(n); }
-  // We do not pass cache requests upwards, only to the next filter.
-  int __stdcall SetCacheHints(int cachehints, int frame_range) { (void)cachehints; (void)frame_range; return 0; };
+  int __stdcall SetCacheHints(int cachehints, int frame_range) { AVS_UNUSED(cachehints); AVS_UNUSED(frame_range); return 0; };  // We do not pass cache requests upwards, only to the next filter.
 };
 
 class AVSMapValue
@@ -1749,6 +1752,9 @@ AVSC_API(IScriptEnvironment*, CreateScriptEnvironment)(int version = AVISYNTH_IN
 #include <avs/capi.h>
 AVSC_API(IScriptEnvironment2*, CreateScriptEnvironment2)(int version = AVISYNTH_INTERFACE_VERSION);
 
+#ifndef BUILDING_AVSCORE
+#undef AVS_UNUSED
+#endif
 
 #pragma pack(pop)
 

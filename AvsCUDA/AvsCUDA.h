@@ -2,6 +2,12 @@
 
 #include <avisynth.h>
 
+#define AVS_UNUSED(x) (void)x
+
+#if _MSC_VER <= 1900
+#define constexpr(expr) (expr)
+#endif
+
 struct FuncDefinition {
   typedef IScriptEnvironment::ApplyFunc apply_func_t;
 

@@ -93,7 +93,9 @@ __forceinline __m128 simd_loadps_unaligned(const float* adr)
 template<typename pixel_t>
 static void resize_v_planar_pointresize(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
-	//int filter_size = program->filter_size;
+  AVS_UNUSED(src_pitch);
+  AVS_UNUSED(bits_per_pixel);
+  AVS_UNUSED(storage);
 
 	pixel_t* src0 = (pixel_t *)src;
 	pixel_t* dst0 = (pixel_t *)dst;
@@ -112,7 +114,7 @@ static void resize_v_planar_pointresize(BYTE* dst, const BYTE* src, int dst_pitc
 template<typename pixel_t>
 __global__ void kl_resize_v_planar_pointresize(
 	pixel_t* dst, const pixel_t* __restrict__ src, int dst_pitch, int src_pitch,
-	const int* __restrict__ pixel_offset, const float* __restrict__ pixel_coefficient,
+	const int* __restrict__ pixel_offset,
 	int target_width, int target_height, float limit, int filter_size)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -134,12 +136,14 @@ void launch_resize_v_planar_pointresize(
 
 	kl_resize_v_planar_pointresize << <blocks, threads >> > (
 		(pixel_t*)dst, (const pixel_t*)src, dst_pitch / sizeof(pixel_t), src_pitch / sizeof(pixel_t),
-		pixel_offset, pixel_coefficient, target_width, target_height, limit, filter_size);
+		pixel_offset, target_width, target_height, limit, filter_size);
 }
 
 template<typename pixel_t>
 static void resize_v_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
+  AVS_UNUSED(src_pitch);
+  AVS_UNUSED(storage);
 	int filter_size = program->filter_size;
 
 	typedef typename std::conditional < std::is_floating_point<pixel_t>::value, float, short>::type coeff_t;
@@ -156,8 +160,8 @@ static void resize_v_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 
 	pixel_t limit = 0;
 	if (!std::is_floating_point<pixel_t>::value) {  // floats are unscaled and uncapped
-		if (sizeof(pixel_t) == 1) limit = 255;
-		else if (sizeof(pixel_t) == 2) limit = pixel_t((1 << bits_per_pixel) - 1);
+    if constexpr(sizeof(pixel_t) == 1) limit = 255;
+    else if constexpr(sizeof(pixel_t) == 2) limit = pixel_t((1 << bits_per_pixel) - 1);
 	}
 
 	for (int y = 0; y < target_height; y++) {
@@ -172,9 +176,9 @@ static void resize_v_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 				result += (src_ptr + pitch_table[i] / sizeof(pixel_t))[x] * current_coeff[i];
 			}
 			if (!std::is_floating_point<pixel_t>::value) {  // floats are unscaled and uncapped
-				if (sizeof(pixel_t) == 1)
+        if constexpr(sizeof(pixel_t) == 1)
 					result = (result + (1 << (FPScale8bits - 1))) / (1 << FPScale8bits);
-				else if (sizeof(pixel_t) == 2)
+        else if constexpr(sizeof(pixel_t) == 2)
 					result = (result + (1 << (FPScale16bits - 1))) / (1 << FPScale16bits);
 				result = clamp(result, decltype(result)(0), decltype(result)(limit));
 			}
@@ -327,6 +331,10 @@ static void resize_v_mmx_planar(BYTE* dst, const BYTE* src, int dst_pitch, int s
 template<SSELoader load>
 static void resize_v_sse2_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
+  AVS_UNUSED(src_pitch);
+  AVS_UNUSED(bits_per_pixel);
+  AVS_UNUSED(storage);
+
 	int filter_size = program->filter_size;
 	short* current_coeff = program->pixel_coefficient;
 
@@ -430,6 +438,9 @@ static void resize_v_sse2_planar(BYTE* dst, const BYTE* src, int dst_pitch, int 
 template<SSELoader load>
 static void resize_v_ssse3_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
+  AVS_UNUSED(bits_per_pixel);
+  AVS_UNUSED(storage);
+
 	int filter_size = program->filter_size;
 	short* current_coeff = program->pixel_coefficient;
 
@@ -509,6 +520,8 @@ __forceinline static void resize_v_create_pitch_table(int* table, int pitch, int
 ***************************************/
 
 static void resize_h_pointresize(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
+  AVS_UNUSED(bits_per_pixel);
+
 	int wMod4 = width / 4 * 4;
 
 	for (int y = 0; y < height; y++) {
@@ -530,15 +543,16 @@ static void resize_h_pointresize(BYTE* dst, const BYTE* src, int dst_pitch, int 
 
 template<typename pixel_t>
 __global__ void kl_resize_h_pointresize(
-	pixel_t* dst, const pixel_t* __restrict__ src, int dst_pitch, int src_pitch,
-	const int* __restrict__ pixel_offset, const float* __restrict__ pixel_coefficient,
+	uint8_t* dst, const uint8_t* __restrict__ src, int dst_pitch, int src_pitch,
+	const int* __restrict__ pixel_offset,
 	int target_width, int target_height, float limit, int filter_size)
 {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
 	if (x < target_width && y < target_height) {
-		dst[x + y * dst_pitch] = src[pixel_offset[x] + y * src_pitch];
+		*(pixel_t*)(dst + x * sizeof(pixel_t) + y * dst_pitch) =
+			*(const pixel_t*)(src + pixel_offset[x] * sizeof(pixel_t) + y * src_pitch);
 	}
 }
 
@@ -551,9 +565,9 @@ void launch_resize_h_pointresize(
 	dim3 threads(32, 16);
 	dim3 blocks(nblocks(target_width, threads.x), nblocks(target_height, threads.y));
 
-	kl_resize_v_planar_pointresize << <blocks, threads >> > (
-		(pixel_t*)dst, (const pixel_t*)src, dst_pitch / sizeof(pixel_t), src_pitch / sizeof(pixel_t),
-		pixel_offset, pixel_coefficient, target_width, target_height, limit, filter_size);
+	kl_resize_h_pointresize<pixel_t> << <blocks, threads >> > (
+		dst, src, dst_pitch, src_pitch,
+		pixel_offset, target_width, target_height, limit, filter_size);
 }
 
 // make the resampling coefficient array mod8 or mod16 friendly for simd, padding non-used coeffs with zeros
@@ -614,8 +628,8 @@ static void resize_h_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 
 	pixel_t limit = 0;
 	if (!std::is_floating_point<pixel_t>::value) {  // floats are unscaled and uncapped
-		if (sizeof(pixel_t) == 1) limit = 255;
-		else if (sizeof(pixel_t) == 2) limit = pixel_t((1 << bits_per_pixel) - 1);
+    if constexpr(sizeof(pixel_t) == 1) limit = 255;
+    else if constexpr(sizeof(pixel_t) == 2) limit = pixel_t((1 << bits_per_pixel) - 1);
 	}
 
 	src_pitch = src_pitch / sizeof(pixel_t);
@@ -639,9 +653,9 @@ static void resize_h_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 				result += (src0 + y*src_pitch)[(begin + i)] * current_coeff[i];
 			}
 			if (!std::is_floating_point<pixel_t>::value) {  // floats are unscaled and uncapped
-				if (sizeof(pixel_t) == 1)
+        if constexpr(sizeof(pixel_t) == 1)
 					result = (result + (1 << (FPScale8bits - 1))) / (1 << FPScale8bits);
-				else if (sizeof(pixel_t) == 2)
+        else if constexpr(sizeof(pixel_t) == 2)
 					result = (result + (1 << (FPScale16bits - 1))) / (1 << FPScale16bits);
 				result = clamp(result, decltype(result)(0), decltype(result)(limit));
 			}
@@ -663,6 +677,13 @@ static __device__ void operator+=(float3& a, float3 b) {
 	a.y += b.y;
 	a.z += b.z;
 }
+// float4 += float4
+static __device__ void operator+=(float4& a, float4 b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+	a.w += b.w;
+}
 // float * uchar2
 static __device__ float2 operator*(float a, uchar2 b) {
 	float2 r = { a * b.x, a * b.y };
@@ -673,9 +694,19 @@ static __device__ float3 operator*(float a, uchar3 b) {
 	float3 r = { a * b.x, a * b.y, a * b.z };
 	return r;
 }
+// float * uchar4
+static __device__ float4 operator*(float a, uchar4 b) {
+	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
+	return r;
+}
 // float * ushort3
 static __device__ float3 operator*(float a, ushort3 b) {
 	float3 r = { a * b.x, a * b.y, a * b.z };
+	return r;
+}
+// float * ushort4
+static __device__ float4 operator*(float a, ushort4 b) {
+	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
 	return r;
 }
 // clamp(float2, int, int)
@@ -686,6 +717,11 @@ static __device__ float2 clamp(float2 a, float b, float c) {
 // clamp(float3, int, int)
 static __device__ float3 clamp(float3 a, float b, float c) {
 	float3 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c), clamp<float>(a.z, b, c) };
+	return r;
+}
+// clamp(float4, int, int)
+static __device__ float4 clamp(float4 a, float b, float c) {
+	float4 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c), clamp<float>(a.z, b, c), clamp<float>(a.w, b, c) };
 	return r;
 }
 static __device__ uchar2 to_uchar2(float2 a) {
@@ -700,8 +736,16 @@ static __device__ uchar3 to_uchar3(float3 a) {
 	uchar3 r = { (uint8_t)a.x, (uint8_t)a.y, (uint8_t)a.z };
 	return r;
 }
+static __device__ uchar4 to_uchar4(float4 a) {
+	uchar4 r = { (uint8_t)a.x, (uint8_t)a.y, (uint8_t)a.z, (uint8_t)a.w };
+	return r;
+}
 static __device__ ushort3 to_ushort3(float3 a) {
 	ushort3 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z };
+	return r;
+}
+static __device__ ushort4 to_ushort4(float4 a) {
+	ushort4 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z, (uint16_t)a.w };
 	return r;
 }
 template <typename pixel_t> struct TypeHelper { };
@@ -733,9 +777,17 @@ template <> struct TypeHelper<uchar3> {
 	typedef float3 float_t;
 	static __device__ uchar3 c(float3 a, float b, float c) { return to_uchar3(clamp(a, b, c)); };
 };
+template <> struct TypeHelper<uchar4> {
+	typedef float4 float_t;
+	static __device__ uchar4 c(float4 a, float b, float c) { return to_uchar4(clamp(a, b, c)); };
+};
 template <> struct TypeHelper<ushort3> {
 	typedef float3 float_t;
 	static __device__ ushort3 c(float3 a, float b, float c) { return to_ushort3(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<ushort4> {
+	typedef float4 float_t;
+	static __device__ ushort4 c(float4 a, float b, float c) { return to_ushort4(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<float3> {
 	typedef float3 float_t;
@@ -744,7 +796,7 @@ template <> struct TypeHelper<float3> {
 
 template<typename pixel_t>
 __global__ void kl_resize_h_planar(
-	pixel_t* dst, const pixel_t* __restrict__ src, int dst_pitch, int src_pitch,
+	uint8_t* dst, const uint8_t* __restrict__ src, int dst_pitch, int src_pitch,
 	const int* __restrict__ pixel_offset, const float* __restrict__ pixel_coefficient,
 	int target_width, int target_height, float limit, int filter_size)
 {
@@ -755,9 +807,11 @@ __global__ void kl_resize_h_planar(
 		auto result = typename TypeHelper<pixel_t>::float_t();
 		int x_offset = pixel_offset[x];
 		for (int i = 0; i < filter_size; ++i) {
-			result += pixel_coefficient[i] * src[(x_offset + i) + y * src_pitch];
+			auto sval = *(const pixel_t*)(src + (x_offset + i) * sizeof(pixel_t) + y * src_pitch);
+			result += pixel_coefficient[i] * sval;
 		}
-		dst[x + y * dst_pitch] = TypeHelper<pixel_t>::c(result, 0.0f, limit);
+		*(pixel_t*)(dst + x * sizeof(pixel_t) + y * dst_pitch) =
+			TypeHelper<pixel_t>::c(result, 0.0f, limit);
 	}
 }
 
@@ -771,7 +825,7 @@ void launch_resize_h_planar(
 	dim3 blocks(nblocks(target_width, threads.x), nblocks(target_height, threads.y));
 
 	kl_resize_h_planar<pixel_t> << <blocks, threads >> > (
-		(pixel_t*)dst, (const pixel_t*)src, dst_pitch / sizeof(pixel_t), src_pitch / sizeof(pixel_t),
+		dst, src, dst_pitch, src_pitch,
 		pixel_offset, pixel_coefficient, target_width, target_height, limit, filter_size);
 }
 
@@ -795,12 +849,12 @@ __forceinline static void process_one_pixel_h_float_mask(const float *src, int b
 	__m128 data_l_single;
 	__m128 data_h_single;
 	// 2x4 pixels
-	if (filtersizemod8 > 4) { // keep low, mask high 4 pixels
+  if constexpr(filtersizemod8 > 4) { // keep low, mask high 4 pixels
 		data_l_single = _mm_loadu_ps(reinterpret_cast<const float*>(src + begin + i * 8));
 		data_h_single = _mm_loadu_ps(reinterpret_cast<const float*>(src + begin + i * 8 + 4));
 		data_h_single = _mm_and_ps(data_h_single, mask);
 	}
-	else if (filtersizemod8 == 4) { // keep low, zero high 4 pixels
+  else if constexpr(filtersizemod8 == 4) { // keep low, zero high 4 pixels
 		data_l_single = _mm_loadu_ps(reinterpret_cast<const float*>(src + begin + i * 8));
 		data_h_single = _mm_setzero_ps();
 	}
@@ -821,6 +875,7 @@ __forceinline static void process_one_pixel_h_float_mask(const float *src, int b
 // filtersizealigned8: special: 1, 2. Generic: -1
 template<int filtersizealigned8, int filtersizemod8>
 static void resizer_h_ssse3_generic_float(BYTE* dst8, const BYTE* src8, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
+  AVS_UNUSED(bits_per_pixel);
 	const int filter_size_numOfBlk8 = (filtersizealigned8 >= 1) ? filtersizealigned8 : (AlignNumber(program->filter_size, 8) / 8);
 
 	const float *src = reinterpret_cast<const float *>(src8);
@@ -1115,6 +1170,7 @@ __forceinline static void process_chunk_v_uint16_t(const uint16_t *src2_ptr, int
 template<bool lessthan16bit, int _filter_size_numOfFullBlk8, int filtersizemod8, bool hasSSE41>
 void internal_resize_v_sse_planar_uint16_t(BYTE* dst0, const BYTE* src0, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
+  AVS_UNUSED(storage);
 	const int filter_size_numOfFullBlk8 = (_filter_size_numOfFullBlk8 >= 0) ? _filter_size_numOfFullBlk8 : (program->filter_size / 8);
 	short* current_coeff = program->pixel_coefficient;
 
@@ -1168,13 +1224,13 @@ void internal_resize_v_sse_planar_uint16_t(BYTE* dst0, const BYTE* src0, int dst
 
 			// and the rest non-div8 chunk
 			__m128i coeff01234567 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(current_coeff + filter_size_numOfFullBlk8 * 8)); // 4x (2x16bit) shorts for even/odd
-			if (filtersizemod8 >= 2)
+      if constexpr(filtersizemod8 >= 2)
 				process_chunk_v_uint16_t<lessthan16bit, 0>(src2_ptr, src_pitch, coeff01234567, result_single_lo, result_single_hi, shifttosigned);
-			if (filtersizemod8 >= 4)
+      if constexpr(filtersizemod8 >= 4)
 				process_chunk_v_uint16_t<lessthan16bit, 2>(src2_ptr, src_pitch, coeff01234567, result_single_lo, result_single_hi, shifttosigned);
-			if (filtersizemod8 >= 6)
+      if constexpr(filtersizemod8 >= 6)
 				process_chunk_v_uint16_t<lessthan16bit, 4>(src2_ptr, src_pitch, coeff01234567, result_single_lo, result_single_hi, shifttosigned);
-			if (filtersizemod8 % 2) { // remaining odd one
+      if constexpr(filtersizemod8 % 2) { // remaining odd one
 				const int index = filtersizemod8 - 1;
 				__m128i src_even = _mm_load_si128(reinterpret_cast<const __m128i*>(src2_ptr + index * src_pitch)); // 8x 16bit pixels
 				if (!lessthan16bit)
@@ -1312,6 +1368,8 @@ void resize_v_sse_planar_uint16_t(BYTE* dst0, const BYTE* src0, int dst_pitch, i
 template<int _filtersize>
 static void internal_resize_v_sse2_planar_float(BYTE* dst0, const BYTE* src0, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
+  AVS_UNUSED(bits_per_pixel);
+  AVS_UNUSED(storage);
 	// 1..8: special case for compiler optimization
 	const int filter_size = _filtersize >= 1 ? _filtersize : program->filter_size;
 	float* current_coeff_float = program->pixel_coefficient_float;
@@ -1445,6 +1503,8 @@ void resize_v_sse2_planar_float(BYTE* dst0, const BYTE* src0, int dst_pitch, int
 //-------- uint8_t Horizontal (8bit)
 
 static void resizer_h_ssse3_generic(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
+  AVS_UNUSED(bits_per_pixel);
+
 	int filter_size = AlignNumber(program->filter_size, 8) / 8;
 	__m128i zero = _mm_setzero_si128();
 
@@ -1523,7 +1583,7 @@ static void resizer_h_ssse3_generic(BYTE* dst, const BYTE* src, int dst_pitch, i
 }
 
 static void resizer_h_ssse3_8(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
-	int filter_size = AlignNumber(program->filter_size, 8) / 8;
+  AVS_UNUSED(bits_per_pixel);
 
 	__m128i zero = _mm_setzero_si128();
 
@@ -1777,25 +1837,33 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 	// CUDA
 	dev_program_luma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
 		new DeviceLocalData<int>(resampling_program_luma->pixel_offset, target_width, env));
-	dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-		new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
-			resampling_program_luma->filter_size, env));
-
+	if (resampling_program_luma->pixel_coefficient_float) {
+		dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
+			new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
+				resampling_program_luma->filter_size, env));
+	}
 	if (resampling_program_chroma) {
 		dev_program_chroma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
-			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset, target_width, env));
-		dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-			new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
-				resampling_program_chroma->filter_size, env));
+			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset,
+				target_width >> vi.GetPlaneWidthSubsampling(PLANAR_U), env));
+		if (resampling_program_chroma->pixel_coefficient_float) {
+			dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
+				new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
+					resampling_program_chroma->filter_size, env));
+		}
 	}
 
 	if (resampling_program_luma->filter_size == 1) {
 		if (vi.IsRGB() && !isRGBPfamily) {
 			// packed RGB
-			if (pixelsize == 1)
+			if (vi.IsRGB24())
 				dev_resampler = launch_resize_h_pointresize<uchar3>;
-			else // if (pixelsize == 2)
+			else if (vi.IsRGB32())
+				dev_resampler = launch_resize_h_pointresize<uchar4>;
+			else if (vi.IsRGB48())
 				dev_resampler = launch_resize_h_pointresize<ushort3>;
+			else if (vi.IsRGB64())
+				dev_resampler = launch_resize_h_pointresize<ushort4>;
 		}
 		else if (vi.IsYUY2()) {
 			// YUY2
@@ -1815,10 +1883,14 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 	else {
 		if (vi.IsRGB() && !isRGBPfamily) {
 			// packed RGB
-			if (pixelsize == 1)
+			if (vi.IsRGB24())
 				dev_resampler = launch_resize_h_planar<uchar3>;
-			else // if (pixelsize == 2)
+			else if (vi.IsRGB32())
+				dev_resampler = launch_resize_h_planar<uchar4>;
+			else if (vi.IsRGB48())
 				dev_resampler = launch_resize_h_planar<ushort3>;
+			else if (vi.IsRGB64())
+				dev_resampler = launch_resize_h_planar<ushort4>;
 		}
 		else if (vi.IsYUY2()) {
 			// YUY2
@@ -1838,6 +1910,15 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 
 	// Change target video info size
 	vi.width = target_width;
+}
+
+int __stdcall FilteredResizeH::SetCacheHints(int cachehints, int frame_range)
+{
+	if (cachehints == CACHE_GET_DEV_TYPE) {
+		return GetDeviceTypes(child) &
+			(DEV_TYPE_CPU | DEV_TYPE_CUDA);
+	}
+	return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
 }
 
 PVideoFrame __stdcall FilteredResizeH::GetFrame(int n, IScriptEnvironment* env_)
@@ -1860,9 +1941,11 @@ PVideoFrame __stdcall FilteredResizeH::GetFrame(int n, IScriptEnvironment* env_)
 			const int plane = planes[p];
 			const auto program = (p > 0 && !vi.IsRGB()) ? resampling_program_chroma : resampling_program_luma;
 			const auto dev_program = (p > 0 && !vi.IsRGB()) ? &dev_program_chroma : &dev_program_luma;
+			const auto pixel_offset = dev_program->pixel_offset->GetData(env);
+			const auto pixel_coefficient = dev_program->pixel_coefficient ? dev_program->pixel_coefficient->GetData(env) : nullptr;
 			dev_resampler(dst->GetWritePtr(plane), src->GetReadPtr(plane), dst->GetPitch(plane), src->GetPitch(plane),
-				dev_program->pixel_offset->GetData(env), dev_program->pixel_coefficient->GetData(env),
-				vi.width, vi.height, (float)limit, program->filter_size);
+				pixel_offset, pixel_coefficient,
+				dst->GetRowSize(plane) / vi.BytesFromPixels(1), dst->GetHeight(plane), (float)limit, program->filter_size);
 			DEBUG_SYNC;
 		}
 	}
@@ -1963,6 +2046,8 @@ PVideoFrame __stdcall FilteredResizeH::GetFrame(int n, IScriptEnvironment* env_)
 
 ResamplerH FilteredResizeH::GetResampler(int CPU, bool aligned, int pixelsize, int bits_per_pixel, ResamplingProgram* program, IScriptEnvironment2* env)
 {
+  AVS_UNUSED(aligned);
+
 	if (pixelsize == 1)
 	{
 		if (CPU & CPUF_SSSE3) {
@@ -2006,11 +2091,9 @@ ResamplerH FilteredResizeH::GetResampler(int CPU, bool aligned, int pixelsize, i
 				else
 					return resizer_h_sse34_generic_uint16_t<false, false>;
 			}
-		}
-		else
+    } else
 			return resize_h_c_planar<uint16_t>;
-	}
-	else { //if (pixelsize == 4)
+  } else { //if (pixelsize == 4)
 
 		if (CPU & CPUF_SSSE3) {
 			resize_h_prepare_coeff_8or16(program, env, ALIGN_FLOAT_RESIZER_COEFF_SIZE); // alignment of 8 is enough for AVX2 float as well
@@ -2159,16 +2242,20 @@ FilteredResizeV::FilteredResizeV(PClip _child, double subrange_top, double subra
 	// CUDA
 	dev_program_luma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
 		new DeviceLocalData<int>(resampling_program_luma->pixel_offset, target_height, env));
-	dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-		new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
-			resampling_program_luma->filter_size, env));
-
+	if (resampling_program_luma->pixel_coefficient_float) {
+		dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
+			new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
+				resampling_program_luma->filter_size, env));
+	}
 	if (resampling_program_chroma) {
 		dev_program_chroma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
-			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset, target_height, env));
-		dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-			new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
-				resampling_program_chroma->filter_size, env));
+			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset, 
+				target_height >> vi.GetPlaneHeightSubsampling(PLANAR_U), env));
+		if (resampling_program_chroma->pixel_coefficient_float) {
+			dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
+				new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
+					resampling_program_chroma->filter_size, env));
+		}
 	}
 
 	if (resampling_program_luma->filter_size == 1) {
@@ -2190,6 +2277,15 @@ FilteredResizeV::FilteredResizeV(PClip _child, double subrange_top, double subra
 
 	// Change target video info size
 	vi.height = target_height;
+}
+
+int __stdcall FilteredResizeV::SetCacheHints(int cachehints, int frame_range)
+{
+	if (cachehints == CACHE_GET_DEV_TYPE) {
+		return GetDeviceTypes(child) &
+			(DEV_TYPE_CPU | DEV_TYPE_CUDA);
+	}
+	return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
 }
 
 PVideoFrame __stdcall FilteredResizeV::GetFrame(int n, IScriptEnvironment* env_)
@@ -2214,9 +2310,10 @@ PVideoFrame __stdcall FilteredResizeV::GetFrame(int n, IScriptEnvironment* env_)
 			const int plane = planes[p];
 			const auto program = (p > 0 && !isRGBPfamily) ? resampling_program_chroma : resampling_program_luma;
 			const auto dev_program = (p > 0 && !isRGBPfamily) ? &dev_program_chroma : &dev_program_luma;
+			const auto pixel_offset = dev_program->pixel_offset->GetData(env);
+			const auto pixel_coefficient = dev_program->pixel_coefficient ? dev_program->pixel_coefficient->GetData(env) : nullptr;
 			dev_resampler(dst->GetWritePtr(plane), src->GetReadPtr(plane), dst->GetPitch(plane), src->GetPitch(plane),
-				dev_program->pixel_offset->GetData(env), dev_program->pixel_coefficient->GetData(env),
-				dst->GetRowSize(plane) / pixelsize, vi.height, (float)limit, program->filter_size);
+				pixel_offset, pixel_coefficient, dst->GetRowSize(plane) / pixelsize, dst->GetHeight(plane), (float)limit, program->filter_size);
 			DEBUG_SYNC;
 		}
 	}
@@ -2297,6 +2394,7 @@ PVideoFrame __stdcall FilteredResizeV::GetFrame(int n, IScriptEnvironment* env_)
 
 ResamplerV FilteredResizeV::GetResampler(int CPU, bool aligned, int pixelsize, int bits_per_pixel, void*& storage, ResamplingProgram* program)
 {
+  AVS_UNUSED(storage);
 	if (program->filter_size == 1) {
 		// Fast pointresize
 		switch (pixelsize) // AVS16
@@ -2380,8 +2478,7 @@ ResamplerV FilteredResizeV::GetResampler(int CPU, bool aligned, int pixelsize, i
 			}
 			else if (aligned && (CPU & CPUF_SSE2)) {
 				return resize_v_sse2_planar_float;
-			}
-			else {
+      } else {
 				return resize_v_c_planar<float>;
 			}
 		}

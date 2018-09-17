@@ -763,7 +763,7 @@ TEST_F(GenericTest, ConvBitsTo8)
 	// CUDA版はshifted scaleしかサポートしていない
 	// オプションなしだとRGBがfull scale変換されるので値が合わなくなるので注意
 
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
 	int bits[] = { 8, 16, 10, 12, 14, 32 };
 	for (int i = 0; i < (int)formats.size(); ++i) {
 		int nbits = IsRGB(formats[i]) ? 2 : 6;
@@ -847,7 +847,7 @@ TEST_F(GenericTest, ConvBitsTo14Dither)
 
 TEST_F(GenericTest, ConvBitsTo16)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
 	int bits[] = { 8, 16, 10, 12, 14, 32 };
 	for (int i = 0; i < (int)formats.size(); ++i) {
 		int nbits = IsRGB(formats[i]) ? 2 : 6;
@@ -863,4 +863,11 @@ TEST_F(GenericTest, ConvBitsTo32)
 {
 	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
 	Test("ConvertBits(32,dither=-1)", formats, ConvBits32Gen());
+}
+
+TEST_F(GenericTest, Resize_PointResize)
+{
+	//std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	std::vector<FORMAT> formats = { FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("PointResize(600,1080)", formats, ConvBits32Gen());
 }

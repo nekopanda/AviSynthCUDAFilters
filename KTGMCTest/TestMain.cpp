@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-  ::testing::GTEST_FLAG(filter) = "*.ConvBitsTo32*";
+  ::testing::GTEST_FLAG(filter) = "*.Resize_PointResize";
   ::testing::InitGoogleTest(&argc, argv);
 
   //_crtBreakAlloc = 7978;

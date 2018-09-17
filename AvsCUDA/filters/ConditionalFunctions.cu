@@ -946,14 +946,14 @@ public:
              // See similar in colors, ColorYUV analyze
         const bool chroma = (plane == PLANAR_U) || (plane == PLANAR_V);
         if (chroma) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-          const float shift = 32768.0f;
-#else
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
           const float shift = 0.0f;
+#else
+      const float shift = 32768.0f;
 #endif
           for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-              // -0.5..0.5 to 0..65535 when FLOAT_CHROMA_IS_ZERO_CENTERED
+          // -0.5..0.5 (0..1.0 when FLOAT_CHROMA_IS_HALF_CENTERED) to 0..65535
               const float pixel = reinterpret_cast<const float *>(srcp)[x];
               accum_buf[clamp((int)(65535.0f*pixel + shift + 0.5f), 0, 65535)]++;
             }
@@ -1035,10 +1035,10 @@ public:
     if (pixelsize == 4) {
       const bool chroma = (plane == PLANAR_U) || (plane == PLANAR_V);
       if (chroma && (mode == MIN && mode == MAX)) {
-#ifdef FLOAT_CHROMA_IS_ZERO_CENTERED
-        const float shift = 32768.0f;
-#else
+#ifdef FLOAT_CHROMA_IS_HALF_CENTERED
         const float shift = 0.0f;
+#else
+      const float shift = 32768.0f;
 #endif
         return AVSValue((double)(retval - shift) / (real_buffersize - 1)); // convert back to float, /65535
       }

@@ -70,9 +70,7 @@ public:
   virtual ~FilteredResizeH(void);
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
-  int __stdcall SetCacheHints(int cachehints, int frame_range) override {
-    return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
-  }
+	int __stdcall SetCacheHints(int cachehints, int frame_range);
 
   static ResamplerH GetResampler(int CPU, bool aligned, int pixelsize, int bits_per_pixel, ResamplingProgram* program, IScriptEnvironment2* env);
 
@@ -121,9 +119,7 @@ public:
   virtual ~FilteredResizeV(void);
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
-  int __stdcall SetCacheHints(int cachehints, int frame_range) override {
-    return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
-  }
+	int __stdcall SetCacheHints(int cachehints, int frame_range);
 
   static ResamplerV GetResampler(int CPU, bool aligned, int pixelsize, int bits_per_pixel, void*& storage, ResamplingProgram* program);
 
