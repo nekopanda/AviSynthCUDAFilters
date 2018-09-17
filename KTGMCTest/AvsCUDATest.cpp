@@ -865,9 +865,106 @@ TEST_F(GenericTest, ConvBitsTo32)
 	Test("ConvertBits(32,dither=-1)", formats, ConvBits32Gen());
 }
 
-TEST_F(GenericTest, Resize_PointResize)
+struct PointResizeGen : ScriptGen
 {
-	//std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	std::vector<FORMAT> formats = { FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("PointResize(600,1080)", formats, ConvBits32Gen());
+	virtual double Thresh(
+		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+		return 0;
+	}
+};
+
+TEST_F(GenericTest, Resize_Point)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("PointResize(600,800)", formats, PointResizeGen());
+}
+
+struct Resize1DGen : ScriptGen
+{
+	virtual double Thresh(
+		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+		// ®”‰‰ŽZƒƒWƒbƒN‚ÍŒë·‚ª‚ ‚é‚Á‚Û‚¢
+		if (bits >= 12 && bits <= 16) return 1 << (bits - 11);
+		if (bits == 32) return 0.25;
+		return 1;
+	}
+};
+struct Resize2DGen : Resize1DGen
+{
+	virtual double Thresh(
+		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+		return Resize1DGen::Thresh(out, fname, is_cuda, bits) * 2;
+	}
+};
+
+TEST_F(GenericTest, Resize_BlackmanV)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("BlackmanResize(1920,800)", formats, Resize1DGen());
+}
+
+TEST_F(GenericTest, Resize_BlackmanH)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("BlackmanResize(600,1080)", formats, Resize1DGen());
+}
+
+TEST_F(GenericTest, Resize_BlackmanS)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("BlackmanResize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_BlackmanL)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("BlackmanResize(2400,1600)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Bilinear)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("BilinearResize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Bicubic)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("BicubicResize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Lanczos)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("LanczosResize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Spline16)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("Spline16Resize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Spline36)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("Spline36Resize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Spline64)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("Spline64Resize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Gauss)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("GaussResize(600,800)", formats, Resize2DGen());
+}
+
+TEST_F(GenericTest, Resize_Sinc)
+{
+	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+	Test("SincResize(600,800)", formats, Resize2DGen());
 }

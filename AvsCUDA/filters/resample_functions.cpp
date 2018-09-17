@@ -300,15 +300,13 @@ ResamplingProgram* ResamplingFunction::GetResamplingProgram(int source_size, dou
     double value = 0.0;
 
     // Now we generate real coefficient
-    if (bits_per_pixel == 32) {
-      // float
-      for (int k = 0; k < fir_filter_size; ++k) {
-        double new_value = value + f((start_pos + k - ok_pos) * filter_step) / total;
-        program->pixel_coefficient_float[i*fir_filter_size + k] = float(new_value - value); // no scaling for float
-        value = new_value;
-      }
+    // float
+    for (int k = 0; k < fir_filter_size; ++k) {
+      double new_value = value + f((start_pos + k - ok_pos) * filter_step) / total;
+      program->pixel_coefficient_float[i*fir_filter_size + k] = float(new_value - value); // no scaling for float
+      value = new_value;
     }
-    else {
+		if (bits_per_pixel != 32) {
       for (int k = 0; k < fir_filter_size; ++k) {
         double new_value = value + f((start_pos + k - ok_pos) * filter_step) / total;
         // FIXME: is it correct to round negative values upwards?

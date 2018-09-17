@@ -88,10 +88,9 @@ struct ResamplingProgram {
     filter_size_alignment = 1; // just info. nothing special, for C. resize_h_prepare_coeff_8or16 can override and realign the coefficients for SIMD processing
     if (bits_per_pixel < 32)
       pixel_coefficient = (short*)Env->Allocate(sizeof(short) * target_size * filter_size, 64, AVS_NORMAL_ALLOC);
-    else
-      pixel_coefficient_float = (float*)Env->Allocate(sizeof(float) * target_size * filter_size, 64, AVS_NORMAL_ALLOC);
+    pixel_coefficient_float = (float*)Env->Allocate(sizeof(float) * target_size * filter_size, 64, AVS_NORMAL_ALLOC);
 
-    if (!pixel_offset || (!pixel_coefficient && bits_per_pixel < 32) || (!pixel_coefficient_float && bits_per_pixel == 32)) {
+    if (!pixel_offset || (!pixel_coefficient && bits_per_pixel < 32) || !pixel_coefficient_float) {
       Env->Free(pixel_offset);
       Env->Free(pixel_coefficient);
       Env->Free(pixel_coefficient_float);

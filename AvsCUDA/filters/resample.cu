@@ -200,12 +200,17 @@ __global__ void kl_resize_v_planar(
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
 	if (x < target_width && y < target_height) {
-		float result = 0;
+		float result = (sizeof(pixel_t) == 4) ? 0.0f : 0.5f;
 		int y_offset = pixel_offset[y];
 		for (int i = 0; i < filter_size; ++i) {
-			result += pixel_coefficient[i] * src[x + (y_offset + i) * src_pitch];
+			result += pixel_coefficient[y * filter_size + i] * src[x + (y_offset + i) * src_pitch];
 		}
-		dst[x + y * dst_pitch] = (pixel_t)clamp<float>(result, 0, limit);
+		if (sizeof(pixel_t) == 4) { // float
+			dst[x + y * dst_pitch] = result;
+		}
+		else {
+			dst[x + y * dst_pitch] = (pixel_t)clamp<float>(result, 0, limit);
+		}
 	}
 }
 
@@ -748,49 +753,72 @@ static __device__ ushort4 to_ushort4(float4 a) {
 	ushort4 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z, (uint16_t)a.w };
 	return r;
 }
+static __device__ float2 make_float2(float v) {
+	float2 r = { v, v };
+	return r;
+}
+static __device__ float3 make_float3(float v) {
+	float3 r = { v, v, v };
+	return r;
+}
+static __device__ float4 make_float4(float v) {
+	float4 r = { v, v, v, v };
+	return r;
+}
 template <typename pixel_t> struct TypeHelper { };
 template <> struct TypeHelper<uint8_t> {
 	typedef float float_t;
+	static __device__ float_t init() { return 0.5f; }
 	static __device__ uint8_t c(float a, float b, float c) { return (uint8_t)clamp<float>(a, b, c); };
 };
 template <> struct TypeHelper<uint16_t> {
 	typedef float float_t;
+	static __device__ float_t init() { return 0.5f; }
 	static __device__ uint16_t c(float a, float b, float c) { return (uint16_t)clamp<float>(a, b, c); };
 };
 template <> struct TypeHelper<float> {
 	typedef float float_t;
+	static __device__ float_t init() { return 0.0f; }
 	static __device__ float c(float a, float b, float c) { return a; };
 };
 template <> struct TypeHelper<uchar2> {
 	typedef float2 float_t;
+	static __device__ float_t init() { return make_float2(0.5f); }
 	static __device__ uchar2 c(float2 a, float b, float c) { return to_uchar2(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<ushort2> {
 	typedef float2 float_t;
+	static __device__ float_t init() { return make_float2(0.5f); }
 	static __device__ ushort2 c(float2 a, float b, float c) { return to_ushort2(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<float2> {
 	typedef float2 float_t;
+	static __device__ float_t init() { return float_t(); }
 	static __device__ float2 c(float2 a, float b, float c) { return a; };
 };
 template <> struct TypeHelper<uchar3> {
 	typedef float3 float_t;
+	static __device__ float_t init() { return make_float3(0.5f); }
 	static __device__ uchar3 c(float3 a, float b, float c) { return to_uchar3(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<uchar4> {
 	typedef float4 float_t;
+	static __device__ float_t init() { return make_float4(0.5f); }
 	static __device__ uchar4 c(float4 a, float b, float c) { return to_uchar4(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<ushort3> {
 	typedef float3 float_t;
+	static __device__ float_t init() { return make_float3(0.5f); }
 	static __device__ ushort3 c(float3 a, float b, float c) { return to_ushort3(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<ushort4> {
 	typedef float4 float_t;
+	static __device__ float_t init() { return make_float4(0.5f); }
 	static __device__ ushort4 c(float4 a, float b, float c) { return to_ushort4(clamp(a, b, c)); };
 };
 template <> struct TypeHelper<float3> {
 	typedef float3 float_t;
+	static __device__ float_t init() { return float_t(); }
 	static __device__ float3 c(float3 a, float b, float c) { return a; };
 };
 
@@ -804,11 +832,16 @@ __global__ void kl_resize_h_planar(
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
 	if (x < target_width && y < target_height) {
-		auto result = typename TypeHelper<pixel_t>::float_t();
+		auto result = TypeHelper<pixel_t>::init();
 		int x_offset = pixel_offset[x];
 		for (int i = 0; i < filter_size; ++i) {
 			auto sval = *(const pixel_t*)(src + (x_offset + i) * sizeof(pixel_t) + y * src_pitch);
-			result += pixel_coefficient[i] * sval;
+			result += pixel_coefficient[x * filter_size + i] * sval;
+#if 0
+			if (sizeof(pixel_t) == 2 && x == 127 && y == 78) {
+				printf("%d * %f -> %f\n", sval, pixel_coefficient[x * filter_size + i], result);
+			}
+#endif
 		}
 		*(pixel_t*)(dst + x * sizeof(pixel_t) + y * dst_pitch) =
 			TypeHelper<pixel_t>::c(result, 0.0f, limit);
@@ -1734,6 +1767,26 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 			env2);
 	}
 
+	// CUDA (copy pixel_coefficient before modificatioin)
+	dev_program_luma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
+		new DeviceLocalData<int>(resampling_program_luma->pixel_offset, target_width, env));
+	if (resampling_program_luma->pixel_coefficient_float) {
+		dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
+			new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
+				resampling_program_luma->filter_size * target_width, env));
+	}
+	if (resampling_program_chroma) {
+		int chroma_target_width = target_width >> vi.GetPlaneWidthSubsampling(PLANAR_U);
+		dev_program_chroma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
+			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset,
+				chroma_target_width, env));
+		if (resampling_program_chroma->pixel_coefficient_float) {
+			dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
+				new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
+					resampling_program_chroma->filter_size * chroma_target_width, env));
+		}
+	}
+
 	// r2592+: no target_width mod4 check, (old avs needed for unaligned frames?)
 	fast_resize = (env->GetCPUFlags() & CPUF_SSSE3) == CPUF_SSSE3 && vi.IsPlanar();
 
@@ -1835,24 +1888,6 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 	}
 
 	// CUDA
-	dev_program_luma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
-		new DeviceLocalData<int>(resampling_program_luma->pixel_offset, target_width, env));
-	if (resampling_program_luma->pixel_coefficient_float) {
-		dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-			new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
-				resampling_program_luma->filter_size, env));
-	}
-	if (resampling_program_chroma) {
-		dev_program_chroma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
-			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset,
-				target_width >> vi.GetPlaneWidthSubsampling(PLANAR_U), env));
-		if (resampling_program_chroma->pixel_coefficient_float) {
-			dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-				new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
-					resampling_program_chroma->filter_size, env));
-		}
-	}
-
 	if (resampling_program_luma->filter_size == 1) {
 		if (vi.IsRGB() && !isRGBPfamily) {
 			// packed RGB
@@ -2245,16 +2280,17 @@ FilteredResizeV::FilteredResizeV(PClip _child, double subrange_top, double subra
 	if (resampling_program_luma->pixel_coefficient_float) {
 		dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
 			new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
-				resampling_program_luma->filter_size, env));
+				resampling_program_luma->filter_size * target_height, env));
 	}
 	if (resampling_program_chroma) {
+		int chroma_target_height = target_height >> vi.GetPlaneHeightSubsampling(PLANAR_U);
 		dev_program_chroma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
 			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset, 
-				target_height >> vi.GetPlaneHeightSubsampling(PLANAR_U), env));
+				chroma_target_height, env));
 		if (resampling_program_chroma->pixel_coefficient_float) {
 			dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
 				new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
-					resampling_program_chroma->filter_size, env));
+					resampling_program_chroma->filter_size * chroma_target_height, env));
 		}
 	}
 
