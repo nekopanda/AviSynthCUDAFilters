@@ -107,7 +107,7 @@ TEST_F(MiscTest, GenericScriptTest)
 
 		std::ofstream out(scriptpath);
 
-		out << "Import(\"G:\\tmp\\amt10182764\\test.avs\")" << std::endl;
+		out << "Import(\"T:\\sandbox\\t28\\AvsTest\\53_resize.avs\")" << std::endl;
 
 		out.close();
 

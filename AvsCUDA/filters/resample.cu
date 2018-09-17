@@ -86,6 +86,168 @@ __forceinline __m128 simd_loadps_unaligned(const float* adr)
 }
 
 
+// cuda vector primitives
+// float2 += float2
+static __device__ void operator+=(float2& a, float2 b) {
+	a.x += b.x;
+	a.y += b.y;
+}
+// float3 += float3
+static __device__ void operator+=(float3& a, float3 b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+}
+// float4 += float4
+static __device__ void operator+=(float4& a, float4 b) {
+	a.x += b.x;
+	a.y += b.y;
+	a.z += b.z;
+	a.w += b.w;
+}
+// float * uchar2
+static __device__ float2 operator*(float a, uchar2 b) {
+	float2 r = { a * b.x, a * b.y };
+	return r;
+}
+// float * uchar3
+static __device__ float3 operator*(float a, uchar3 b) {
+	float3 r = { a * b.x, a * b.y, a * b.z };
+	return r;
+}
+// float * uchar4
+static __device__ float4 operator*(float a, uchar4 b) {
+	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
+	return r;
+}
+// float * ushort3
+static __device__ float3 operator*(float a, ushort3 b) {
+	float3 r = { a * b.x, a * b.y, a * b.z };
+	return r;
+}
+// float * ushort4
+static __device__ float4 operator*(float a, ushort4 b) {
+	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
+	return r;
+}
+// float * float4
+static __device__ float4 operator*(float a, float4 b) {
+	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
+	return r;
+}
+// clamp(float2, int, int)
+static __device__ float2 clamp(float2 a, float b, float c) {
+	float2 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c) };
+	return r;
+}
+// clamp(float3, int, int)
+static __device__ float3 clamp(float3 a, float b, float c) {
+	float3 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c), clamp<float>(a.z, b, c) };
+	return r;
+}
+// clamp(float4, int, int)
+static __device__ float4 clamp(float4 a, float b, float c) {
+	float4 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c), clamp<float>(a.z, b, c), clamp<float>(a.w, b, c) };
+	return r;
+}
+static __device__ uchar2 to_uchar2(float2 a) {
+	uchar2 r = { (uint8_t)a.x, (uint8_t)a.y };
+	return r;
+}
+static __device__ ushort2 to_ushort2(float2 a) {
+	ushort2 r = { (uint16_t)a.x, (uint16_t)a.y };
+	return r;
+}
+static __device__ uchar3 to_uchar3(float3 a) {
+	uchar3 r = { (uint8_t)a.x, (uint8_t)a.y, (uint8_t)a.z };
+	return r;
+}
+static __device__ uchar4 to_uchar4(float4 a) {
+	uchar4 r = { (uint8_t)a.x, (uint8_t)a.y, (uint8_t)a.z, (uint8_t)a.w };
+	return r;
+}
+static __device__ ushort3 to_ushort3(float3 a) {
+	ushort3 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z };
+	return r;
+}
+static __device__ ushort4 to_ushort4(float4 a) {
+	ushort4 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z, (uint16_t)a.w };
+	return r;
+}
+static __device__ float2 make_float2(float v) {
+	float2 r = { v, v };
+	return r;
+}
+static __device__ float3 make_float3(float v) {
+	float3 r = { v, v, v };
+	return r;
+}
+static __device__ float4 make_float4(float v) {
+	float4 r = { v, v, v, v };
+	return r;
+}
+template <typename pixel_t> struct TypeHelper { };
+template <> struct TypeHelper<uint8_t> {
+	typedef float float_t;
+	static __device__ float_t init() { return 0.5f; }
+	static __device__ uint8_t c(float a, float b, float c) { return (uint8_t)clamp<float>(a, b, c); };
+};
+template <> struct TypeHelper<uint16_t> {
+	typedef float float_t;
+	static __device__ float_t init() { return 0.5f; }
+	static __device__ uint16_t c(float a, float b, float c) { return (uint16_t)clamp<float>(a, b, c); };
+};
+template <> struct TypeHelper<float> {
+	typedef float float_t;
+	static __device__ float_t init() { return 0.0f; }
+	static __device__ float c(float a, float b, float c) { return a; };
+};
+template <> struct TypeHelper<uchar2> {
+	typedef float2 float_t;
+	static __device__ float_t init() { return make_float2(0.5f); }
+	static __device__ uchar2 c(float2 a, float b, float c) { return to_uchar2(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<ushort2> {
+	typedef float2 float_t;
+	static __device__ float_t init() { return make_float2(0.5f); }
+	static __device__ ushort2 c(float2 a, float b, float c) { return to_ushort2(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<float2> {
+	typedef float2 float_t;
+	static __device__ float_t init() { return float_t(); }
+	static __device__ float2 c(float2 a, float b, float c) { return a; };
+};
+template <> struct TypeHelper<uchar3> {
+	typedef float3 float_t;
+	static __device__ float_t init() { return make_float3(0.5f); }
+	static __device__ uchar3 c(float3 a, float b, float c) { return to_uchar3(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<uchar4> {
+	typedef float4 float_t;
+	static __device__ float_t init() { return make_float4(0.5f); }
+	static __device__ uchar4 c(float4 a, float b, float c) { return to_uchar4(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<ushort3> {
+	typedef float3 float_t;
+	static __device__ float_t init() { return make_float3(0.5f); }
+	static __device__ ushort3 c(float3 a, float b, float c) { return to_ushort3(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<ushort4> {
+	typedef float4 float_t;
+	static __device__ float_t init() { return make_float4(0.5f); }
+	static __device__ ushort4 c(float4 a, float b, float c) { return to_ushort4(clamp(a, b, c)); };
+};
+template <> struct TypeHelper<float3> {
+	typedef float3 float_t;
+	static __device__ float_t init() { return float_t(); }
+	static __device__ float3 c(float3 a, float b, float c) { return a; };
+};
+template <> struct TypeHelper<float4> {
+	typedef float4 float_t;
+	static __device__ float_t init() { return float_t(); }
+	static __device__ float4 c(float4 a, float b, float c) { return a; };
+};
+
 /***************************************
 ***** Vertical Resizer Assembly *******
 ***************************************/
@@ -199,18 +361,23 @@ __global__ void kl_resize_v_planar(
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
+	extern __shared__ float s_coeff_buf[];
+	float* s_coeff = s_coeff_buf + threadIdx.y * filter_size;
+
+	if (y < target_height) {
+		for (int x = threadIdx.x; x < filter_size; x += blockDim.x) {
+			s_coeff[x] = pixel_coefficient[y * filter_size + x];
+		}
+	}
+	__syncthreads();
+
 	if (x < target_width && y < target_height) {
-		float result = (sizeof(pixel_t) == 4) ? 0.0f : 0.5f;
+		float4 result = TypeHelper<pixel_t>::init();
 		int y_offset = pixel_offset[y];
 		for (int i = 0; i < filter_size; ++i) {
-			result += pixel_coefficient[y * filter_size + i] * src[x + (y_offset + i) * src_pitch];
+			result += s_coeff[i] * src[x + (y_offset + i) * src_pitch];
 		}
-		if (sizeof(pixel_t) == 4) { // float
-			dst[x + y * dst_pitch] = result;
-		}
-		else {
-			dst[x + y * dst_pitch] = (pixel_t)clamp<float>(result, 0, limit);
-		}
+		dst[x + y * dst_pitch] = TypeHelper<pixel_t>::c(result, 0, limit);
 	}
 }
 
@@ -220,12 +387,14 @@ void launch_resize_v_planar(
 	const int* pixel_offset, const float* pixel_coefficient,
 	int target_width, int target_height, float limit, int filter_size)
 {
-	dim3 threads(32, 16);
-	dim3 blocks(nblocks(target_width, threads.x), nblocks(target_height, threads.y));
+	int vector_width = (target_width + 3) >> 2;
 
-	kl_resize_v_planar << <blocks, threads >> > (
+	dim3 threads(32, 16);
+	dim3 blocks(nblocks(vector_width, threads.x), nblocks(target_height, threads.y));
+
+	kl_resize_v_planar << <blocks, threads, filter_size * 16 * sizeof(float)>> > (
 		(pixel_t*)dst, (const pixel_t*)src, dst_pitch / sizeof(pixel_t), src_pitch / sizeof(pixel_t),
-		pixel_offset, pixel_coefficient, target_width, target_height, limit, filter_size);
+		pixel_offset, pixel_coefficient, vector_width, target_height, limit, filter_size);
 }
 
 #ifdef X86_32
@@ -670,158 +839,6 @@ static void resize_h_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 	}
 }
 
-// vector primitives
-// float2 += float2
-static __device__ void operator+=(float2& a, float2 b) {
-	a.x += b.x;
-	a.y += b.y;
-}
-// float3 += float3
-static __device__ void operator+=(float3& a, float3 b) {
-	a.x += b.x;
-	a.y += b.y;
-	a.z += b.z;
-}
-// float4 += float4
-static __device__ void operator+=(float4& a, float4 b) {
-	a.x += b.x;
-	a.y += b.y;
-	a.z += b.z;
-	a.w += b.w;
-}
-// float * uchar2
-static __device__ float2 operator*(float a, uchar2 b) {
-	float2 r = { a * b.x, a * b.y };
-	return r;
-}
-// float * uchar3
-static __device__ float3 operator*(float a, uchar3 b) {
-	float3 r = { a * b.x, a * b.y, a * b.z };
-	return r;
-}
-// float * uchar4
-static __device__ float4 operator*(float a, uchar4 b) {
-	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
-	return r;
-}
-// float * ushort3
-static __device__ float3 operator*(float a, ushort3 b) {
-	float3 r = { a * b.x, a * b.y, a * b.z };
-	return r;
-}
-// float * ushort4
-static __device__ float4 operator*(float a, ushort4 b) {
-	float4 r = { a * b.x, a * b.y, a * b.z, a * b.w };
-	return r;
-}
-// clamp(float2, int, int)
-static __device__ float2 clamp(float2 a, float b, float c) {
-	float2 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c) };
-	return r;
-}
-// clamp(float3, int, int)
-static __device__ float3 clamp(float3 a, float b, float c) {
-	float3 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c), clamp<float>(a.z, b, c) };
-	return r;
-}
-// clamp(float4, int, int)
-static __device__ float4 clamp(float4 a, float b, float c) {
-	float4 r = { clamp<float>(a.x, b, c), clamp<float>(a.y, b, c), clamp<float>(a.z, b, c), clamp<float>(a.w, b, c) };
-	return r;
-}
-static __device__ uchar2 to_uchar2(float2 a) {
-	uchar2 r = { (uint8_t)a.x, (uint8_t)a.y };
-	return r;
-}
-static __device__ ushort2 to_ushort2(float2 a) {
-	ushort2 r = { (uint16_t)a.x, (uint16_t)a.y };
-	return r;
-}
-static __device__ uchar3 to_uchar3(float3 a) {
-	uchar3 r = { (uint8_t)a.x, (uint8_t)a.y, (uint8_t)a.z };
-	return r;
-}
-static __device__ uchar4 to_uchar4(float4 a) {
-	uchar4 r = { (uint8_t)a.x, (uint8_t)a.y, (uint8_t)a.z, (uint8_t)a.w };
-	return r;
-}
-static __device__ ushort3 to_ushort3(float3 a) {
-	ushort3 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z };
-	return r;
-}
-static __device__ ushort4 to_ushort4(float4 a) {
-	ushort4 r = { (uint16_t)a.x, (uint16_t)a.y, (uint16_t)a.z, (uint16_t)a.w };
-	return r;
-}
-static __device__ float2 make_float2(float v) {
-	float2 r = { v, v };
-	return r;
-}
-static __device__ float3 make_float3(float v) {
-	float3 r = { v, v, v };
-	return r;
-}
-static __device__ float4 make_float4(float v) {
-	float4 r = { v, v, v, v };
-	return r;
-}
-template <typename pixel_t> struct TypeHelper { };
-template <> struct TypeHelper<uint8_t> {
-	typedef float float_t;
-	static __device__ float_t init() { return 0.5f; }
-	static __device__ uint8_t c(float a, float b, float c) { return (uint8_t)clamp<float>(a, b, c); };
-};
-template <> struct TypeHelper<uint16_t> {
-	typedef float float_t;
-	static __device__ float_t init() { return 0.5f; }
-	static __device__ uint16_t c(float a, float b, float c) { return (uint16_t)clamp<float>(a, b, c); };
-};
-template <> struct TypeHelper<float> {
-	typedef float float_t;
-	static __device__ float_t init() { return 0.0f; }
-	static __device__ float c(float a, float b, float c) { return a; };
-};
-template <> struct TypeHelper<uchar2> {
-	typedef float2 float_t;
-	static __device__ float_t init() { return make_float2(0.5f); }
-	static __device__ uchar2 c(float2 a, float b, float c) { return to_uchar2(clamp(a, b, c)); };
-};
-template <> struct TypeHelper<ushort2> {
-	typedef float2 float_t;
-	static __device__ float_t init() { return make_float2(0.5f); }
-	static __device__ ushort2 c(float2 a, float b, float c) { return to_ushort2(clamp(a, b, c)); };
-};
-template <> struct TypeHelper<float2> {
-	typedef float2 float_t;
-	static __device__ float_t init() { return float_t(); }
-	static __device__ float2 c(float2 a, float b, float c) { return a; };
-};
-template <> struct TypeHelper<uchar3> {
-	typedef float3 float_t;
-	static __device__ float_t init() { return make_float3(0.5f); }
-	static __device__ uchar3 c(float3 a, float b, float c) { return to_uchar3(clamp(a, b, c)); };
-};
-template <> struct TypeHelper<uchar4> {
-	typedef float4 float_t;
-	static __device__ float_t init() { return make_float4(0.5f); }
-	static __device__ uchar4 c(float4 a, float b, float c) { return to_uchar4(clamp(a, b, c)); };
-};
-template <> struct TypeHelper<ushort3> {
-	typedef float3 float_t;
-	static __device__ float_t init() { return make_float3(0.5f); }
-	static __device__ ushort3 c(float3 a, float b, float c) { return to_ushort3(clamp(a, b, c)); };
-};
-template <> struct TypeHelper<ushort4> {
-	typedef float4 float_t;
-	static __device__ float_t init() { return make_float4(0.5f); }
-	static __device__ ushort4 c(float4 a, float b, float c) { return to_ushort4(clamp(a, b, c)); };
-};
-template <> struct TypeHelper<float3> {
-	typedef float3 float_t;
-	static __device__ float_t init() { return float_t(); }
-	static __device__ float3 c(float3 a, float b, float c) { return a; };
-};
-
 template<typename pixel_t>
 __global__ void kl_resize_h_planar(
 	uint8_t* dst, const uint8_t* __restrict__ src, int dst_pitch, int src_pitch,
@@ -831,12 +848,19 @@ __global__ void kl_resize_h_planar(
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 
+	extern __shared__ float s_coeff[][32];
+
+	for (int y = threadIdx.y; y < filter_size; y += blockDim.y) {
+		s_coeff[y][threadIdx.x] = pixel_coefficient[blockIdx.x * 32 * filter_size + y * 32 + threadIdx.x];
+	}
+	__syncthreads();
+
 	if (x < target_width && y < target_height) {
 		auto result = TypeHelper<pixel_t>::init();
 		int x_offset = pixel_offset[x];
 		for (int i = 0; i < filter_size; ++i) {
 			auto sval = *(const pixel_t*)(src + (x_offset + i) * sizeof(pixel_t) + y * src_pitch);
-			result += pixel_coefficient[x * filter_size + i] * sval;
+			result += s_coeff[i][threadIdx.x] * sval;
 #if 0
 			if (sizeof(pixel_t) == 2 && x == 127 && y == 78) {
 				printf("%d * %f -> %f\n", sval, pixel_coefficient[x * filter_size + i], result);
@@ -857,9 +881,28 @@ void launch_resize_h_planar(
 	dim3 threads(32, 16);
 	dim3 blocks(nblocks(target_width, threads.x), nblocks(target_height, threads.y));
 
-	kl_resize_h_planar<pixel_t> << <blocks, threads >> > (
+	kl_resize_h_planar<pixel_t> << <blocks, threads, filter_size * 32 * sizeof(float)>> > (
 		dst, src, dst_pitch, src_pitch,
 		pixel_offset, pixel_coefficient, target_width, target_height, limit, filter_size);
+}
+
+std::unique_ptr<DeviceLocalData<float>> make_h_coeff_for_cuda(
+	const float* pixel_coefficient, int filter_size, int target_width, PNeoEnv env)
+{
+	int aligned_width = (target_width + 31) & ~31;
+	std::unique_ptr<float[]> data = std::unique_ptr<float[]>(new float[aligned_width * filter_size]);
+
+	for (int b = 0; b < aligned_width / 32; ++b) {
+		for (int y = 0; y < filter_size; ++y) {
+			for (int x = 0; x < 32; ++x) {
+				data[b * 32 * filter_size + y * 32 + x] =
+					(b * 32 + x < target_width) ? pixel_coefficient[filter_size * (b * 32 + x) + y] : 0;
+			}
+		}
+	}
+
+	return std::unique_ptr<DeviceLocalData<float>>(
+		new DeviceLocalData<float>(data.get(), aligned_width * filter_size, env));
 }
 
 //-------- 128 bit float Horizontals
@@ -1771,9 +1814,9 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 	dev_program_luma.pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
 		new DeviceLocalData<int>(resampling_program_luma->pixel_offset, target_width, env));
 	if (resampling_program_luma->pixel_coefficient_float) {
-		dev_program_luma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-			new DeviceLocalData<float>(resampling_program_luma->pixel_coefficient_float,
-				resampling_program_luma->filter_size * target_width, env));
+		dev_program_luma.pixel_coefficient = make_h_coeff_for_cuda(
+			resampling_program_luma->pixel_coefficient_float, 
+			resampling_program_luma->filter_size, target_width, env);
 	}
 	if (resampling_program_chroma) {
 		int chroma_target_width = target_width >> vi.GetPlaneWidthSubsampling(PLANAR_U);
@@ -1781,9 +1824,9 @@ FilteredResizeH::FilteredResizeH(PClip _child, double subrange_left, double subr
 			new DeviceLocalData<int>(resampling_program_chroma->pixel_offset,
 				chroma_target_width, env));
 		if (resampling_program_chroma->pixel_coefficient_float) {
-			dev_program_chroma.pixel_coefficient = std::unique_ptr<DeviceLocalData<float>>(
-				new DeviceLocalData<float>(resampling_program_chroma->pixel_coefficient_float,
-					resampling_program_chroma->filter_size * chroma_target_width, env));
+			dev_program_chroma.pixel_coefficient = make_h_coeff_for_cuda(
+				resampling_program_chroma->pixel_coefficient_float,
+				resampling_program_chroma->filter_size, chroma_target_width, env);
 		}
 	}
 
@@ -2304,11 +2347,11 @@ FilteredResizeV::FilteredResizeV(PClip _child, double subrange_top, double subra
 	}
 	else {
 		if (pixelsize == 1)
-			dev_resampler = launch_resize_v_planar<uint8_t>;
+			dev_resampler = launch_resize_v_planar<uchar4>;
 		else if (pixelsize == 2)
-			dev_resampler = launch_resize_v_planar<uint16_t>;
+			dev_resampler = launch_resize_v_planar<ushort4>;
 		else
-			dev_resampler = launch_resize_v_planar<float>;
+			dev_resampler = launch_resize_v_planar<float4>;
 	}
 
 	// Change target video info size
