@@ -241,6 +241,11 @@ __host__ void cpu_softthresh(float *data, float threshold)
 	}
 }
 
+__device__ __host__ float qp_apply_thresh(float qp, float thresh_a, float thresh_b)
+{
+	return clamp(thresh_a * qp + thresh_b, 0.0f, qp);
+}
+
 #ifdef __CUDA_ARCH__
 __constant__
 #endif
@@ -281,7 +286,7 @@ __global__ void kl_deblock(
   ushort2* out, int out_pitch,
   const uint16_t* __restrict__ qp_table, int qp_pitch,
   int count_minus_1, int shift, int maxv,
-  float strength, float qp_bias, bool is_soft)
+  float strength, float thresh_a, float thresh_b, bool is_soft)
 {
   int tx = threadIdx.x; // 8
   int ty = threadIdx.y; // count
@@ -313,7 +318,7 @@ __global__ void kl_deblock(
 
   // requantize
 	uint16_t qp = qp_table[blockIdx.x + blockIdx.y * qp_pitch];
-	float thresh = (qp + qp_bias) * ((1 << 2) + strength) - 1;
+	float thresh = qp_apply_thresh(qp, thresh_a, thresh_b) * ((1 << 2) + strength) - 1;
   if (is_soft) {
     dev_softthresh(tx, dct_tmp, thresh);
   }
@@ -354,7 +359,7 @@ void cpu_deblock(
   uint16_t* out, int out_pitch,
   const uint16_t* qp_table, int qp_pitch, 
   int count_minus_1, int shift, int maxv,
-  float strength, float qp_bias, bool is_soft)
+  float strength, float thresh_a, float thresh_b, bool is_soft)
 {
   for (int by = 0; by < bh; ++by) {
     for (int bx = 0; bx < bw; ++bx) {
@@ -380,7 +385,7 @@ void cpu_deblock(
 
         // requantize
 				uint16_t qp = qp_table[bx + by * qp_pitch];
-				float thresh = (qp + qp_bias) * ((1 << 2) + strength) - 1;
+				float thresh = qp_apply_thresh(qp, thresh_a, thresh_b) * ((1 << 2) + strength) - 1;
 				if (is_soft) {
 					cpu_softthresh(dct_tmp, thresh);
 				}
@@ -557,7 +562,7 @@ void cpu_deblock_avx(
 	uint16_t* tmp, int tmp_pitch,
 	const uint16_t* qp_table, int qp_pitch,
 	int count_minus_1, int deblockShift, int deblockMaxV,
-	float strength, float qp_bias, bool is_soft,
+	float strength, float thresh_a, float thresh_b, bool is_soft,
 	
 	int width, int height,
 	pixel_t* dst, int dst_pitch, int mergeShift, int mergeMaxV)
@@ -570,7 +575,7 @@ void cpu_deblock_avx(
 				int off_x = bx * 8 + offset.x;
 				int off_y = by * 8 + offset.y;
 				uint16_t qp = qp_table[bx + by * qp_pitch];
-				float thresh = (qp + qp_bias) * ((1 << 2) + strength) - 1;
+				float thresh = qp_apply_thresh(qp, thresh_a, thresh_b) * ((1 << 2) + strength) - 1;
 				const int half = (1 << deblockShift) >> 1;
 				const pixel_t* src_block = &src[off_x + off_y * src_pitch];
 				uint16_t* tmp_block = &tmp[off_x + off_y * tmp_pitch];
@@ -601,11 +606,14 @@ class KDeblock : public KFMFilterBase
 {
 	int quality;
 	float strength;
-	float qp_bias;
+	float qp_thresh;
 	float b_ratio;
 	int force_qp;
 	bool is_soft;
 	bool show;
+
+	float thresh_a;
+	float thresh_b;
 
 	template <typename pixel_t>
 	void DeblockPlane(
@@ -686,7 +694,7 @@ class KDeblock : public KFMFilterBase
 				qpvi.width, qpvi.height,
 				tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
 				qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
-				deblockShift, deblockMaxV, strength, qp_bias, is_soft,
+				deblockShift, deblockMaxV, strength, thresh_a, thresh_b, is_soft,
 				width, height, dst, dstPitch, mergeShift, mergeMaxV);
 		}
 		else {
@@ -705,7 +713,7 @@ class KDeblock : public KFMFilterBase
 					qpvi.width, qpvi.height,
 					tmpOut.GetWritePtr<ushort2>(), tmpOut.GetPitch<ushort2>(),
 					qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
-					deblockShift, deblockMaxV, strength, qp_bias, is_soft);
+					deblockShift, deblockMaxV, strength, thresh_a, thresh_b, is_soft);
 				DEBUG_SYNC;
 			}
 			else {
@@ -713,7 +721,7 @@ class KDeblock : public KFMFilterBase
 					qpvi.width, qpvi.height,
 					tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
 					qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), count - 1,
-					deblockShift, deblockMaxV, strength, qp_bias, is_soft);
+					deblockShift, deblockMaxV, strength, thresh_a, thresh_b, is_soft);
 			}
 
 			if (IS_CUDA) {
@@ -787,12 +795,12 @@ class KDeblock : public KFMFilterBase
 	}
 
 public:
-	KDeblock(PClip source, int quality, float strength, float qp_bias, float b_ratio, 
+	KDeblock(PClip source, int quality, float strength, float qp_thresh, float b_ratio, 
 		int force_qp, bool is_soft, bool show, IScriptEnvironment* env)
 		: KFMFilterBase(source)
 		, quality(quality)
 		, strength(strength)
-		, qp_bias(qp_bias)
+		, qp_thresh(qp_thresh)
 		, b_ratio(b_ratio)
 		, force_qp(force_qp)
 		, is_soft(is_soft)
@@ -800,6 +808,10 @@ public:
 	{
 		if (vi.width & 7) env->ThrowError("[KDeblock]: width must be multiple of 8");
 		if (vi.height & 7) env->ThrowError("[KDeblock]: height must be multiple of 8");
+
+		const float W = 5;
+		thresh_a = (qp_thresh + W) / (2 * W);
+		thresh_b = (W * W - qp_thresh * qp_thresh) / (2 * W);
 	}
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -832,7 +844,7 @@ public:
 			args[0].AsClip(),          // source
 			args[1].AsInt(3),          // quality
 			(float)args[2].AsFloat(0), // strength
-			(float)args[3].AsFloat(0), // qp_bias
+			(float)args[3].AsFloat(0), // thresh
 			(float)args[4].AsFloat(0.5f), // b_ratio
 			args[5].AsInt(-1),         // force_qp
 			args[6].AsBool(false),     // is_soft
@@ -952,7 +964,7 @@ static AVSValue __cdecl FrameType(AVSValue args, void* user_data, IScriptEnviron
 
 void AddFuncDeblock(IScriptEnvironment* env)
 {
-	env->AddFunction("KDeblock", "c[quality]i[str]f[bias]f[bratio]f[force_qp]i[is_soft]b[show]b", KDeblock::Create, 0);
+	env->AddFunction("KDeblock", "c[quality]i[str]f[thr]f[bratio]f[qp]i[soft]b[show]b", KDeblock::Create, 0);
 	env->AddFunction("QPClip", "c[nonb]b", QPClip::Create, 0);
 
 	env->AddFunction("FrameType", "c", FrameType, 0);
