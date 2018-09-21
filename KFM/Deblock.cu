@@ -12,6 +12,91 @@
 #include "VectorFunctions.cuh"
 #include "KFMFilterBase.cuh"
 
+struct QPClipInfo {
+  enum
+  {
+    VERSION = 1,
+    MAGIC_KEY = 0x6180FDF8,
+  };
+  int nMagicKey;
+  int nVersion;
+
+  int imageWidth;
+  int imageHeight;
+
+  QPClipInfo(const VideoInfo& vi)
+    : nMagicKey(MAGIC_KEY)
+    , nVersion(VERSION)
+    , imageWidth(vi.width)
+    , imageHeight(vi.height)
+  { }
+
+  static const QPClipInfo* GetParam(const VideoInfo& vi, PNeoEnv env)
+  {
+    if (vi.sample_type != MAGIC_KEY) {
+      env->ThrowError("Invalid source (sample_type signature does not match)");
+    }
+    const QPClipInfo* param = (const QPClipInfo*)(void*)vi.num_audio_samples;
+    if (param->nMagicKey != MAGIC_KEY) {
+      env->ThrowError("Invalid source (magic key does not match)");
+    }
+    return param;
+  }
+
+  static void SetParam(VideoInfo& vi, const QPClipInfo* param)
+  {
+    vi.audio_samples_per_second = 0; // kill audio
+    vi.sample_type = MAGIC_KEY;
+    vi.num_audio_samples = (size_t)param;
+  }
+};
+
+// 映像なしでQPだけのクリップ
+class QPClip : public GenericVideoFilter
+{
+  QPClipInfo info;
+public:
+  QPClip(PClip clip, IScriptEnvironment* env)
+    : GenericVideoFilter(clip)
+    , info(vi)
+  {
+    QPClipInfo::SetParam(vi, &info);
+
+    // フレーム自体はダミー
+    vi.width = 2;
+    vi.height = 2;
+    vi.pixel_type = VideoInfo::CS_Y8;
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
+    PVideoFrame src = child->GetFrame(n, env);
+    PVideoFrame dst = env->NewVideoFrame(vi);
+    env->CopyFrameProps(src, dst);
+    return dst;
+  }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceTypes(child) &
+        (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return 0;
+  }
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new QPClip(
+      args[0].AsClip(),      // clip
+      env
+    );
+  }
+};
+
 struct CPUInfo {
 	bool initialized, avx, avx2;
 };
@@ -604,6 +689,9 @@ bool IsAVX2Available();
 
 class KDeblock : public KFMFilterBase
 {
+  PClip qpclip;
+  float frameRateConv; // (qpclip frame rate) / (source frame rate)
+
 	int quality;
 	float strength;
 	float qp_thresh;
@@ -775,19 +863,27 @@ class KDeblock : public KFMFilterBase
 	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		Frame src = child->GetFrame(n, env);
-		if (force_qp > 0) {
-			// QP指定あり
-			return DeblockEntry<pixel_t>(src, nullptr, nullptr, 0, 0, env);
-		}
-		if (src.GetProperty("QP_Table_Non_B")) {
-			// QPテーブルあり
-			Frame qpTable = src.GetProperty("QP_Table")->GetFrame();
-			Frame qpTableNonB = src.GetProperty("QP_Table_Non_B")->GetFrame();
-			int qpStride = (int)src.GetProperty("QP_Stride")->GetInt();
-			int qpScaleType = (int)src.GetProperty("QP_ScaleType")->GetInt();
-			return DeblockEntry<pixel_t>(src, qpTable.GetReadPtr<uint8_t>(),
-				qpTableNonB.GetReadPtr<uint8_t>(), qpStride, qpScaleType, env);
-		}
+    if (force_qp > 0) {
+      // QP指定あり
+      return DeblockEntry<pixel_t>(src, nullptr, nullptr, 0, 0, env);
+    }
+    else {
+      PVideoFrame qpsrc;
+      if (qpclip) {
+        int qp_n = (int)(frameRateConv * n + 0.3f);
+        qpsrc = qpclip->GetFrame(qp_n, env);
+      }
+      PVideoFrame& qpframe = qpclip ? qpsrc : src.frame;
+      if (qpframe->GetProperty("QP_Table_Non_B")) {
+        // QPテーブルあり
+        Frame qpTable = qpframe->GetProperty("QP_Table")->GetFrame();
+        Frame qpTableNonB = qpframe->GetProperty("QP_Table_Non_B")->GetFrame();
+        int qpStride = (int)qpframe->GetProperty("QP_Stride")->GetInt();
+        int qpScaleType = (int)qpframe->GetProperty("QP_ScaleType")->GetInt();
+        return DeblockEntry<pixel_t>(src, qpTable.GetReadPtr<uint8_t>(),
+          qpTableNonB.GetReadPtr<uint8_t>(), qpStride, qpScaleType, env);
+      }
+    }
 		if (show) {
 			DrawText<pixel_t>(src.frame, vi.BitsPerComponent(), 0, 0, "Disabled", env);
 		}
@@ -796,8 +892,9 @@ class KDeblock : public KFMFilterBase
 
 public:
 	KDeblock(PClip source, int quality, float strength, float qp_thresh, float b_ratio, 
-		int force_qp, bool is_soft, bool show, IScriptEnvironment* env)
+		PClip qpclip, int force_qp, bool is_soft, bool show, IScriptEnvironment* env)
 		: KFMFilterBase(source)
+    , qpclip(qpclip)
 		, quality(quality)
 		, strength(strength)
 		, qp_thresh(qp_thresh)
@@ -812,6 +909,15 @@ public:
 		const float W = 5;
 		thresh_a = (qp_thresh + W) / (2 * W);
 		thresh_b = (W * W - qp_thresh * qp_thresh) / (2 * W);
+
+    if (qpclip) {
+      auto qpvi = qpclip->GetVideoInfo();
+      frameRateConv = (float)(qpvi.fps_numerator * vi.fps_denominator) / 
+        (float)(qpvi.fps_denominator * vi.fps_numerator);
+    }
+    else {
+      frameRateConv = 1.0f;
+    }
 	}
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -841,14 +947,15 @@ public:
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
 	{
 		return new KDeblock(
-			args[0].AsClip(),          // source
+      args[0].AsClip(),          // source
 			args[1].AsInt(3),          // quality
 			(float)args[2].AsFloat(0), // strength
 			(float)args[3].AsFloat(0), // thresh
 			(float)args[4].AsFloat(0.5f), // b_ratio
-			args[5].AsInt(-1),         // force_qp
-			args[6].AsBool(false),     // is_soft
-			args[7].AsBool(false),     // show
+      args[5].AsClip(),          // qpclip
+			args[6].AsInt(-1),         // force_qp
+			args[7].AsBool(false),     // is_soft
+			args[8].AsBool(false),     // show
 			env
 		);
 	}
@@ -874,18 +981,29 @@ void cpu_scale_qp(int width, int height,
 	}
 }
 
-class QPClip : public GenericVideoFilter
+// QPテーブルをフレームデータに変換
+class ShowQP : public GenericVideoFilter
 {
-	int mode;
 	bool nonB;
 public:
-	QPClip(PClip clip, bool nonB, IScriptEnvironment* env)
+  ShowQP(PClip clip, bool nonB, IScriptEnvironment* env_)
 		: GenericVideoFilter(clip)
 		, nonB(nonB)
 	{
+    PNeoEnv env = env_;
+
 		vi.pixel_type = VideoInfo::CS_Y8;
-		vi.width = (vi.width + 15) >> 4;
-		vi.height = (vi.height + 15) >> 4;
+
+    if (vi.sample_type == QPClipInfo::MAGIC_KEY) {
+      // ソースはQPClipだった
+      auto info = QPClipInfo::GetParam(vi, env);
+      vi.width = (info->imageWidth + 15) >> 4;
+      vi.height = (info->imageHeight + 15) >> 4;
+    }
+    else {
+      vi.width = (vi.width + 15) >> 4;
+      vi.height = (vi.height + 15) >> 4;
+    }
 	}
 
 	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -934,7 +1052,7 @@ public:
 
 	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
 	{
-		return new QPClip(
+		return new ShowQP(
 			args[0].AsClip(),      // clip
 			args[1].AsBool(true),  // nonB
 			env
@@ -964,8 +1082,9 @@ static AVSValue __cdecl FrameType(AVSValue args, void* user_data, IScriptEnviron
 
 void AddFuncDeblock(IScriptEnvironment* env)
 {
-	env->AddFunction("KDeblock", "c[quality]i[str]f[thr]f[bratio]f[qp]i[soft]b[show]b", KDeblock::Create, 0);
-	env->AddFunction("QPClip", "c[nonb]b", QPClip::Create, 0);
+	env->AddFunction("KDeblock", "c[quality]i[str]f[thr]f[bratio]f[qpclip]c[qp]i[soft]b[show]b", KDeblock::Create, 0);
+  env->AddFunction("QPClip", "c", QPClip::Create, 0);
+	env->AddFunction("ShowQP", "c[nonb]b", ShowQP::Create, 0);
 
 	env->AddFunction("FrameType", "c", FrameType, 0);
 }
