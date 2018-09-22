@@ -241,6 +241,19 @@ inline void add_to_block_avx(uint16_t* dst, __m256 row, __m256 half, int shift, 
 	_mm_storeu_si128((__m128i*)dst, _mm_add_epi32(_mm_loadu_si128((__m128i*)dst), c));
 }
 
+inline void mult8(__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
+{
+	const auto CONST8 = _mm256_set1_ps(64.0f);
+	row0 = _mm256_mul_ps(row0, CONST8);
+	row1 = _mm256_mul_ps(row1, CONST8);
+	row2 = _mm256_mul_ps(row2, CONST8);
+	row3 = _mm256_mul_ps(row3, CONST8);
+	row4 = _mm256_mul_ps(row4, CONST8);
+	row5 = _mm256_mul_ps(row5, CONST8);
+	row6 = _mm256_mul_ps(row6, CONST8);
+	row7 = _mm256_mul_ps(row7, CONST8);
+}
+
 inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, int maxv_,
 	__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
 {
@@ -259,25 +272,33 @@ inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, 
 __forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv,
 	__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
 {
-	// dct
-	dct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
-	transpose8_ps(row0, row1, row2, row3, row4, row5, row6, row7);
-	dct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
-
-	// ì]íuÇ≥ÇÍÇΩèÛë‘ÇæÇØÇ«[0]ÇÃà íuÇÕìØÇ∂Ç»ÇÃÇ≈ñ‚ëËÇ»Ç¢
-
-	// requantize
-	if (is_soft) {
-		softthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
+	if (thresh <= 0) {
+	//if(false) {
+		// ïœâªÇµÇ»Ç¢ÇÃÇ≈ÇªÇÃÇ‹Ç‹ì¸ÇÍÇÈ
+		// Ç∆Ç¢Ç¡ÇƒÇ‡dct->idctÇ≈8î{Ç≥ÇÍÇÈÇÃÇ≈8î{
+		mult8(row0, row1, row2, row3, row4, row5, row6, row7);
 	}
 	else {
-		hardthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
-	}
+		// dct
+		dct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+		transpose8_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+		dct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
 
-	// idct
-	idct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
-	transpose8_ps(row0, row1, row2, row3, row4, row5, row6, row7);
-	idct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+		// ì]íuÇ≥ÇÍÇΩèÛë‘ÇæÇØÇ«[0]ÇÃà íuÇÕìØÇ∂Ç»ÇÃÇ≈ñ‚ëËÇ»Ç¢
+
+		// requantize
+		if (is_soft) {
+			softthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
+		}
+		else {
+			hardthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
+		}
+
+		// idct
+		idct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+		transpose8_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+		idct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
+	}
 
 	add_block_avx(dst, dst_pitch, half, shift, maxv, row0, row1, row2, row3, row4, row5, row6, row7);
 }

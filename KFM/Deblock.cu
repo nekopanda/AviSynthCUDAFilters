@@ -465,21 +465,31 @@ void cpu_deblock(
 					}
 				}
 
-        // dct
-				cpu_dct8x8(dct_tmp);
-
-        // requantize
 				uint16_t qp = qp_table[bx + by * qp_pitch];
 				float thresh = qp_apply_thresh(qp, thresh_a, thresh_b) * ((1 << 2) + strength) - 1;
-				if (is_soft) {
-					cpu_softthresh(dct_tmp, thresh);
+
+				if (thresh <= 0) {
+					// •Ï‰»‚µ‚È‚¢‚Ì‚Å‚»‚Ì‚Ü‚Ü“ü‚ê‚é
+					// ‚Æ‚¢‚Á‚Ä‚àdct->idct‚Å8*8”{‚³‚ê‚é‚Ì‚Å64”{
+					for (int i = 0; i < 64; ++i) {
+						dct_tmp[i] *= 64;
+					}
 				}
 				else {
-					cpu_hardthresh(dct_tmp, thresh);
+					// dct
+					cpu_dct8x8(dct_tmp);
+
+					// requantize
+					if (is_soft) {
+						cpu_softthresh(dct_tmp, thresh);
+					}
+					else {
+						cpu_hardthresh(dct_tmp, thresh);
+					}
+
+					// idct
+					cpu_idct8x8(dct_tmp);
 				}
-        
-				// idct
-				cpu_idct8x8(dct_tmp);
 
         // add
 				const int half = (1 << shift) >> 1;
@@ -507,6 +517,52 @@ void cpu_deblock(
 			}
     }
   }
+}
+
+template <typename pixel_t>
+__global__ void kl_deblock_show(
+	pixel_t* dst, int dst_pitch,
+	int width, int height,
+	int bw, int bh,
+	const uint16_t* qp_table, int qp_pitch,
+	float thresh_a, float thresh_b)
+{
+	uint16_t qp = qp_table[blockDim.x + blockDim.y * qp_pitch];
+	bool is_enabled = (qp_apply_thresh(qp, thresh_a, thresh_b) >= (qp >> 1));
+	int off_x = blockDim.x * 8 + 4;
+	int off_y = blockDim.y * 8 + 4;
+	int x = off_x + threadIdx.x;
+	int y = off_y + threadIdx.y;
+	if (x >= 0 && x < width && y >= 0 && y < height) {
+		dst[x + y * dst_pitch] = is_enabled ? 230 : 16;
+	}
+}
+
+template <typename pixel_t>
+void cpu_deblock_show(
+	pixel_t* dst, int dst_pitch,
+	int width, int height,
+	int bw, int bh,
+	const uint16_t* qp_table, int qp_pitch,
+	float thresh_a, float thresh_b)
+{
+	for (int by = 0; by < bh; ++by) {
+		for (int bx = 0; bx < bw; ++bx) {
+			uint16_t qp = qp_table[bx + by * qp_pitch];
+			bool is_enabled = (qp_apply_thresh(qp, thresh_a, thresh_b) >= (qp >> 1));
+			int off_x = bx * 8 - 4;
+			int off_y = by * 8 - 4;
+			for (int dy = 0; dy < 8; ++dy) {
+				for (int dx = 0; dx < 8; ++dx) {
+					int x = off_x + dx;
+					int y = off_y + dy;
+					if (x >= 0 && x < width && y >= 0 && y < height) {
+						dst[x + y * dst_pitch] = is_enabled ? 230 : 16;
+					}
+				}
+			}
+		}
+	}
 }
 
 // normalize the qscale factor
@@ -698,7 +754,7 @@ class KDeblock : public KFMFilterBase
 	float b_ratio;
 	int force_qp;
 	bool is_soft;
-	bool show;
+	int show;
 
 	float thresh_a;
 	float thresh_b;
@@ -769,7 +825,23 @@ class KDeblock : public KFMFilterBase
 		int mergeMaxV = (1 << bits) - 1;
 		int count = 1 << quality;
 
-		if (!IS_CUDA && IsAVX2Available()) {
+		if (show == 2) {
+			if (IS_CUDA) {
+				dim3 threads(8, 8);
+				dim3 blocks(qpvi.width, qpvi.height);
+				kl_deblock_show << <blocks, threads >> >(
+					dst, dstPitch, width, height, qpvi.width, qpvi.height,
+					qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(),
+					thresh_a, thresh_b);
+				DEBUG_SYNC;
+			}
+			else {
+				cpu_deblock_show(dst, dstPitch, width, height, qpvi.width, qpvi.height,
+					qpTmp.GetReadPtr<uint16_t>(), qpTmp.GetPitch<uint16_t>(), 
+					thresh_a, thresh_b);
+			}
+		}
+		else if (!IS_CUDA && IsAVX2Available()) {
 		//if(false) {
 			// CPU‚ÅAVX2‚ªŽg‚¦‚é‚È‚çAVX2”Å
 			VideoInfo tmpvi = vi;
@@ -850,7 +922,7 @@ class KDeblock : public KFMFilterBase
 			src.GetReadPtr<pixel_t>(PLANAR_V), src.GetPitch<pixel_t>(PLANAR_V),
 			qpTable, qpTableNonB, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
-		if (show) {
+		if (show == 1) {
 			char buf[100];
 			sprintf_s(buf, "KDeblock: %s", qpTable ? "Using QP table" : "Constant QP");
 			DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
@@ -892,7 +964,7 @@ class KDeblock : public KFMFilterBase
 
 public:
 	KDeblock(PClip source, int quality, float strength, float qp_thresh, float b_ratio, 
-		PClip qpclip, int force_qp, bool is_soft, bool show, IScriptEnvironment* env)
+		PClip qpclip, int force_qp, bool is_soft, int show, IScriptEnvironment* env)
 		: KFMFilterBase(source)
     , qpclip(qpclip)
 		, quality(quality)
@@ -955,7 +1027,7 @@ public:
       args[5].AsClip(),          // qpclip
 			args[6].AsInt(-1),         // force_qp
 			args[7].AsBool(false),     // is_soft
-			args[8].AsBool(false),     // show
+			args[8].AsInt(0),     // show
 			env
 		);
 	}
@@ -1082,7 +1154,7 @@ static AVSValue __cdecl FrameType(AVSValue args, void* user_data, IScriptEnviron
 
 void AddFuncDeblock(IScriptEnvironment* env)
 {
-	env->AddFunction("KDeblock", "c[quality]i[str]f[thr]f[bratio]f[qpclip]c[qp]i[soft]b[show]b", KDeblock::Create, 0);
+	env->AddFunction("KDeblock", "c[quality]i[str]f[thr]f[bratio]f[qpclip]c[qp]i[soft]b[show]i", KDeblock::Create, 0);
   env->AddFunction("QPClip", "c", QPClip::Create, 0);
 	env->AddFunction("ShowQP", "c[nonb]b", ShowQP::Create, 0);
 
