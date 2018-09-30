@@ -582,7 +582,8 @@ __device__ __host__ inline int norm_qscale(int qscale, int type)
 
 __global__ void kl_make_qp_table(
   int in_width, int in_height,
-	const uint8_t* in_table, const uint8_t* nonb_table,
+	const uint8_t* in_table0, const uint8_t* in_table1,
+	const uint8_t* nonb_table0, const uint8_t* nonb_table1,
 	int in_pitch, int qp_scale, float b_ratio,
 	int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
@@ -593,11 +594,17 @@ __global__ void kl_make_qp_table(
 
   if (x < out_width && y < out_height) {
     int qp;
-    if (in_table) {
+    if (in_table0) {
 			int qp_x = min(x >> qp_shift_x, in_width - 1);
 			int qp_y = min(y >> qp_shift_y, in_height - 1);
-			int b = norm_qscale(in_table[qp_x + qp_y * in_pitch], qp_scale);
-			int nonb = norm_qscale(nonb_table[qp_x + qp_y * in_pitch], qp_scale);
+			int in_qp = in_table0[qp_x + qp_y * in_pitch];
+			int nonb_qp = nonb_table0[qp_x + qp_y * in_pitch];
+			if (in_table1) {
+				in_qp = max(in_qp, (int)in_table1[qp_x + qp_y * in_pitch]);
+				nonb_qp = max(nonb_qp, (int)nonb_table1[qp_x + qp_y * in_pitch]);
+			}
+			int b = norm_qscale(in_qp, qp_scale);
+			int nonb = norm_qscale(nonb_qp, qp_scale);
 			qp = max(1, (int)(b * b_ratio + nonb * (1 - b_ratio) + 0.5f));
     }
     else {
@@ -609,7 +616,8 @@ __global__ void kl_make_qp_table(
 
 void cpu_make_qp_table(
   int in_width, int in_height,
-  const uint8_t* in_table, const uint8_t* nonb_table, 
+  const uint8_t* in_table0, const uint8_t* in_table1, 
+	const uint8_t* nonb_table0, const uint8_t* nonb_table1,
 	int in_pitch, int qp_scale, float b_ratio,
 	int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
@@ -618,11 +626,17 @@ void cpu_make_qp_table(
   for (int y = 0; y < out_height; ++y) {
     for (int x = 0; x < out_width; ++x) {
       int qp;
-      if (in_table) {
+      if (in_table0) {
 				int qp_x = min(x >> qp_shift_x, in_width - 1);
 				int qp_y = min(y >> qp_shift_y, in_height - 1);
-				int b = norm_qscale(in_table[qp_x + qp_y * in_pitch], qp_scale);
-				int nonb = norm_qscale(nonb_table[qp_x + qp_y * in_pitch], qp_scale);
+				int in_qp = in_table0[qp_x + qp_y * in_pitch];
+				int nonb_qp = nonb_table0[qp_x + qp_y * in_pitch];
+				if (in_table1) {
+					in_qp = max(in_qp, (int)in_table1[qp_x + qp_y * in_pitch]);
+					nonb_qp = max(nonb_qp, (int)nonb_table1[qp_x + qp_y * in_pitch]);
+				}
+				int b = norm_qscale(in_qp, qp_scale);
+				int nonb = norm_qscale(nonb_qp, qp_scale);
         qp = max(1, (int)(b * b_ratio + nonb * (1 - b_ratio) + 0.5f));
       }
       else {
@@ -763,7 +777,9 @@ class KDeblock : public KFMFilterBase
 	void DeblockPlane(
 		int width, int height,
 		pixel_t* dst, int dstPitch, const pixel_t* src, int srcPitch, 
-		const uint8_t* qpTable, const uint8_t* qpTableNonB, int qpStride, int qpScaleType,
+		const uint8_t* qpTable0, const uint8_t* qpTableNonB0,
+		const uint8_t* qpTable1, const uint8_t* qpTableNonB1,
+		int qpStride, int qpScaleType,
 		int qpShiftX, int qpShiftY, PNeoEnv env)
 	{
 		typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -806,14 +822,16 @@ class KDeblock : public KFMFilterBase
 			dim3 blocks(nblocks(qpvi.width, threads.x), nblocks(qpvi.height, threads.y));
 			kl_make_qp_table<<<blocks, threads >>>((
 				vi.width + 15) >> 4, (vi.height + 15) >> 4,
-				qpTable, qpTableNonB, qpStride, qpTable ? qpScaleType : force_qp, b_ratio,
+				qpTable0, qpTableNonB0, qpTable1, qpTableNonB1, 
+				qpStride, qpTable0 ? qpScaleType : force_qp, b_ratio,
 				qpShiftX, qpShiftY, qpvi.width, qpvi.height,
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 			DEBUG_SYNC;
 		}
 		else {
 			cpu_make_qp_table((vi.width + 15) >> 4, (vi.height + 15) >> 4,
-				qpTable, qpTableNonB, qpStride, qpTable ? qpScaleType : force_qp, b_ratio, 
+				qpTable0, qpTableNonB0, qpTable1, qpTableNonB1, 
+				qpStride, qpTable0 ? qpScaleType : force_qp, b_ratio,
 				qpShiftX, qpShiftY, qpvi.width, qpvi.height,
 				qpTmp.GetWritePtr<uint16_t>(), qpTmp.GetPitch<uint16_t>());
 		}
@@ -903,63 +921,118 @@ class KDeblock : public KFMFilterBase
 	}
 
 	template <typename pixel_t>
-	PVideoFrame DeblockEntry(Frame& src, const uint8_t* qpTable, const uint8_t* qpTableNonB, int qpStride, int qpScaleType, PNeoEnv env)
+	PVideoFrame DeblockEntry(Frame& src,
+		const uint8_t* qpTable0, const uint8_t* qpTableNonB0,
+		const uint8_t* qpTable1, const uint8_t* qpTableNonB1, 
+		int qpStride, int qpScaleType, PNeoEnv env)
 	{
 		Frame dst = env->NewVideoFrame(vi);
 
 		DeblockPlane(vi.width, vi.height, 
 			dst.GetWritePtr<pixel_t>(PLANAR_Y), dst.GetPitch<pixel_t>(PLANAR_Y), 
 			src.GetReadPtr<pixel_t>(PLANAR_Y), src.GetPitch<pixel_t>(PLANAR_Y), 
-			qpTable, qpTableNonB, qpStride, qpScaleType, 1, 1, env);
+			qpTable0, qpTableNonB0, qpTable1, qpTableNonB1, 
+			qpStride, qpScaleType, 1, 1, env);
 
 		DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
 			dst.GetWritePtr<pixel_t>(PLANAR_U), dst.GetPitch<pixel_t>(PLANAR_U),
 			src.GetReadPtr<pixel_t>(PLANAR_U), src.GetPitch<pixel_t>(PLANAR_U),
-			qpTable, qpTableNonB, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+			qpTable0, qpTableNonB0, qpTable1, qpTableNonB1, 
+			qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
 		DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
 			dst.GetWritePtr<pixel_t>(PLANAR_V), dst.GetPitch<pixel_t>(PLANAR_V),
 			src.GetReadPtr<pixel_t>(PLANAR_V), src.GetPitch<pixel_t>(PLANAR_V),
-			qpTable, qpTableNonB, qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
+			qpTable0, qpTableNonB0, qpTable1, qpTableNonB1,
+			qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
 		if (show == 1) {
 			char buf[100];
-			sprintf_s(buf, "KDeblock: %s", qpTable ? "Using QP table" : "Constant QP");
+			sprintf_s(buf, "KDeblock: %s", qpTable0 ? "Using QP table" : "Constant QP");
 			DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
 		}
 
 		return dst.frame;
 	}
 
+	// QPテーブルのフレーム指定
+	template <typename pixel_t>
+	PVideoFrame DeblockEntry(Frame& src, PVideoFrame& qp0, PVideoFrame& qp1, PNeoEnv env)
+	{
+		if (qp0->GetProperty("QP_Table_Non_B") == nullptr) {
+			// QPテーブルがない
+			if (show) {
+				DrawText<pixel_t>(src.frame, vi.BitsPerComponent(), 0, 0, "Disabled", env);
+			}
+			return src.frame;
+		}
+
+		Frame qpTable0 = qp0->GetProperty("QP_Table")->GetFrame();
+		Frame qpTableNonB0 = qp0->GetProperty("QP_Table_Non_B")->GetFrame();
+		int qpStride = (int)qp0->GetProperty("QP_Stride")->GetInt();
+		int qpScaleType = (int)qp0->GetProperty("QP_ScaleType")->GetInt();
+
+		if (!qp1) {
+			return DeblockEntry<pixel_t>(src,
+				qpTable0.GetReadPtr<uint8_t>(), qpTableNonB0.GetReadPtr<uint8_t>(),
+				nullptr, nullptr,
+				qpStride, qpScaleType, env);
+		}
+
+		Frame qpTable1 = qp1->GetProperty("QP_Table")->GetFrame();
+		Frame qpTableNonB1 = qp1->GetProperty("QP_Table_Non_B")->GetFrame();
+
+		return DeblockEntry<pixel_t>(src,
+			qpTable0.GetReadPtr<uint8_t>(), qpTableNonB0.GetReadPtr<uint8_t>(),
+			qpTable1.GetReadPtr<uint8_t>(), qpTableNonB1.GetReadPtr<uint8_t>(),
+			qpStride, qpScaleType, env);
+	}
+
+	PVideoFrame GetQPFrame(int n, PNeoEnv env)
+	{
+		if (qpclip) {
+			return qpclip->GetFrame(n, env);
+		}
+		return child->GetFrame(n, env);
+	}
+
 	template <typename pixel_t>
 	PVideoFrame GetFrameT(int n, PNeoEnv env)
 	{
 		Frame src = child->GetFrame(n, env);
-    if (force_qp > 0) {
+    
+		if (force_qp > 0) {
       // QP指定あり
-      return DeblockEntry<pixel_t>(src, nullptr, nullptr, 0, 0, env);
+			return DeblockEntry<pixel_t>(src, nullptr, nullptr, nullptr, nullptr, 0, 0, env);
     }
-    else {
-      PVideoFrame qpsrc;
-      if (qpclip) {
-        int qp_n = (int)(frameRateConv * n + 0.3f);
-        qpsrc = qpclip->GetFrame(qp_n, env);
+
+		if (src.GetProperty("KFM_SourceStart")) {
+			// フレーム指定あり
+			int start = (int)src.GetProperty("KFM_SourceStart")->GetInt();
+			int num = (int)src.GetProperty("KFM_NumSourceFrames")->GetInt();
+
+      // 想定されるフレームと離れすぎてたらバグの可能性が高いので検出
+      int qp_n = (int)(frameRateConv * n + 0.3f);
+      if (start < qp_n - 10 || start > qp_n + 10) {
+        env->ThrowError("Invalid KFM_SourceStart");
       }
-      PVideoFrame& qpframe = qpclip ? qpsrc : src.frame;
-      if (qpframe->GetProperty("QP_Table_Non_B")) {
-        // QPテーブルあり
-        Frame qpTable = qpframe->GetProperty("QP_Table")->GetFrame();
-        Frame qpTableNonB = qpframe->GetProperty("QP_Table_Non_B")->GetFrame();
-        int qpStride = (int)qpframe->GetProperty("QP_Stride")->GetInt();
-        int qpScaleType = (int)qpframe->GetProperty("QP_ScaleType")->GetInt();
-        return DeblockEntry<pixel_t>(src, qpTable.GetReadPtr<uint8_t>(),
-          qpTableNonB.GetReadPtr<uint8_t>(), qpStride, qpScaleType, env);
-      }
-    }
-		if (show) {
-			DrawText<pixel_t>(src.frame, vi.BitsPerComponent(), 0, 0, "Disabled", env);
+
+			if (num <= 1) {
+				return DeblockEntry<pixel_t>(src, GetQPFrame(start, env), PVideoFrame(), env);
+			}
+			else {
+				return DeblockEntry<pixel_t>(src, GetQPFrame(start, env), GetQPFrame(start + 1, env), env);
+			}
 		}
-		return src.frame;
+
+		if (qpclip) {
+			// QPクリップ指定あり
+			int qp_n = (int)(frameRateConv * n + 0.3f);
+			return DeblockEntry<pixel_t>(src, GetQPFrame(qp_n, env), PVideoFrame(), env);
+		}
+
+		// ソースフレームからQP取得
+		return DeblockEntry<pixel_t>(src, src.frame, PVideoFrame(), env);
 	}
 
 public:

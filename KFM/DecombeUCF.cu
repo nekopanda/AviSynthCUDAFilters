@@ -1738,7 +1738,13 @@ public:
         if (cleanField[i + 0] && cleanField[i + 1]) {
           // 2枚連続できれいなフィールドがある -> きれいなフィールドで構成されたフレームを返す
           int n60 = n60start + i;
-          return dweaveclip->GetFrame(n60, env);
+          PVideoFrame frame = dweaveclip->GetFrame(n60, env);
+          int sourceStart = n60 / 2;
+          int sourceEnd = (n60 + 2 + 1) / 2;
+          env->MakePropertyWritable(&frame);
+          frame->SetProperty("KFM_SourceStart", sourceStart);
+          frame->SetProperty("KFM_NumSourceFrames", sourceEnd - sourceStart);
+          return frame;
         }
       }
       // 3フィールド以上あるのに2枚連続の綺麗なフィールドがない場合は、
@@ -1746,16 +1752,26 @@ public:
       if (frameInfo.numFields <= 2) {
         if (cleanField[0]) {
           // 1枚目のフィールドは綺麗 -> 後ろのフィールドは汚いので前のフィールドを使って補間
-          return beforeclip->GetFrame(n60start, env);
+          PVideoFrame frame = beforeclip->GetFrame(n60start, env);
+          int sourceStart = n60start;
+          env->MakePropertyWritable(&frame);
+          frame->SetProperty("KFM_SourceStart", sourceStart);
+          frame->SetProperty("KFM_NumSourceFrames", 1);
+          return frame;
         }
         else if (cleanField[1]) {
           // 2枚目のフィールドは綺麗 -> 前のフィールドは汚いので後ろのフィールドを使って補間
-          return afterclip->GetFrame(n60start + 1, env);
+          PVideoFrame frame = afterclip->GetFrame(n60start + 1, env);
+          int sourceStart = n60start + 1 / 2;
+          env->MakePropertyWritable(&frame);
+          frame->SetProperty("KFM_SourceStart", sourceStart);
+          frame->SetProperty("KFM_NumSourceFrames", 1);
+          return frame;
         }
       }
       // きれいなフィールドがなかった -> NRを返す
       if (nrclip) {
-        nrclip->GetFrame(n24, env);
+        return nrclip->GetFrame(n24, env);
       }
     }
 
@@ -2081,10 +2097,10 @@ public:
       res = nrclip->GetFrame(n60, env);
     }
     else if (centerFlag == DECOMB_UCF_PREV) {
-      res = beforeclip->GetFrame(n60 - 1, env);
+      res = beforeclip->GetFrame(--n60, env);
     }
     else if (centerFlag == DECOMB_UCF_NEXT) {
-      res = afterclip->GetFrame(n60 + 1, env);
+      res = afterclip->GetFrame(++n60, env);
     }
     else if (useNR && nrclip) {
       res = nrclip->GetFrame(n60, env);
@@ -2099,8 +2115,11 @@ public:
       res = child->GetFrame(n60, env);
     }
 
-    // フラグをコピーして返す
+    env->MakePropertyWritable(&res);
     env->CopyFrameProps(centerFrame, res);
+    res->SetProperty("KFM_SourceStart", n60 / 2);
+    res->SetProperty("KFM_NumSourceFrames", 1);
+
     return res;
   }
 

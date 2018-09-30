@@ -255,6 +255,9 @@ class KFMSwitch : public KFMFilterBase
 		Frame dst = env->NewVideoFrame(srcvi);
 		MergeBlock<pixel_t>(baseFrame, frame60, mflag, dst, env);
 
+		// プロパティをコピー
+		env->CopyFrameProps(baseFrame.frame, dst.frame);
+
 		return dst;
   }
 
@@ -427,6 +430,27 @@ class KFMSwitch : public KFMFilterBase
     Frame dst;
     if (mode != ONLY_FRAME_DURATION) {
       dst = InternalGetFrame<pixel_t>(n60, info, env);
+
+			if (dst.GetProperty("KFM_SourceStart") == nullptr) {
+				// プロパティがない場合はここで追加する
+				int start, end;
+				switch (info.baseType) {
+				case FRAME_60:
+				case FRAME_UCF:
+				case FRAME_30:
+					start = n60 >> 1;
+					end = start + 1;
+					break;
+				case FRAME_24:
+					Frame24Info frameInfo = patterns.GetFrame60(fm.pattern, n60);
+					start = frameInfo.fieldStartIndex / 2;
+					end = (frameInfo.fieldStartIndex + frameInfo.numFields + 1) / 2;
+					break;
+				}
+				env->MakePropertyWritable(&dst.frame);
+				dst.SetProperty("KFM_SourceStart", start);
+				dst.SetProperty("KFM_NumSourceFrames", end - start);
+			}
     }
     else {
       dst = env->NewVideoFrame(srcvi);
@@ -435,6 +459,7 @@ class KFMSwitch : public KFMFilterBase
     int duration = 0;
     if (mode != NORMAL) {
       duration = GetFrameDuration(n60, info, env);
+			env->MakePropertyWritable(&dst.frame);
       dst.SetProperty("FrameDuration", duration);
     }
 

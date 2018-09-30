@@ -400,6 +400,8 @@ struct AVS_Linkage {
   const char*     (PDevice::*PDevice_GetName)() const;
   // end class PDevice
 
+	bool            (VideoFrame::*VdieoFrame_IsPropertyWritable)() const;
+
   /**********************************************************************/
 };
 
@@ -1007,6 +1009,7 @@ public:
   bool IsWritable() const AVS_BakedCode( return AVS_LinkCall(IsWritable)() )
   BYTE* GetWritePtr(int plane=0) const AVS_BakedCode( return AVS_LinkCall(VFGetWritePtr)(plane) )
 
+  bool IsPropertyWritable() const AVS_BakedCode(return AVS_LinkCall(VdieoFrame_IsPropertyWritable)())
   void SetProperty(const char* key, const AVSMapValue& value) AVS_BakedCode(return AVS_LinkCall_Void(VdieoFrame_SetProperty)(key, value))
 
   // if key is not found, returns nullptr
@@ -1707,6 +1710,8 @@ public:
   virtual void __stdcall DeviceAddCallback(void(*cb)(void*), void* user_data) = 0;
 
   virtual PVideoFrame __stdcall GetFrame(PClip c, int n, const PDevice& device) = 0;
+
+	virtual bool __stdcall MakePropertyWritable(PVideoFrame* pvf) = 0;
 };
 
 // support inteface conversion

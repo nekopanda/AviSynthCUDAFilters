@@ -45,7 +45,7 @@ struct Frame24Info {
   int frameIndex; // サイクル内のフレーム番号
   int fieldStartIndex; // ソースフィールド開始番号
   int numFields; // ソースフィールド数
-  int fieldShift; // 2224パターンを2323変換する場合のずらしが必要はフレーム
+  int fieldShift; // 2224パターンを2323変換する場合のずらしが必要なフレーム
 };
 
 struct FMData {
