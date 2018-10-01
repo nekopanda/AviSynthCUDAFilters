@@ -269,13 +269,13 @@ class KFMSuper : public KFMFilterBase
       dim3 threads(DC_BLOCK_SIZE, DC_BLOCK_TH_W, DC_BLOCK_TH_H);
       dim3 blocks(nblocks(width, DC_BLOCK_TH_W), nblocks(height, DC_BLOCK_TH_H));
       dim3 blocksUV(nblocks(widthUV, DC_BLOCK_TH_W), nblocks(heightUV, DC_BLOCK_TH_H));
-      kl_analyze_frame<pixel_t, parity> << <blocks, threads >> >(
+      kl_analyze_frame<pixel_t, parity> << <blocks, threads >> > (
         combeY, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       DEBUG_SYNC;
-      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> >(
+      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> > (
         combeU, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
-      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> >(
+      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> > (
         combeV, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
     }
@@ -304,7 +304,7 @@ class KFMSuper : public KFMFilterBase
       AnalyzeFrame<pixel_t, false>(f0, f1, dst, env);
     }
 
-		return dst.frame;
+    return dst.frame;
   }
 public:
   KFMSuper(PClip clip, PClip pad, IScriptEnvironment* env)
@@ -335,25 +335,25 @@ public:
       break;
     }
 
-		return PVideoFrame();
+    return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
-		AVSValue clip = new KFMSuper(
-			args[0].AsClip(),       // clip
-			args[1].AsClip(),       // pad
-			env
-		);
-		clip = env->Invoke("SeparateFields", AVSValue(&clip, 1));
-		return env->Invoke("Align", AVSValue(&clip, 1));
+    AVSValue clip = new KFMSuper(
+      args[0].AsClip(),       // clip
+      args[1].AsClip(),       // pad
+      env
+    );
+    clip = env->Invoke("SeparateFields", AVSValue(&clip, 1));
+    return env->Invoke("Align", AVSValue(&clip, 1));
   }
 };
 
@@ -418,13 +418,13 @@ class KCleanSuper : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, 32), nblocks(height, 16));
       dim3 blocksUV(nblocks(widthUV, 32), nblocks(heightUV, 16));
-      kl_clean_super << <blocks, threads >> >(
+      kl_clean_super << <blocks, threads >> > (
         dstY, prevY, curY, width, height, pitchY, thY);
       DEBUG_SYNC;
-      kl_clean_super << <blocksUV, threads >> >(
+      kl_clean_super << <blocksUV, threads >> > (
         dstU, prevU, curU, widthUV, heightUV, pitchUV, thC);
       DEBUG_SYNC;
-      kl_clean_super << <blocksUV, threads >> >(
+      kl_clean_super << <blocksUV, threads >> > (
         dstV, prevV, curV, widthUV, heightUV, pitchUV, thC);
       DEBUG_SYNC;
     }
@@ -457,12 +457,12 @@ public:
     return dst.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -594,13 +594,13 @@ public:
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
       kl_init_fmcount << <1, 2 >> > (fmcnt);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocks, threads >> >(
+      kl_count_cmflags << <blocks, threads >> > (
         fmcnt, combe0Y, combe1Y, pitch, width, height, parity, prmY.threshM, prmY.threshS, prmY.threshLS);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocksUV, threads >> >(
+      kl_count_cmflags << <blocksUV, threads >> > (
         fmcnt, combe0U, combe1U, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocksUV, threads >> >(
+      kl_count_cmflags << <blocksUV, threads >> > (
         fmcnt, combe0V, combe1V, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
       DEBUG_SYNC;
     }
@@ -614,12 +614,12 @@ public:
     return dst.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -663,12 +663,12 @@ public:
     return dst.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -793,12 +793,12 @@ public:
     return dst.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return 0;
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return 0;
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -854,11 +854,11 @@ class KTelecine : public KFMFilterBase
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
         dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
-        kl_copy << <blocks, threads >> >(dstY, src0Y, width4, vi.height / 2, pitchY * 2);
+        kl_copy << <blocks, threads >> > (dstY, src0Y, width4, vi.height / 2, pitchY * 2);
         DEBUG_SYNC;
-        kl_copy << <blocksUV, threads >> >(dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
+        kl_copy << <blocksUV, threads >> > (dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
-        kl_copy << <blocksUV, threads >> >(dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
+        kl_copy << <blocksUV, threads >> > (dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
       }
       else {
@@ -883,11 +883,11 @@ class KTelecine : public KFMFilterBase
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
         dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
-        kl_average << <blocks, threads >> >(dstY, src0Y, src1Y, width4, vi.height / 2, pitchY * 2);
+        kl_average << <blocks, threads >> > (dstY, src0Y, src1Y, width4, vi.height / 2, pitchY * 2);
         DEBUG_SYNC;
-        kl_average << <blocksUV, threads >> >(dstU, src0U, src1U, width4UV, heightUV / 2, pitchUV * 2);
+        kl_average << <blocksUV, threads >> > (dstU, src0U, src1U, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
-        kl_average << <blocksUV, threads >> >(dstV, src0V, src1V, width4UV, heightUV / 2, pitchUV * 2);
+        kl_average << <blocksUV, threads >> > (dstV, src0V, src1V, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
       }
       else {
@@ -999,12 +999,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1056,11 +1056,11 @@ class KTelecineSuper : public KFMFilterBase
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width, threads.x), nblocks(srcvi.height, threads.y));
         dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-        kl_max << <blocks, threads >> >(dstY, src0Y, src1Y, width, height, pitchY);
+        kl_max << <blocks, threads >> > (dstY, src0Y, src1Y, width, height, pitchY);
         DEBUG_SYNC;
-        kl_max << <blocksUV, threads >> >(dstU, src0U, src1U, widthUV, heightUV, pitchUV);
+        kl_max << <blocksUV, threads >> > (dstU, src0U, src1U, widthUV, heightUV, pitchUV);
         DEBUG_SYNC;
-        kl_max << <blocksUV, threads >> >(dstV, src0V, src1V, widthUV, heightUV, pitchUV);
+        kl_max << <blocksUV, threads >> > (dstV, src0V, src1V, widthUV, heightUV, pitchUV);
         DEBUG_SYNC;
       }
       else {
@@ -1107,12 +1107,12 @@ public:
     return out.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1238,9 +1238,9 @@ void cpu_bilinear_v(
 {
   enum { HALF = SCALE / 2 };
   for (int y = 0; y < height; ++y) {
-		int y0 = ((y - HALF) >> SHIFT);
-		int c0 = ((y0 + 1) << SHIFT) - (y - HALF);
-		int c1 = SCALE - c0;
+    int y0 = ((y - HALF) >> SHIFT);
+    int c0 = ((y0 + 1) << SHIFT) - (y - HALF);
+    int c1 = SCALE - c0;
     for (int x = 0; x < width; ++x) {
       auto s0 = src[x + (y0 + 0) * spitch];
       auto s1 = src[x + (y0 + 1) * spitch];
@@ -1275,7 +1275,7 @@ void launch_bilinear_v(
 {
   dim3 threads(32, 8);
   dim3 h_blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_bilinear_v<SCALE, SHIFT> << <h_blocks, threads >> >(dst, width, height, dpitch, src, spitch);
+  kl_bilinear_v<SCALE, SHIFT> << <h_blocks, threads >> > (dst, width, height, dpitch, src, spitch);
   DEBUG_SYNC;
 }
 
@@ -1323,7 +1323,7 @@ void launch_bilinear_h(
 {
   dim3 threads(32, 8);
   dim3 h_blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_bilinear_h<SCALE, SHIFT> << <h_blocks, threads >> >(dst, width, height, dpitch, src, spitch);
+  kl_bilinear_h<SCALE, SHIFT> << <h_blocks, threads >> > (dst, width, height, dpitch, src, spitch);
   DEBUG_SYNC;
 }
 
@@ -1390,11 +1390,11 @@ class KSwitchFlag : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_temporal_soften << <blocks, threads >> >(dstY, src0Y, src1Y, src2Y, width, height, pitchY);
+      kl_temporal_soften << <blocks, threads >> > (dstY, src0Y, src1Y, src2Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_temporal_soften << <blocksUV, threads >> >(dstU, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      kl_temporal_soften << <blocksUV, threads >> > (dstU, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_temporal_soften << <blocksUV, threads >> >(dstV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      kl_temporal_soften << <blocksUV, threads >> > (dstV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1435,11 +1435,11 @@ class KSwitchFlag : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_copy_first << <blocks, threads >> >(combeY, pitchY, srcY, width, height, spitchY);
+      kl_copy_first << <blocks, threads >> > (combeY, pitchY, srcY, width, height, spitchY);
       DEBUG_SYNC;
-      kl_copy_first << <blocksUV, threads >> >(combeU, pitchUV, srcU, widthUV, heightUV, spitchUV);
+      kl_copy_first << <blocksUV, threads >> > (combeU, pitchUV, srcU, widthUV, heightUV, spitchUV);
       DEBUG_SYNC;
-      kl_copy_first << <blocksUV, threads >> >(combeV, pitchUV, srcV, widthUV, heightUV, spitchUV);
+      kl_copy_first << <blocksUV, threads >> > (combeV, pitchUV, srcV, widthUV, heightUV, spitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1452,7 +1452,7 @@ class KSwitchFlag : public KFMFilterBase
     if (IS_CUDA) {
       dim3 threads(32, 16);
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_max << <blocksUV, threads >> >(combeU, combeU, combeV, widthUV, heightUV, pitchUV);
+      kl_max << <blocksUV, threads >> > (combeU, combeU, combeV, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1480,7 +1480,7 @@ class KSwitchFlag : public KFMFilterBase
         if (IS_CUDA) {
           dim3 threads(32, 8);
           dim3 blocks(nblocks(fwidth, threads.x), nblocks(fheight, threads.y));
-          kl_combe_to_flag << <blocks, threads >> >(
+          kl_combe_to_flag << <blocks, threads >> > (
             flagptrs[i] + fpitch + 1, fwidth - 1, fheight - 1, fpitch, combeptrs[i] + pitchY + 1, pitchY);
           DEBUG_SYNC;
         }
@@ -1503,10 +1503,10 @@ class KSwitchFlag : public KFMFilterBase
       dim3 threads(32, 8);
       dim3 blocks(nblocks(fwidth, threads.x), nblocks(fheight, threads.y));
       for (int i = 0; i < 2; ++i) {
-        kl_sum_box3x3 << <blocks, threads >> >(
+        kl_sum_box3x3 << <blocks, threads >> > (
           flagtmpp, flagptrs[i], fwidth, fheight, fpitch, 255);
         DEBUG_SYNC;
-        kl_sum_box3x3 << <blocks, threads >> >(
+        kl_sum_box3x3 << <blocks, threads >> > (
           flagptrs[i], flagtmpp, fwidth, fheight, fpitch, 255);
         DEBUG_SYNC;
       }
@@ -1522,7 +1522,7 @@ class KSwitchFlag : public KFMFilterBase
     if (IS_CUDA) {
       dim3 threads(32, 8);
       dim3 binary_blocks(nblocks(fwidth, threads.x), nblocks(fheight, threads.y));
-      kl_binary_flag << <binary_blocks, threads >> >(
+      kl_binary_flag << <binary_blocks, threads >> > (
         flagpY, flagpY, flagpC, fwidth, fheight, fpitch, (int)thY, (int)thC);
       DEBUG_SYNC;
     }
@@ -1568,12 +1568,12 @@ public:
     return flag.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1663,9 +1663,9 @@ public:
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
     return 0;
   }
 
@@ -1792,12 +1792,12 @@ public:
     return dst.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1811,7 +1811,7 @@ public:
 
 __device__ __host__ int BinomialMerge(int a, int b, int c)
 {
-    return (a + 2 * b + c + 2) >> 2;
+  return (a + 2 * b + c + 2) >> 2;
 }
 
 template <typename pixel_t>
@@ -1890,11 +1890,11 @@ class KRemoveCombe : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_remove_combe2 << <blocks, threads >> >(dstY, srcY, width, height, pitchY, combeY, fpitchY, thY);
+      kl_remove_combe2 << <blocks, threads >> > (dstY, srcY, width, height, pitchY, combeY, fpitchY, thY);
       DEBUG_SYNC;
-      kl_remove_combe2 << <blocksUV, threads >> >(dstU, srcU, widthUV, heightUV, pitchUV, combeU, fpitchUV, thC);
+      kl_remove_combe2 << <blocksUV, threads >> > (dstU, srcU, widthUV, heightUV, pitchUV, combeU, fpitchUV, thC);
       DEBUG_SYNC;
-      kl_remove_combe2 << <blocksUV, threads >> >(dstV, srcV, widthUV, heightUV, pitchUV, combeV, fpitchUV, thC);
+      kl_remove_combe2 << <blocksUV, threads >> > (dstV, srcV, widthUV, heightUV, pitchUV, combeV, fpitchUV, thC);
       DEBUG_SYNC;
     }
     else {
@@ -1952,12 +1952,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {

@@ -105,13 +105,13 @@ class KTemporalDiff : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_compare_frames << <blocks, threads >> >(dstY,
+      kl_compare_frames << <blocks, threads >> > (dstY,
         srcY[0], srcY[1], srcY[2], srcY[3], srcY[4], width4, vi.height, pitchY);
       DEBUG_SYNC;
-      kl_compare_frames << <blocksUV, threads >> >(dstU,
+      kl_compare_frames << <blocksUV, threads >> > (dstU,
         srcU[0], srcU[1], srcU[2], srcU[3], srcU[4], width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_compare_frames << <blocksUV, threads >> >(dstV,
+      kl_compare_frames << <blocksUV, threads >> > (dstV,
         srcV[0], srcV[1], srcV[2], srcV[3], srcV[4], width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
@@ -158,12 +158,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
@@ -282,13 +282,13 @@ class KAnalyzeStatic : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_min_frames << <blocks, threads >> >(dstY,
+      kl_min_frames << <blocks, threads >> > (dstY,
         srcY[0], srcY[1], srcY[2], width4, vi.height, pitchY);
       DEBUG_SYNC;
-      kl_min_frames << <blocksUV, threads >> >(dstU,
+      kl_min_frames << <blocksUV, threads >> > (dstU,
         srcU[0], srcU[1], srcU[2], width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_min_frames << <blocksUV, threads >> >(dstV,
+      kl_min_frames << <blocksUV, threads >> > (dstV,
         srcV[0], srcV[1], srcV[2], width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
@@ -316,7 +316,7 @@ class KAnalyzeStatic : public KFMFilterBase
     if (IS_CUDA) {
       dim3 threads(32, 16);
       dim3 blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
-      kl_and_coefs << <blocks, threads >> >(
+      kl_and_coefs << <blocks, threads >> > (
         dstp, diffp, width4, vi.height, pitch, invcombe, invdiff);
       DEBUG_SYNC;
     }
@@ -393,12 +393,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
@@ -480,13 +480,13 @@ class KMergeStatic : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_merge_static << <blocks, threads >> >(
+      kl_merge_static << <blocks, threads >> > (
         dstY, src60Y, src30Y, pitchY, flagY, width4, vi.height);
       DEBUG_SYNC;
-      kl_merge_static << <blocksUV, threads >> >(
+      kl_merge_static << <blocksUV, threads >> > (
         dstU, src60U, src30U, pitchUV, flagU, width4UV, heightUV);
       DEBUG_SYNC;
-      kl_merge_static << <blocksUV, threads >> >(
+      kl_merge_static << <blocksUV, threads >> > (
         dstV, src60V, src30V, pitchUV, flagV, width4UV, heightUV);
       DEBUG_SYNC;
     }
@@ -544,12 +544,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {

@@ -4,7 +4,7 @@
 // テスト対象となるクラス Foo のためのフィクスチャ
 class KTGMCTest : public AvsTestBase {
 protected:
-	KTGMCTest() { }
+  KTGMCTest() { }
 
   void MSuperTest(TEST_FRAMES tf, bool chroma, int pel, int level);
   void AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch);
@@ -40,12 +40,12 @@ protected:
 
   void NNEDI3Test(TEST_FRAMES tf, bool chroma, int nsize, int nns, int qual, int pscrn);
 
-	void TemporalNRTest(TEST_FRAMES tf);
-	void DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first);
-	void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
+  void TemporalNRTest(TEST_FRAMES tf);
+  void DebandTest(TEST_FRAMES tf, int sample_mode, bool blur_first);
+  void EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma);
 
-   void CFieldDiffTest(int nt, bool chroma);
-   void CFrameDiffDupTest(int blocksize, bool chroma);
+  void CFieldDiffTest(int nt, bool chroma);
+  void CFrameDiffDupTest(int blocksize, bool chroma);
 };
 
 #pragma region MSuper
@@ -118,44 +118,44 @@ TEST_F(KTGMCTest, MSuper_NoCPel1Level0)
 void KTGMCTest::AnalyzeTest(TEST_FRAMES tf, bool cuda, int blksize, bool chroma, int pel, int batch)
 {
   PEnv env;
-	try {
+  try {
     env = PEnv(CreateScriptEnvironment2());
 
-		AVSValue result;
-		std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
-		env->LoadPlugin(debugtoolPath.c_str(), true, &result);
+    AVSValue result;
+    std::string debugtoolPath = modulePath + "\\KDebugTool.dll";
+    env->LoadPlugin(debugtoolPath.c_str(), true, &result);
     std::string ktgmcPath = modulePath + "\\KTGMC.dll";
     env->LoadPlugin(ktgmcPath.c_str(), true, &result);
 
-		std::string scriptpath = workDirPath + "\\script.avs";
+    std::string scriptpath = workDirPath + "\\script.avs";
 
-		std::ofstream out(scriptpath);
+    std::ofstream out(scriptpath);
 
-		out << "LWLibavVideoSource(\"test.ts\")" << std::endl;
-		out << "s = KMSuper(pel = " << pel << ")" << std::endl;
-		out << "kap = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, chroma = " <<
-			(chroma ? "true" : "false") << ", blksize = " << blksize <<
-			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
-		out << "karef = s.KMAnalyse(isb = true, delta = 1, chroma = " <<
-			(chroma ? "true" : "false") << ", blksize = " << blksize <<
-			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
-		out << "kacuda = s." << (cuda ? "OnCPU(0)." : "") << "KMAnalyse(isb = true, delta = 1, chroma = " <<
-			(chroma ? "true" : "false") << ", blksize = " << blksize <<
-			", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, batch = " << batch << ", partial = kap" <<
+    out << "LWLibavVideoSource(\"test.ts\")" << std::endl;
+    out << "s = KMSuper(pel = " << pel << ")" << std::endl;
+    out << "kap = s.KMPartialSuper().KMAnalyse(isb = true, delta = 1, chroma = " <<
+      (chroma ? "true" : "false") << ", blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "karef = s.KMAnalyse(isb = true, delta = 1, chroma = " <<
+      (chroma ? "true" : "false") << ", blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false)" << std::endl;
+    out << "kacuda = s." << (cuda ? "OnCPU(0)." : "") << "KMAnalyse(isb = true, delta = 1, chroma = " <<
+      (chroma ? "true" : "false") << ", blksize = " << blksize <<
+      ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, batch = " << batch << ", partial = kap" <<
       (cuda ? ".OnCPU(0)" : "") << ")" << (cuda ? O_C(0) : "") << std::endl;
-		out << "KMAnalyzeCheck2(karef, kacuda, last)" << std::endl;
+    out << "KMAnalyzeCheck2(karef, kacuda, last)" << std::endl;
 
-		out.close();
+    out.close();
 
-		{
-			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
       GetFrames(clip, tf, env.get());
-		}
-	}
-	catch (const AvisynthError& err) {
-		printf("%s\n", err.msg);
-		GTEST_FAIL();
-	}
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
 }
 
 TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch1)
@@ -180,62 +180,62 @@ TEST_F(KTGMCTest, Analyze_Blk32NoCPel1Batch8)
 
 TEST_F(KTGMCTest, Analyze_Blk16WithCPel2)
 {
-	AnalyzeTest(TF_MID, true, 16, true, 2, 4);
+  AnalyzeTest(TF_MID, true, 16, true, 2, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk16WithCPel1)
 {
-	AnalyzeTest(TF_MID, true, 16, true, 1, 4);
+  AnalyzeTest(TF_MID, true, 16, true, 1, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk16NoCPel2)
 {
-	AnalyzeTest(TF_MID, true, 16, false, 2, 4);
+  AnalyzeTest(TF_MID, true, 16, false, 2, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk16NoCPel1)
 {
-	AnalyzeTest(TF_MID, true, 16, false, 1, 4);
+  AnalyzeTest(TF_MID, true, 16, false, 1, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk8WithCPel2)
 {
-	AnalyzeTest(TF_MID, true, 8, true, 2, 4);
+  AnalyzeTest(TF_MID, true, 8, true, 2, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk8WithCPel1)
 {
-	AnalyzeTest(TF_MID, true, 8, true, 1, 4);
+  AnalyzeTest(TF_MID, true, 8, true, 1, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk8NoCPel2)
 {
-	AnalyzeTest(TF_MID, true, 8, false, 2, 4);
+  AnalyzeTest(TF_MID, true, 8, false, 2, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk8NoCPel1)
 {
-	AnalyzeTest(TF_MID, true, 8, false, 1, 4);
+  AnalyzeTest(TF_MID, true, 8, false, 1, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk32WithCPel2)
 {
-	AnalyzeTest(TF_MID, true, 32, true, 2, 4);
+  AnalyzeTest(TF_MID, true, 32, true, 2, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk32WithCPel1)
 {
-	AnalyzeTest(TF_MID, true, 32, true, 1, 4);
+  AnalyzeTest(TF_MID, true, 32, true, 1, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk32NoCPel2)
 {
-	AnalyzeTest(TF_MID, true, 32, false, 2, 4);
+  AnalyzeTest(TF_MID, true, 32, false, 2, 4);
 }
 
 TEST_F(KTGMCTest, Analyze_Blk32NoCPel1)
 {
-	AnalyzeTest(TF_MID, true, 32, false, 1, 4);
+  AnalyzeTest(TF_MID, true, 32, false, 1, 4);
 }
 
 TEST_F(KTGMCTest, AnalyzeCPU_Blk16WithCPel2)
@@ -306,12 +306,12 @@ void KTGMCTest::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
           ", overlap = " << (blksize / 2) << ", lambda = 400, global = true, meander = false, partial = pmvf1.OnCPU(0))" << std::endl;
       }
       if (N == 1) {
-				out << "degref = src.KMDegrain1(s, mvb"<< O_C(0) <<", mvf"<< O_C(0)<<", thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)"<< O_C(0) << std::endl;
+        out << "degref = src.KMDegrain1(s, mvb" << O_C(0) << ", mvf" << O_C(0) << ", thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain1(scuda, mvb, mvf, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << O_C(0) << std::endl;
       }
       else if (N == 2) {
-        out << "degref = src.KMDegrain2(s, mvb"<< O_C(0)<<", mvf"<< O_C(0)<<", mvb1"<< O_C(0) <<", mvf1"<< O_C(0) <<", thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
-        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)"<< O_C(0) << std::endl;
+        out << "degref = src.KMDegrain2(s, mvb" << O_C(0) << ", mvf" << O_C(0) << ", mvb1" << O_C(0) << ", mvf1" << O_C(0) << ", thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << std::endl;
+        out << "degcuda = srcuda.KMDegrain2(scuda, mvb, mvf, mvb1, mvf1, thSAD = 6400, thSCD1 = 1800, thSCD2 = 980)" << O_C(0) << std::endl;
       }
     }
     else {
@@ -351,12 +351,12 @@ void KTGMCTest::DegrainTest(TEST_FRAMES tf, int N, int blksize, int pel)
 
 TEST_F(KTGMCTest, Degrain_1Blk8Pel2)
 {
-	DegrainTest(TF_MID, 1, 8, 2);
+  DegrainTest(TF_MID, 1, 8, 2);
 }
 
 TEST_F(KTGMCTest, Degrain_1Blk8Pel1)
 {
-	DegrainTest(TF_MID, 1, 8, 1);
+  DegrainTest(TF_MID, 1, 8, 1);
 }
 
 TEST_F(KTGMCTest, Degrain_1Blk16Pel2)
@@ -381,12 +381,12 @@ TEST_F(KTGMCTest, Degrain_1Blk32Pel1)
 
 TEST_F(KTGMCTest, Degrain_2Blk8Pel2)
 {
-	DegrainTest(TF_MID, 2, 8, 2);
+  DegrainTest(TF_MID, 2, 8, 2);
 }
 
 TEST_F(KTGMCTest, Degrain_2Blk8Pel1)
 {
-	DegrainTest(TF_MID, 2, 8, 1);
+  DegrainTest(TF_MID, 2, 8, 1);
 }
 
 TEST_F(KTGMCTest, Degrain_2Blk16Pel2)
@@ -536,12 +536,12 @@ void KTGMCTest::CompensateTest(TEST_FRAMES tf, int blksize, int pel)
 
 TEST_F(KTGMCTest, Compensate_Blk8Pel2)
 {
-	CompensateTest(TF_MID, 8, 2);
+  CompensateTest(TF_MID, 8, 2);
 }
 
 TEST_F(KTGMCTest, Compensate_Blk8Pel1)
 {
-	CompensateTest(TF_MID, 8, 1);
+  CompensateTest(TF_MID, 8, 1);
 }
 
 TEST_F(KTGMCTest, Compensate_Blk16Pel2)
@@ -1064,7 +1064,7 @@ void KTGMCTest::InpandVerticalX2Test(TEST_FRAMES tf, bool chroma)
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
-    out << "ref = src.mt_inpand(mode=\"vertical\", U=" << rc << ",V=" << rc << 
+    out << "ref = src.mt_inpand(mode=\"vertical\", U=" << rc << ",V=" << rc <<
       ").mt_inpand(mode=\"vertical\", U=" << rc << ",V=" << rc << ")" << std::endl;
     out << "cuda = srcuda.KInpandVerticalX2(U = " << rc << ", V = " << rc << ")" O_C(0) "" << std::endl;
 
@@ -1482,7 +1482,7 @@ void KTGMCTest::LimitOverSharpenTest(TEST_FRAMES tf)
     out << "sr1cuda = src1.OnCPU(0)" << std::endl;
     out << "sr2cuda = src2.OnCPU(0)" << std::endl;
     out << "sr3cuda = src3.OnCPU(0)" << std::endl;
-    
+
     out << "tMax = src1.mt_logic(src2, \"max\", U = 3, V = 3).mt_logic(src3, \"max\", U = 3, V = 3)" << std::endl;
     out << "tMin = src1.mt_logic(src2, \"min\", U = 3, V = 3).mt_logic(src3, \"min\", U = 3, V = 3)" << std::endl;
     out << "ref = src.mt_clamp( tMax,tMin, 0,0, U=3,V=3 )" << std::endl;
@@ -1535,7 +1535,7 @@ void KTGMCTest::ToFullRangeTest(TEST_FRAMES tf, bool chroma)
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
     out <<
-      "ref = src.mt_lut(yexpr=\"0.000000 1.062500 0.066406 x 16 - 219 / 0 1 clip 0.062500 + / - * x 16 - 219 / 0 1 clip 1 0.000000 - * + 255 * \"," << 
+      "ref = src.mt_lut(yexpr=\"0.000000 1.062500 0.066406 x 16 - 219 / 0 1 clip 0.062500 + / - * x 16 - 219 / 0 1 clip 1 0.000000 - * + 255 * \"," <<
       "expr=\"x 128 - 128 * 112 / 128 + \",y=3,u=" << rc << ",v=" << rc << ")" << std::endl;
 
     out << "cuda = srcuda.KTGMC_ToFullRange(u=" << rc << ",v=" << rc << ")" O_C(0) "" << std::endl;
@@ -2109,40 +2109,40 @@ TEST_F(KTGMCTest, DeviceCheck)
 
 TEST_F(KTGMCTest, StartupTime)
 {
-	PEnv env;
-	try {
-		env = PEnv(CreateScriptEnvironment2());
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
 
-		AVSValue result;
-		std::string scriptpath = workDirPath + "\\script.avs";
+    AVSValue result;
+    std::string scriptpath = workDirPath + "\\script.avs";
 
-		std::ofstream out(scriptpath);
-		out << "SetCacheMode(CACHE_OPTIMAL_SIZE)" << std::endl;
-		out << "LWLibavVideoSource(\"test.ts\").QTGMC()" << std::endl;
-		out.close();
+    std::ofstream out(scriptpath);
+    out << "SetCacheMode(CACHE_OPTIMAL_SIZE)" << std::endl;
+    out << "LWLibavVideoSource(\"test.ts\").QTGMC()" << std::endl;
+    out.close();
 
-		PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+    PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
 
-		int64_t sum = 0, prev, cur;
-		for (int i = 100; i < 120; ++i) {
-			QueryPerformanceCounter((LARGE_INTEGER*)&prev);
+    int64_t sum = 0, prev, cur;
+    for (int i = 100; i < 120; ++i) {
+      QueryPerformanceCounter((LARGE_INTEGER*)&prev);
 
-			PVideoFrame frame = clip->GetFrame(i, env.get());
+      PVideoFrame frame = clip->GetFrame(i, env.get());
 
-			QueryPerformanceCounter((LARGE_INTEGER*)&cur);
-			int64_t frametime = cur - prev;
-			sum += frametime;
+      QueryPerformanceCounter((LARGE_INTEGER*)&cur);
+      int64_t frametime = cur - prev;
+      sum += frametime;
 
-			int64_t freq;
-			QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
-			printf("%d: %.1f (elapsed: %.1f)\n", i - 100 + 1,
-				(double)frametime / freq * 1000.0, (double)sum / freq * 1000.0);
-		}
-	}
-	catch (const AvisynthError& err) {
-		printf("%s\n", err.msg);
-		GTEST_FAIL();
-	}
+      int64_t freq;
+      QueryPerformanceFrequency((LARGE_INTEGER*)&freq);
+      printf("%d: %.1f (elapsed: %.1f)\n", i - 100 + 1,
+        (double)frametime / freq * 1000.0, (double)sum / freq * 1000.0);
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
 }
 
 #pragma endregion
@@ -2272,184 +2272,184 @@ TEST_F(KTGMCTest, AvsProp)
 
 TEST_F(KTGMCTest, DISABLED_DumpAVSProperty)
 {
-	PEnv env;
-	try {
-		env = PEnv(CreateScriptEnvironment2());
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
 
-		int types[] = {
-			VideoInfo::CS_BGR24,
-			VideoInfo::CS_BGR32,
-			VideoInfo::CS_YUY2,
-			VideoInfo::CS_YV24,
-			VideoInfo::CS_YV16,
-			VideoInfo::CS_YV12,
-			VideoInfo::CS_I420,
-			VideoInfo::CS_IYUV,
-			VideoInfo::CS_YV411,
-			VideoInfo::CS_Y8,
-			VideoInfo::CS_YUV444P10,
-			VideoInfo::CS_YUV422P10,
-			VideoInfo::CS_YUV420P10,
-			VideoInfo::CS_Y10,
-			VideoInfo::CS_YUV444P12,
-			VideoInfo::CS_YUV422P12,
-			VideoInfo::CS_YUV420P12,
-			VideoInfo::CS_Y12,
-			VideoInfo::CS_YUV444P14,
-			VideoInfo::CS_YUV422P14,
-			VideoInfo::CS_YUV420P14,
-			VideoInfo::CS_Y14,
-			VideoInfo::CS_YUV444P16,
-			VideoInfo::CS_YUV422P16,
-			VideoInfo::CS_YUV420P16,
-			VideoInfo::CS_Y16,
-			VideoInfo::CS_YUV444PS,
-			VideoInfo::CS_YUV422PS,
-			VideoInfo::CS_YUV420PS,
-			VideoInfo::CS_Y32,
-			VideoInfo::CS_BGR48,
-			VideoInfo::CS_BGR64,
-			VideoInfo::CS_RGBP,
-			VideoInfo::CS_RGBP10,
-			VideoInfo::CS_RGBP12,
-			VideoInfo::CS_RGBP14,
-			VideoInfo::CS_RGBP16,
-			VideoInfo::CS_RGBPS,
-			VideoInfo::CS_RGBAP,
-			VideoInfo::CS_RGBAP10,
-			VideoInfo::CS_RGBAP12,
-			VideoInfo::CS_RGBAP14,
-			VideoInfo::CS_RGBAP16,
-			VideoInfo::CS_RGBAPS,
-			VideoInfo::CS_YUVA444,
-			VideoInfo::CS_YUVA422,
-			VideoInfo::CS_YUVA420,
-			VideoInfo::CS_YUVA444P10,
-			VideoInfo::CS_YUVA422P10,
-			VideoInfo::CS_YUVA420P10,
-			VideoInfo::CS_YUVA444P12,
-			VideoInfo::CS_YUVA422P12,
-			VideoInfo::CS_YUVA420P12,
-			VideoInfo::CS_YUVA444P14,
-			VideoInfo::CS_YUVA422P14,
-			VideoInfo::CS_YUVA420P14,
-			VideoInfo::CS_YUVA444P16,
-			VideoInfo::CS_YUVA422P16,
-			VideoInfo::CS_YUVA420P16,
-			VideoInfo::CS_YUVA444PS,
-			VideoInfo::CS_YUVA422PS,
-			VideoInfo::CS_YUVA420PS
-		};
-		const char* typenames[] = {
-			"CS_BGR24",
-			"CS_BGR32",
-			"CS_YUY2",
-			"CS_YV24",
-			"CS_YV16",
-			"CS_YV12",
-			"CS_I420",
-			"CS_IYUV",
-			"CS_YV411",
-			"CS_Y8",
-			"CS_YUV444P10",
-			"CS_YUV422P10",
-			"CS_YUV420P10",
-			"CS_Y10",
-			"CS_YUV444P12",
-			"CS_YUV422P12",
-			"CS_YUV420P12",
-			"CS_Y12",
-			"CS_YUV444P14",
-			"CS_YUV422P14",
-			"CS_YUV420P14",
-			"CS_Y14",
-			"CS_YUV444P16",
-			"CS_YUV422P16",
-			"CS_YUV420P16",
-			"CS_Y16",
-			"CS_YUV444PS",
-			"CS_YUV422PS",
-			"CS_YUV420PS",
-			"CS_Y32",
-			"CS_BGR48",
-			"CS_BGR64",
-			"CS_RGBP",
-			"CS_RGBP10",
-			"CS_RGBP12",
-			"CS_RGBP14",
-			"CS_RGBP16",
-			"CS_RGBPS",
-			"CS_RGBAP",
-			"CS_RGBAP10",
-			"CS_RGBAP12",
-			"CS_RGBAP14",
-			"CS_RGBAP16",
-			"CS_RGBAPS",
-			"CS_YUVA444",
-			"CS_YUVA422",
-			"CS_YUVA420",
-			"CS_YUVA444P10",
-			"CS_YUVA422P10",
-			"CS_YUVA420P10",
-			"CS_YUVA444P12",
-			"CS_YUVA422P12",
-			"CS_YUVA420P12",
-			"CS_YUVA444P14",
-			"CS_YUVA422P14",
-			"CS_YUVA420P14",
-			"CS_YUVA444P16",
-			"CS_YUVA422P16",
-			"CS_YUVA420P16",
-			"CS_YUVA444PS",
-			"CS_YUVA422PS",
-			"CS_YUVA420PS"
-		};
+    int types[] = {
+      VideoInfo::CS_BGR24,
+      VideoInfo::CS_BGR32,
+      VideoInfo::CS_YUY2,
+      VideoInfo::CS_YV24,
+      VideoInfo::CS_YV16,
+      VideoInfo::CS_YV12,
+      VideoInfo::CS_I420,
+      VideoInfo::CS_IYUV,
+      VideoInfo::CS_YV411,
+      VideoInfo::CS_Y8,
+      VideoInfo::CS_YUV444P10,
+      VideoInfo::CS_YUV422P10,
+      VideoInfo::CS_YUV420P10,
+      VideoInfo::CS_Y10,
+      VideoInfo::CS_YUV444P12,
+      VideoInfo::CS_YUV422P12,
+      VideoInfo::CS_YUV420P12,
+      VideoInfo::CS_Y12,
+      VideoInfo::CS_YUV444P14,
+      VideoInfo::CS_YUV422P14,
+      VideoInfo::CS_YUV420P14,
+      VideoInfo::CS_Y14,
+      VideoInfo::CS_YUV444P16,
+      VideoInfo::CS_YUV422P16,
+      VideoInfo::CS_YUV420P16,
+      VideoInfo::CS_Y16,
+      VideoInfo::CS_YUV444PS,
+      VideoInfo::CS_YUV422PS,
+      VideoInfo::CS_YUV420PS,
+      VideoInfo::CS_Y32,
+      VideoInfo::CS_BGR48,
+      VideoInfo::CS_BGR64,
+      VideoInfo::CS_RGBP,
+      VideoInfo::CS_RGBP10,
+      VideoInfo::CS_RGBP12,
+      VideoInfo::CS_RGBP14,
+      VideoInfo::CS_RGBP16,
+      VideoInfo::CS_RGBPS,
+      VideoInfo::CS_RGBAP,
+      VideoInfo::CS_RGBAP10,
+      VideoInfo::CS_RGBAP12,
+      VideoInfo::CS_RGBAP14,
+      VideoInfo::CS_RGBAP16,
+      VideoInfo::CS_RGBAPS,
+      VideoInfo::CS_YUVA444,
+      VideoInfo::CS_YUVA422,
+      VideoInfo::CS_YUVA420,
+      VideoInfo::CS_YUVA444P10,
+      VideoInfo::CS_YUVA422P10,
+      VideoInfo::CS_YUVA420P10,
+      VideoInfo::CS_YUVA444P12,
+      VideoInfo::CS_YUVA422P12,
+      VideoInfo::CS_YUVA420P12,
+      VideoInfo::CS_YUVA444P14,
+      VideoInfo::CS_YUVA422P14,
+      VideoInfo::CS_YUVA420P14,
+      VideoInfo::CS_YUVA444P16,
+      VideoInfo::CS_YUVA422P16,
+      VideoInfo::CS_YUVA420P16,
+      VideoInfo::CS_YUVA444PS,
+      VideoInfo::CS_YUVA422PS,
+      VideoInfo::CS_YUVA420PS
+    };
+    const char* typenames[] = {
+      "CS_BGR24",
+      "CS_BGR32",
+      "CS_YUY2",
+      "CS_YV24",
+      "CS_YV16",
+      "CS_YV12",
+      "CS_I420",
+      "CS_IYUV",
+      "CS_YV411",
+      "CS_Y8",
+      "CS_YUV444P10",
+      "CS_YUV422P10",
+      "CS_YUV420P10",
+      "CS_Y10",
+      "CS_YUV444P12",
+      "CS_YUV422P12",
+      "CS_YUV420P12",
+      "CS_Y12",
+      "CS_YUV444P14",
+      "CS_YUV422P14",
+      "CS_YUV420P14",
+      "CS_Y14",
+      "CS_YUV444P16",
+      "CS_YUV422P16",
+      "CS_YUV420P16",
+      "CS_Y16",
+      "CS_YUV444PS",
+      "CS_YUV422PS",
+      "CS_YUV420PS",
+      "CS_Y32",
+      "CS_BGR48",
+      "CS_BGR64",
+      "CS_RGBP",
+      "CS_RGBP10",
+      "CS_RGBP12",
+      "CS_RGBP14",
+      "CS_RGBP16",
+      "CS_RGBPS",
+      "CS_RGBAP",
+      "CS_RGBAP10",
+      "CS_RGBAP12",
+      "CS_RGBAP14",
+      "CS_RGBAP16",
+      "CS_RGBAPS",
+      "CS_YUVA444",
+      "CS_YUVA422",
+      "CS_YUVA420",
+      "CS_YUVA444P10",
+      "CS_YUVA422P10",
+      "CS_YUVA420P10",
+      "CS_YUVA444P12",
+      "CS_YUVA422P12",
+      "CS_YUVA420P12",
+      "CS_YUVA444P14",
+      "CS_YUVA422P14",
+      "CS_YUVA420P14",
+      "CS_YUVA444P16",
+      "CS_YUVA422P16",
+      "CS_YUVA420P16",
+      "CS_YUVA444PS",
+      "CS_YUVA422PS",
+      "CS_YUVA420PS"
+    };
 
-		for (int i = 0; i < sizeof(types) / sizeof(types[0]); ++i) {
-			VideoInfo vi = VideoInfo();
-			vi.width = 100;
-			vi.height = 32;
-			vi.pixel_type = types[i];
+    for (int i = 0; i < sizeof(types) / sizeof(types[0]); ++i) {
+      VideoInfo vi = VideoInfo();
+      vi.width = 100;
+      vi.height = 32;
+      vi.pixel_type = types[i];
 
-			printf("Pixel Format: %s\n", typenames[i]);
-			printf("VideoInfo Properties\n");
-			printf("IsRGB() = %d\n", vi.IsRGB());
-			printf("IsRGB24() = %d\n", vi.IsRGB24());
-			printf("IsRGB32() = %d\n", vi.IsRGB32());
-			printf("IsYUV() = %d\n", vi.IsYUV());
-			printf("IsYUY2() = %d\n", vi.IsYUY2());
-			printf("IsYV24() = %d\n", vi.IsYV24());
-			printf("IsYV16() = %d\n", vi.IsYV16());
-			printf("IsYV12() = %d\n", vi.IsYV12());
-			printf("IsYV411() = %d\n", vi.IsYV411());
-			printf("IsY8() = %d\n", vi.IsY8());
-			printf("IsPlanar() = %d\n", vi.IsPlanar());
-			printf("BytesFromPixels(1) = %d\n", vi.BytesFromPixels(1));
-			printf("RowSize() = %d\n", vi.RowSize());
-			printf("BitsPerPixel() = %d\n", vi.BitsPerPixel());
-			printf("NumComponents() = %d\n", vi.NumComponents());
-			printf("ComponentSize() = %d\n", vi.ComponentSize());
-			printf("BitsPerComponent() = %d\n", vi.BitsPerComponent());
-			printf("Is444() = %d\n", vi.Is444());
-			printf("Is422() = %d\n", vi.Is422());
-			printf("Is420() = %d\n", vi.Is420());
-			printf("IsY() = %d\n", vi.IsY());
-			printf("IsRGB48() = %d\n", vi.IsRGB48());
-			printf("IsRGB64() = %d\n", vi.IsRGB64());
-			printf("IsYUVA() = %d\n", vi.IsYUVA());
-			printf("IsPlanarRGB() = %d\n", vi.IsPlanarRGB());
-			printf("IsPlanarRGBA() = %d\n", vi.IsPlanarRGBA());
+      printf("Pixel Format: %s\n", typenames[i]);
+      printf("VideoInfo Properties\n");
+      printf("IsRGB() = %d\n", vi.IsRGB());
+      printf("IsRGB24() = %d\n", vi.IsRGB24());
+      printf("IsRGB32() = %d\n", vi.IsRGB32());
+      printf("IsYUV() = %d\n", vi.IsYUV());
+      printf("IsYUY2() = %d\n", vi.IsYUY2());
+      printf("IsYV24() = %d\n", vi.IsYV24());
+      printf("IsYV16() = %d\n", vi.IsYV16());
+      printf("IsYV12() = %d\n", vi.IsYV12());
+      printf("IsYV411() = %d\n", vi.IsYV411());
+      printf("IsY8() = %d\n", vi.IsY8());
+      printf("IsPlanar() = %d\n", vi.IsPlanar());
+      printf("BytesFromPixels(1) = %d\n", vi.BytesFromPixels(1));
+      printf("RowSize() = %d\n", vi.RowSize());
+      printf("BitsPerPixel() = %d\n", vi.BitsPerPixel());
+      printf("NumComponents() = %d\n", vi.NumComponents());
+      printf("ComponentSize() = %d\n", vi.ComponentSize());
+      printf("BitsPerComponent() = %d\n", vi.BitsPerComponent());
+      printf("Is444() = %d\n", vi.Is444());
+      printf("Is422() = %d\n", vi.Is422());
+      printf("Is420() = %d\n", vi.Is420());
+      printf("IsY() = %d\n", vi.IsY());
+      printf("IsRGB48() = %d\n", vi.IsRGB48());
+      printf("IsRGB64() = %d\n", vi.IsRGB64());
+      printf("IsYUVA() = %d\n", vi.IsYUVA());
+      printf("IsPlanarRGB() = %d\n", vi.IsPlanarRGB());
+      printf("IsPlanarRGBA() = %d\n", vi.IsPlanarRGBA());
 
-			PVideoFrame frame = env->NewVideoFrame(vi);
-			printf("VideoFrame Properties\n");
-			printf("GetPitch() = %d\n", frame->GetPitch());
-			printf("GetRowSize() = %d\n", frame->GetRowSize());
-			printf("GetHeight() = %d\n", frame->GetHeight());
-			printf("\n");
-		}
-	}
-	catch (const AvisynthError& err) {
-		printf("%s\n", err.msg);
-		GTEST_FAIL();
-	}
+      PVideoFrame frame = env->NewVideoFrame(vi);
+      printf("VideoFrame Properties\n");
+      printf("GetPitch() = %d\n", frame->GetPitch());
+      printf("GetRowSize() = %d\n", frame->GetRowSize());
+      printf("GetHeight() = %d\n", frame->GetHeight());
+      printf("\n");
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
 }

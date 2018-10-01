@@ -23,7 +23,7 @@ public:
   void DebugSync()
   {
 #ifndef NDEBUG
-//#if 1
+    //#if 1
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 #endif

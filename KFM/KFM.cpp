@@ -177,12 +177,12 @@ public:
     return dst.frame;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return 0;
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return 0;
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
@@ -195,37 +195,37 @@ public:
 };
 
 float RSplitScore(const PulldownPatternField* pattern, const float* fv) {
-	float sumsplit = 0, sumnsplit = 0;
+  float sumsplit = 0, sumnsplit = 0;
 
-	for (int i = 0; i < 14; ++i) {
-		if (pattern[i].split) {
-			sumsplit += fv[i];
-		}
-		else {
-			sumnsplit += fv[i];
-		}
-	}
+  for (int i = 0; i < 14; ++i) {
+    if (pattern[i].split) {
+      sumsplit += fv[i];
+    }
+    else {
+      sumnsplit += fv[i];
+    }
+  }
 
-	return sumsplit - sumnsplit;
+  return sumsplit - sumnsplit;
 }
 
 float RSplitCost(const PulldownPatternField* pattern, const float* fv, const float* fvcost, float costth) {
-	int nsplit = 0;
-	float sumcost = 0;
+  int nsplit = 0;
+  float sumcost = 0;
 
-	for (int i = 0; i < 14; ++i) {
-		if (pattern[i].split) {
-			nsplit++;
-			if (fv[i] < costth) {
-				// 相対的にfvを重視したいので、fvcostはlogで抑える
-				//「全切り替えポイントでfvが小さい」->大（ただし動きが全く無ければ小）
-				//「ある切り替えポイントでのみノイズが発生」->小 にしたい
-				sumcost += (costth - fv[i]) * log2f(fvcost[i] + 1.0f);
-			}
-		}
-	}
+  for (int i = 0; i < 14; ++i) {
+    if (pattern[i].split) {
+      nsplit++;
+      if (fv[i] < costth) {
+        // 相対的にfvを重視したいので、fvcostはlogで抑える
+        //「全切り替えポイントでfvが小さい」->大（ただし動きが全く無ければ小）
+        //「ある切り替えポイントでのみノイズが発生」->小 にしたい
+        sumcost += (costth - fv[i]) * log2f(fvcost[i] + 1.0f);
+      }
+    }
+  }
 
-	return sumcost / nsplit;
+  return sumcost / nsplit;
 }
 
 float RSplitReliability(const PulldownPatternField* pattern, const float* fv, float costth) {
@@ -279,17 +279,17 @@ PulldownPattern::PulldownPattern(int nf0, int nf1, int nf2, int nf3)
 }
 
 PulldownPattern::PulldownPattern()
-	: fields()
+  : fields()
   , cycle(2)
 {
   // 30p
-	for (int c = 0, fstart = 0; c < 4; ++c) {
-		for (int i = 0; i < 4; ++i) {
-			int nf = 2;
-			fields[fstart + nf - 1].split = true;
-			fstart += nf;
-		}
-	}
+  for (int c = 0, fstart = 0; c < 4; ++c) {
+    for (int i = 0; i < 4; ++i) {
+      int nf = 2;
+      fields[fstart + nf - 1].split = true;
+      fstart += nf;
+    }
+  }
 }
 
 PulldownPatterns::PulldownPatterns()
@@ -328,17 +328,17 @@ Frame24Info PulldownPatterns::GetFrame24(int patternIndex, int n24) const {
   info.cycleIndex = n24 / 4;
   info.frameIndex = n24 % 4;
 
-	int searchFrame = info.frameIndex;
+  int searchFrame = info.frameIndex;
 
-	// パターンが30pの場合は、5枚中真ん中の1枚を消す
-	// 30pの場合は、24pにした時点で5枚中1枚が失われてしまうので、正しく60pに復元することはできない
-	// 30p部分は60pクリップから取得されるので基本的には問題ないが、
-	// 前後のサイクルが24pで、サイクル境界の空きフレームとして30p部分も取得されることがある
-	// なので、5枚中、最初と最後のフレームだけは正しく60pに復元する必要がある
-	// 以下の処理がないと最後のフレーム(4枚目)がズレてしまう
-	if (Is30p(patternIndex)) {
-		if (searchFrame >= 2) ++searchFrame;
-	}
+  // パターンが30pの場合は、5枚中真ん中の1枚を消す
+  // 30pの場合は、24pにした時点で5枚中1枚が失われてしまうので、正しく60pに復元することはできない
+  // 30p部分は60pクリップから取得されるので基本的には問題ないが、
+  // 前後のサイクルが24pで、サイクル境界の空きフレームとして30p部分も取得されることがある
+  // なので、5枚中、最初と最後のフレームだけは正しく60pに復元する必要がある
+  // 以下の処理がないと最後のフレーム(4枚目)がズレてしまう
+  if (Is30p(patternIndex)) {
+    if (searchFrame >= 2) ++searchFrame;
+  }
 
   const PulldownPatternField* ptn = allpatterns[patternIndex];
   int fldstart = 0;
@@ -425,17 +425,17 @@ std::string GetFullPath(const std::string& path);
 class DumpTextFile
 {
 public:
-	FILE* fp;
-	DumpTextFile(const std::string& fname, IScriptEnvironment* env)
-		: fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
-	{
-		if (fp == nullptr) {
-			env->ThrowError("Failed to open file ... %s", fname);
-		}
-	}
-	~DumpTextFile() {
-		fclose(fp);
-	}
+  FILE* fp;
+  DumpTextFile(const std::string& fname, IScriptEnvironment* env)
+    : fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
+  {
+    if (fp == nullptr) {
+      env->ThrowError("Failed to open file ... %s", fname);
+    }
+  }
+  ~DumpTextFile() {
+    fclose(fp);
+  }
 };
 
 class KFMCycleAnalyze : public GenericVideoFilter
@@ -447,14 +447,14 @@ class KFMCycleAnalyze : public GenericVideoFilter
     READ_PATTERN = 2,
   };
 
-	PClip source;
+  PClip source;
   VideoInfo srcvi;
   int numCycles;
-	PulldownPatterns patterns;
+  PulldownPatterns patterns;
   int mode; // 0:リアルタイム最良, 1:1パス目, 2:2パス目
 
   CycleAnalyzeInfo info;
-	
+
   // 基本パラメータ
   float lscale;
   float costth;
@@ -578,7 +578,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
 
     FMMatch match = { 0 };
     int last = (cycle == numCycles - 1) ? (numCycles + cycleRange) : (cycle + 1);
-    for ( ; current < last; ++current) {
+    for (; current < last; ++current) {
       if (current < numCycles) {
         match = patterns.Matching(GetFMData(current, env),
           srcvi.width, srcvi.height, costth, adj2224, adj30);
@@ -658,14 +658,14 @@ public:
     int cycleRange, float NGThresh, int pastCycles,
     float th60, float th24, float rel24,
     const std::string& filepath, int debug, IScriptEnvironment* env)
-		: GenericVideoFilter(fmframe)
-		, source(source)
+    : GenericVideoFilter(fmframe)
+    , source(source)
     , srcvi(source->GetVideoInfo())
     , numCycles(nblocks(vi.num_frames, 5))
     , mode(mode)
     , info(mode)
-	  , lscale(lscale)
-	  , costth(costth)
+    , lscale(lscale)
+    , costth(costth)
     , adj2224(adj2224)
     , adj30(adj30)
     , cycleRange(cycleRange)
@@ -678,7 +678,7 @@ public:
     , debug(debug)
     , pattern(0)
     , current(0)
-	{
+  {
     int out_bytes = sizeof(KFMResult);
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 4;
@@ -691,7 +691,7 @@ public:
 
     if (mode == GEN_PATTERN) {
       if (debug) {
-				debugFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".debug", env));
+        debugFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".debug", env));
       }
     }
     else if (mode == READ_PATTERN) {
@@ -708,7 +708,7 @@ public:
   }
 
   PVideoFrame __stdcall GetFrame(int cycle, IScriptEnvironment* env)
-	{
+  {
     if (mode == REALTIME) {
       return RealTimeGetFrame(cycle, env);
     }
@@ -719,14 +719,14 @@ public:
       return MakeFrame(results[cycle], env);
     }
     return PVideoFrame();
-	}
+  }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_SERIALIZED;
-		}
-		return 0;
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_SERIALIZED;
+    }
+    return 0;
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -743,9 +743,9 @@ public:
       args[7].AsInt(5),             // range
       (float)args[8].AsFloat(1.0f), // thresh
       args[9].AsInt(180),           // past
-			(float)args[10].AsFloat(3.0f),           // th60
-			(float)args[11].AsFloat(0.1f),           // th30
-			(float)args[12].AsFloat(0.2f),           // rell24
+      (float)args[10].AsFloat(3.0f),           // th60
+      (float)args[11].AsFloat(0.1f),           // th30
+      (float)args[12].AsFloat(0.2f),           // rell24
       args[13].AsString("kfm_cycle.dat"),           // filepath
       args[14].AsInt(0),           // debug
       env
@@ -767,7 +767,7 @@ public:
     int cs = vi.ComponentSize();
     if (cs != 1 && cs != 2)
       env->ThrowError("[Print] Unsupported pixel format");
-    if(vi.IsRGB() || !vi.IsPlanar())
+    if (vi.IsRGB() || !vi.IsPlanar())
       env->ThrowError("[Print] Unsupported pixel format");
   }
 
@@ -793,9 +793,9 @@ public:
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
     return 0;
   }
 
@@ -813,70 +813,70 @@ public:
 
 class KFMDumpFM : public GenericVideoFilter
 {
-	int nOut;
-	std::unique_ptr<DumpTextFile> outFile;
+  int nOut;
+  std::unique_ptr<DumpTextFile> outFile;
 public:
-	KFMDumpFM(PClip fmframe, const std::string& filepath, IScriptEnvironment* env)
-		: GenericVideoFilter(fmframe)
-		, nOut(0)
-	{
-		outFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath, env));
-		fprintf(outFile->fp, "#shima,large shima,move\n");
-	}
+  KFMDumpFM(PClip fmframe, const std::string& filepath, IScriptEnvironment* env)
+    : GenericVideoFilter(fmframe)
+    , nOut(0)
+  {
+    outFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath, env));
+    fprintf(outFile->fp, "#shima,large shima,move\n");
+  }
 
-	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
-	{
-		if (n < nOut) {
-			return child->GetFrame(n, env);
-		}
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    if (n < nOut) {
+      return child->GetFrame(n, env);
+    }
 
-		FMMatch match = { 0 };
-		for (int current = n; current < n + 1; ++current) {
-			Frame frame = child->GetFrame(n, env);
-			const FMCount* ptr = frame.GetReadPtr<FMCount>();
-			for (int i = 0; i < 2; ++i) {
-				fprintf(outFile->fp, "%d,%d,%d\n", ptr[i].shima, ptr[i].lshima, ptr[i].move);
-			}
-			++nOut;
-		}
+    FMMatch match = { 0 };
+    for (int current = n; current < n + 1; ++current) {
+      Frame frame = child->GetFrame(n, env);
+      const FMCount* ptr = frame.GetReadPtr<FMCount>();
+      for (int i = 0; i < 2; ++i) {
+        fprintf(outFile->fp, "%d,%d,%d\n", ptr[i].shima, ptr[i].lshima, ptr[i].move);
+      }
+      ++nOut;
+    }
 
-		if (nOut == vi.num_frames) {
-			// 最後までGetFrameした
-			outFile = nullptr;
-		}
+    if (nOut == vi.num_frames) {
+      // 最後までGetFrameした
+      outFile = nullptr;
+    }
 
-		return child->GetFrame(n, env);
-	}
+    return child->GetFrame(n, env);
+  }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_DEV_TYPE) {
-			return GetDeviceTypes(child) &
-				(DEV_TYPE_CPU | DEV_TYPE_CUDA);
-		}
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_SERIALIZED;
-		}
-		return 0;
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceTypes(child) &
+        (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_SERIALIZED;
+    }
+    return 0;
+  }
 
-	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-	{
-		return new KFMDumpFM(
-			args[0].AsClip(),      // clip
-			args[1].AsString("kfm.txt"),    // filepath
-			env
-		);
-	}
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KFMDumpFM(
+      args[0].AsClip(),      // clip
+      args[1].AsString("kfm.txt"),    // filepath
+      env
+    );
+  }
 };
 
 void AddFuncFM(IScriptEnvironment* env)
 {
-	env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
+  env->AddFunction("KShowStatic", "cc", KShowStatic::Create, 0);
 
   env->AddFunction("KFMCycleAnalyze", "cc[mode]i[lscale]f[costth]f[adj2224]f[adj30]f[range]i[thresh]f[past]i[th60]f[th24]f[rel24]f[filepath]s[debug]i", KFMCycleAnalyze::Create, 0);
   env->AddFunction("Print", "cs[x]i[y]i", Print::Create, 0);
 
-	env->AddFunction("KFMDumpFM", "c[filepath]s", KFMDumpFM::Create, 0);
+  env->AddFunction("KFMDumpFM", "c[filepath]s", KFMDumpFM::Create, 0);
 }
 
 #define NOMINMAX
@@ -908,8 +908,8 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   AddFuncMergeStatic(env);
   AddFuncCombingAnalyze(env);
   AddFuncDebandKernel(env);
-	AddFuncUCF(env);
-	AddFuncDeblock(env);
+  AddFuncUCF(env);
+  AddFuncDeblock(env);
 
   return "K Field Matching Plugin";
 }

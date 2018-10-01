@@ -103,12 +103,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -126,13 +126,13 @@ public:
 enum KFMSWTICH_FLAG {
   FRAME_60 = 1,
   FRAME_30,
-	FRAME_24,
+  FRAME_24,
   FRAME_UCF,
 };
 
 class KFMSwitch : public KFMFilterBase
 {
-	typedef uint8_t pixel_t;
+  typedef uint8_t pixel_t;
 
   enum Mode {
     NORMAL = 0,
@@ -145,62 +145,62 @@ class KFMSwitch : public KFMFilterBase
   PClip clip24;
   PClip mask24;
   PClip cc24;
-  
+
   PClip clip30;
   PClip mask30;
   PClip cc30;
 
-	PClip fmclip;
+  PClip fmclip;
   PClip combemaskclip;
   PClip containscombeclip;
   PClip ucfclip;
-	float thswitch;
+  float thswitch;
   int mode; // 0:通常 1:通常(FrameDurationあり) 2:FrameDurationのみ
-	bool show;
-	bool showflag;
+  bool show;
+  bool showflag;
 
   int analyzeMode;
 
-	int logUVx;
-	int logUVy;
-	int nBlkX, nBlkY;
+  int logUVx;
+  int logUVy;
+  int nBlkX, nBlkY;
 
-	bool is30_60;
-	bool is24_60;
+  bool is30_60;
+  bool is24_60;
 
-	PulldownPatterns patterns;
+  PulldownPatterns patterns;
 
-	template <typename pixel_t>
-	void VisualizeFlag(Frame& dst, Frame& flag, PNeoEnv env)
-	{
-		// 判定結果を表示
-		int blue[] = { 73, 230, 111 };
+  template <typename pixel_t>
+  void VisualizeFlag(Frame& dst, Frame& flag, PNeoEnv env)
+  {
+    // 判定結果を表示
+    int blue[] = { 73, 230, 111 };
 
-		pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
-		pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
-		pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+    pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
     const uint8_t* flagY = flag.GetReadPtr<uint8_t>(PLANAR_Y);
     const uint8_t* flagC = flag.GetReadPtr<uint8_t>(PLANAR_U);
 
-		int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
-		int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
+    int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+    int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
     int fpitchY = flag.GetPitch<uint8_t>(PLANAR_Y);
     int fpitchUV = flag.GetPitch<uint8_t>(PLANAR_U);
 
-		// 色を付ける
-		for (int y = 0; y < srcvi.height; ++y) {
-			for (int x = 0; x < srcvi.width; ++x) {
+    // 色を付ける
+    for (int y = 0; y < srcvi.height; ++y) {
+      for (int x = 0; x < srcvi.width; ++x) {
         int coefY = flagY[x + y * fpitchY];
-				int offY = x + y * dstPitchY;
+        int offY = x + y * dstPitchY;
         dstY[offY] = (blue[0] * coefY + dstY[offY] * (128 - coefY)) >> 7;
-        
+
         int coefC = flagC[(x >> logUVx) + (y >> logUVy) * fpitchUV];
-				int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
-				dstU[offUV] = (blue[1] * coefC + dstU[offUV] * (128 - coefC)) >> 7;
-				dstV[offUV] = (blue[2] * coefC + dstV[offUV] * (128 - coefC)) >> 7;
-			}
-		}
-	}
+        int offUV = (x >> logUVx) + (y >> logUVy) * dstPitchUV;
+        dstU[offUV] = (blue[1] * coefC + dstU[offUV] * (128 - coefC)) >> 7;
+        dstV[offUV] = (blue[2] * coefC + dstV[offUV] * (128 - coefC)) >> 7;
+      }
+    }
+  }
 
   struct FrameInfo {
     int baseType;
@@ -216,7 +216,7 @@ class KFMSwitch : public KFMFilterBase
     case FRAME_UCF:
       return ucfclip->GetFrame(n60, env);
     case FRAME_30:
-			return clip30->GetFrame(is30_60 ? n60 : (n60 >> 1), env);
+      return clip30->GetFrame(is30_60 ? n60 : (n60 >> 1), env);
     case FRAME_24:
       return clip24->GetFrame(is24_60 ? n60 : info.n24, env);
     }
@@ -233,10 +233,10 @@ class KFMSwitch : public KFMFilterBase
     }
     return Frame();
   }
-  
-	template <typename pixel_t>
-	Frame InternalGetFrame(int n60, FrameInfo& info, PNeoEnv env)
-	{
+
+  template <typename pixel_t>
+  Frame InternalGetFrame(int n60, FrameInfo& info, PNeoEnv env)
+  {
     Frame baseFrame = GetBaseFrame(n60, info, env);
     if (info.maskType == 0) {
       return baseFrame;
@@ -245,31 +245,31 @@ class KFMSwitch : public KFMFilterBase
     Frame mflag = GetMaskFrame(n60, info, env);
     Frame frame60 = child->GetFrame(n60, env);
 
-		if (!IS_CUDA && srcvi.ComponentSize() == 1 && showflag) {
-			env->MakeWritable(&baseFrame.frame);
-			VisualizeFlag<pixel_t>(baseFrame, mflag, env);
-			return baseFrame;
-		}
+    if (!IS_CUDA && srcvi.ComponentSize() == 1 && showflag) {
+      env->MakeWritable(&baseFrame.frame);
+      VisualizeFlag<pixel_t>(baseFrame, mflag, env);
+      return baseFrame;
+    }
 
-		// ダメなブロックはbobフレームからコピー
-		Frame dst = env->NewVideoFrame(srcvi);
-		MergeBlock<pixel_t>(baseFrame, frame60, mflag, dst, env);
+    // ダメなブロックはbobフレームからコピー
+    Frame dst = env->NewVideoFrame(srcvi);
+    MergeBlock<pixel_t>(baseFrame, frame60, mflag, dst, env);
 
-		// プロパティをコピー
-		env->CopyFrameProps(baseFrame.frame, dst.frame);
+    // プロパティをコピー
+    env->CopyFrameProps(baseFrame.frame, dst.frame);
 
-		return dst;
+    return dst;
   }
 
-	FrameInfo GetFrameInfo(int n60, KFMResult fm, PNeoEnv env)
-	{
-		int cycleIndex = n60 / 10;
+  FrameInfo GetFrameInfo(int n60, KFMResult fm, PNeoEnv env)
+  {
+    int cycleIndex = n60 / 10;
     Frame baseFrame;
     FrameInfo info = { 0 };
 
     // 60p判定は 1パスの場合はコスト 2パスの場合はKFMCycleAnalyzeの結果 を使う
-		if ((analyzeMode == 0 && fm.cost > thswitch) || (analyzeMode != 0 && fm.is60p)) {
-			// コストが高いので60pと判断
+    if ((analyzeMode == 0 && fm.cost > thswitch) || (analyzeMode != 0 && fm.is60p)) {
+      // コストが高いので60pと判断
       info.baseType = ucfclip ? FRAME_UCF : FRAME_60;
 
       if (mode == ONLY_FRAME_DURATION) {
@@ -296,7 +296,7 @@ class KFMSwitch : public KFMFilterBase
       else {
         return info;
       }
-		}
+    }
 
     // ここでのtypeは 24 or 30 or UCF
 
@@ -346,8 +346,8 @@ class KFMSwitch : public KFMFilterBase
       info.n24 = n24;
     }
 
-		return info;
-	}
+    return info;
+  }
 
   static const char* FrameTypeStr(int frameType)
   {
@@ -426,31 +426,31 @@ class KFMSwitch : public KFMFilterBase
     int cycleIndex = n60 / 10;
     KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
     FrameInfo info = GetFrameInfo(n60, fm, env);
-    
+
     Frame dst;
     if (mode != ONLY_FRAME_DURATION) {
       dst = InternalGetFrame<pixel_t>(n60, info, env);
 
-			if (dst.GetProperty("KFM_SourceStart") == nullptr) {
-				// プロパティがない場合はここで追加する
-				int start, end;
-				switch (info.baseType) {
-				case FRAME_60:
-				case FRAME_UCF:
-				case FRAME_30:
-					start = n60 >> 1;
-					end = start + 1;
-					break;
-				case FRAME_24:
-					Frame24Info frameInfo = patterns.GetFrame60(fm.pattern, n60);
-					start = frameInfo.fieldStartIndex / 2;
-					end = (frameInfo.fieldStartIndex + frameInfo.numFields + 1) / 2;
-					break;
-				}
-				env->MakePropertyWritable(&dst.frame);
-				dst.SetProperty("KFM_SourceStart", start);
-				dst.SetProperty("KFM_NumSourceFrames", end - start);
-			}
+      if (dst.GetProperty("KFM_SourceStart") == nullptr) {
+        // プロパティがない場合はここで追加する
+        int start, end;
+        switch (info.baseType) {
+        case FRAME_60:
+        case FRAME_UCF:
+        case FRAME_30:
+          start = n60 >> 1;
+          end = start + 1;
+          break;
+        case FRAME_24:
+          Frame24Info frameInfo = patterns.GetFrame60(fm.pattern, n60);
+          start = frameInfo.fieldStartIndex / 2;
+          end = (frameInfo.fieldStartIndex + frameInfo.numFields + 1) / 2;
+          break;
+        }
+        env->MakePropertyWritable(&dst.frame);
+        dst.SetProperty("KFM_SourceStart", start);
+        dst.SetProperty("KFM_NumSourceFrames", end - start);
+      }
     }
     else {
       dst = env->NewVideoFrame(srcvi);
@@ -459,7 +459,7 @@ class KFMSwitch : public KFMFilterBase
     int duration = 0;
     if (mode != NORMAL) {
       duration = GetFrameDuration(n60, info, env);
-			env->MakePropertyWritable(&dst.frame);
+      env->MakePropertyWritable(&dst.frame);
       dst.SetProperty("FrameDuration", duration);
     }
 
@@ -474,12 +474,12 @@ class KFMSwitch : public KFMFilterBase
   }
 
 public:
-	KFMSwitch(PClip clip60, PClip fmclip,
+  KFMSwitch(PClip clip60, PClip fmclip,
     PClip clip24, PClip mask24, PClip cc24,
     PClip clip30, PClip mask30, PClip cc30,
     PClip ucfclip,
-		float thswitch, int mode, bool show, bool showflag, IScriptEnvironment* env)
-		: KFMFilterBase(clip60)
+    float thswitch, int mode, bool show, bool showflag, IScriptEnvironment* env)
+    : KFMFilterBase(clip60)
     , srcvi(vi)
     , fmclip(fmclip)
     , clip24(clip24)
@@ -489,18 +489,18 @@ public:
     , mask30(mask30)
     , cc30(cc30)
     , ucfclip(ucfclip)
-		, thswitch(thswitch)
+    , thswitch(thswitch)
     , mode(mode)
-		, show(show)
-		, showflag(showflag)
-		, logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
-		, logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-	{
-		if (vi.width & 7) env->ThrowError("[KFMSwitch]: width must be multiple of 8");
-		if (vi.height & 7) env->ThrowError("[KFMSwitch]: height must be multiple of 8");
+    , show(show)
+    , showflag(showflag)
+    , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
+    , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+  {
+    if (vi.width & 7) env->ThrowError("[KFMSwitch]: width must be multiple of 8");
+    if (vi.height & 7) env->ThrowError("[KFMSwitch]: height must be multiple of 8");
 
-		nBlkX = nblocks(vi.width, OVERLAP);
-		nBlkY = nblocks(vi.height, OVERLAP);
+    nBlkX = nblocks(vi.width, OVERLAP);
+    nBlkY = nblocks(vi.height, OVERLAP);
 
     if (mode < 0 || mode > 2) {
       env->ThrowError("[KFMSwitch] mode(%d) must be in range 0-2", mode);
@@ -548,31 +548,31 @@ public:
     VideoInfo vicc30 = cc30->GetVideoInfo();
     VideoInfo viucf = ucfclip ? ucfclip->GetVideoInfo() : VideoInfo();
 
-		// 24/30クリップは補間された60fpsか見る
-		is24_60 = (vi24.fps_numerator == vi60.fps_numerator) && (vi24.fps_denominator == vi60.fps_denominator);
-		is30_60 = (vi30.fps_numerator == vi60.fps_numerator) && (vi30.fps_denominator == vi60.fps_denominator);
+    // 24/30クリップは補間された60fpsか見る
+    is24_60 = (vi24.fps_numerator == vi60.fps_numerator) && (vi24.fps_denominator == vi60.fps_denominator);
+    is30_60 = (vi30.fps_numerator == vi60.fps_numerator) && (vi30.fps_denominator == vi60.fps_denominator);
 
     // fpsチェック
-		if (is24_60 == false) {
-			if (vi24.fps_denominator != vimask24.fps_denominator)
-				env->ThrowError("[KFMSwitch]: vi24.fps_denominator != vimask24.fps_denominator");
-			if (vi24.fps_numerator != vimask24.fps_numerator)
-				env->ThrowError("[KFMSwitch]: vi24.fps_numerator != vimask24.fps_numerator");
-		}
-		if (vicc24.fps_denominator != vimask24.fps_denominator)
-			env->ThrowError("[KFMSwitch]: vicc24.fps_denominator != vimask24.fps_denominator");
-		if (vicc24.fps_numerator != vimask24.fps_numerator)
-			env->ThrowError("[KFMSwitch]: vicc24.fps_numerator != vimask24.fps_numerator");
-		if (is30_60 == false) {
-			if (vi30.fps_denominator != vimask30.fps_denominator)
-				env->ThrowError("[KFMSwitch]: vi30.fps_denominator != vimask30.fps_denominator");
-			if (vi30.fps_numerator != vimask30.fps_numerator)
-				env->ThrowError("[KFMSwitch]: vi30.fps_numerator != vimask30.fps_numerator");
-		}
-		if (vicc30.fps_denominator != vimask30.fps_denominator)
-			env->ThrowError("[KFMSwitch]: vicc30.fps_denominator != vimask30.fps_denominator");
-		if (vicc30.fps_numerator != vimask30.fps_numerator)
-			env->ThrowError("[KFMSwitch]: vicc30.fps_numerator != vimask30.fps_numerator");
+    if (is24_60 == false) {
+      if (vi24.fps_denominator != vimask24.fps_denominator)
+        env->ThrowError("[KFMSwitch]: vi24.fps_denominator != vimask24.fps_denominator");
+      if (vi24.fps_numerator != vimask24.fps_numerator)
+        env->ThrowError("[KFMSwitch]: vi24.fps_numerator != vimask24.fps_numerator");
+    }
+    if (vicc24.fps_denominator != vimask24.fps_denominator)
+      env->ThrowError("[KFMSwitch]: vicc24.fps_denominator != vimask24.fps_denominator");
+    if (vicc24.fps_numerator != vimask24.fps_numerator)
+      env->ThrowError("[KFMSwitch]: vicc24.fps_numerator != vimask24.fps_numerator");
+    if (is30_60 == false) {
+      if (vi30.fps_denominator != vimask30.fps_denominator)
+        env->ThrowError("[KFMSwitch]: vi30.fps_denominator != vimask30.fps_denominator");
+      if (vi30.fps_numerator != vimask30.fps_numerator)
+        env->ThrowError("[KFMSwitch]: vi30.fps_numerator != vimask30.fps_numerator");
+    }
+    if (vicc30.fps_denominator != vimask30.fps_denominator)
+      env->ThrowError("[KFMSwitch]: vicc30.fps_denominator != vimask30.fps_denominator");
+    if (vicc30.fps_numerator != vimask30.fps_numerator)
+      env->ThrowError("[KFMSwitch]: vicc30.fps_numerator != vimask30.fps_numerator");
     if (ucfclip) {
       if (vi60.fps_denominator != viucf.fps_denominator)
         env->ThrowError("[KFMSwitch]: vi60.fps_denominator != viucf.fps_denominator");
@@ -606,55 +606,55 @@ public:
 
     // UCFクリップチェック
     if (ucfclip) {
-      if(DecombUCFInfo::GetParam(viucf, env)->fpsType != 60)
+      if (DecombUCFInfo::GetParam(viucf, env)->fpsType != 60)
         env->ThrowError("[KFMSwitch]: Invalid UCF clip (KDecombUCF60 clip is required)");
     }
-	}
+  }
 
-	PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
-	{
-		PNeoEnv env = env_;
+  PVideoFrame __stdcall GetFrame(int n60, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
 
-		int pixelSize = srcvi.ComponentSize();
-		switch (pixelSize) {
-		case 1:
-			return GetFrameTop<uint8_t>(n60, env);
-		case 2:
+    int pixelSize = srcvi.ComponentSize();
+    switch (pixelSize) {
+    case 1:
+      return GetFrameTop<uint8_t>(n60, env);
+    case 2:
       return GetFrameTop<uint16_t>(n60, env);
-		default:
-			env->ThrowError("[KFMSwitch] Unsupported pixel format");
-			break;
-		}
+    default:
+      env->ThrowError("[KFMSwitch] Unsupported pixel format");
+      break;
+    }
 
-		return PVideoFrame();
-	}
+    return PVideoFrame();
+  }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
-	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-	{
-		return new KFMSwitch(
-			args[0].AsClip(),           // clip60
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KFMSwitch(
+      args[0].AsClip(),           // clip60
       args[1].AsClip(),           // fmclip
       args[2].AsClip(),           // clip24
       args[3].AsClip(),           // mask24
       args[4].AsClip(),           // cc24
       args[5].AsClip(),           // clip30
-			args[6].AsClip(),           // mask30
+      args[6].AsClip(),           // mask30
       args[7].AsClip(),           // cc30
       args[8].Defined() ? args[8].AsClip() : nullptr,           // ucfclip
       (float)args[9].AsFloat(3.0f),// thswitch
       args[10].AsInt(0),           // mode
       args[11].AsBool(false),      // show
-			args[12].AsBool(false),      // showflag
-			env
-			);
-	}
+      args[12].AsBool(false),      // showflag
+      env
+    );
+  }
 };
 
 class KFMPad : public KFMFilterBase
@@ -701,12 +701,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -727,20 +727,20 @@ public:
     , devices(devices)
   { }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_DEV_TYPE) {
-			return devices;
-		}
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return 0;
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return devices;
+    }
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return 0;
+  }
 
-	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
-	{
-		return new AssumeDevice(args[0].AsClip(), args[1].AsInt());
-	}
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new AssumeDevice(args[0].AsClip(), args[1].AsInt());
+  }
 };
 
 void AddFuncFMKernel(IScriptEnvironment* env)
@@ -748,5 +748,5 @@ void AddFuncFMKernel(IScriptEnvironment* env)
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
   env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
-	env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
+  env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

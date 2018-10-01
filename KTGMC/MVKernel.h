@@ -8,7 +8,7 @@
 #include "KMV.h"
 
 enum {
-	ANALYZE_MAX_BATCH = 8
+  ANALYZE_MAX_BATCH = 8
 };
 
 template <typename pixel_t>
@@ -31,32 +31,32 @@ public:
   virtual void RB2BilinearFiltered(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight) = 0;
 
-	// Analyze //
+  // Analyze //
   virtual int GetSearchBlockSize() = 0;
   virtual int GetSearchBatchSize() = 0;
   virtual void EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV) = 0;
   virtual void InterpolatePrediction(
-		int batch,
-		const short2* src_vector, int srcVectorPitch, const int* src_sad, int srcSadPitch,
-		short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
-		int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
-		int normFactor, int normov, int atotal, int aodd, int aeven) = 0;
+    int batch,
+    const short2* src_vector, int srcVectorPitch, const int* src_sad, int srcSadPitch,
+    short2* dst_vector, int dstVectorPitch, int* dst_sad, int dstSadPitch,
+    int nSrcBlkX, int nSrcBlkY, int nDstBlkX, int nDstBlkY,
+    int normFactor, int normov, int atotal, int aodd, int aeven) = 0;
   virtual void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount) = 0;
   virtual void StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount) = 0;
   virtual void WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD) = 0;
 
   // 36 args
   virtual void Search(
-		int batch, void* _searchbatch, 
-		int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
-		int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
-		int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
-		const pixel_t** pSrcY, const pixel_t** pSrcU, const pixel_t** pSrcV,
-		const pixel_t** pRefY, const pixel_t** pRefU, const pixel_t** pRefV,
-		int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
-		const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* blocks, int* prog, int* next) = 0;
+    int batch, void* _searchbatch,
+    int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
+    int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
+    int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
+    const pixel_t** pSrcY, const pixel_t** pSrcU, const pixel_t** pSrcV,
+    const pixel_t** pRefY, const pixel_t** pRefU, const pixel_t** pRefV,
+    int nPitchY, int nPitchUV, int nImgPitchY, int nImgPitchUV,
+    const short2* globalMV, short2* vectors, int vectorsPitch, int* sads, int sadPitch, void* blocks, int* prog, int* next) = 0;
 
-	// Degrain //
+  // Degrain //
   virtual void GetDegrainStructSize(int N, int& degrainBlock, int& degrainArg) = 0;
 
   //35 args

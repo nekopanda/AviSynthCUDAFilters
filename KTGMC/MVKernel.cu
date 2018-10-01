@@ -282,7 +282,7 @@ __device__ sad_t dev_calc_sad(
 {
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
-		HALF_UV = BLK_SIZE / 4,
+    HALF_UV = BLK_SIZE / 4,
   };
   int sad = 0;
   int yx = wi;
@@ -313,28 +313,28 @@ __device__ sad_t dev_calc_sad_debug(
 {
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
-		HALF_UV = BLK_SIZE / 4,
+    HALF_UV = BLK_SIZE / 4,
   };
   int sad = 0;
-	int yx = wi;
-	for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
-		sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
-		if (debug && wi == 0) {
-			printf("i=%d,sum=%d\n", yy, sad);
-		}
-	}
-	if (CHROMA) {
-		// UVは8x8
-		int uvx = wi % BLK_SIZE_UV;
-		int uvy = wi / BLK_SIZE_UV;
-		for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4回ループ
-			sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-			sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
-			if (debug && wi == 0) {
-				printf("i=%d,sum=%d\n", uvy, sad);
-			}
-		}
-	}
+  int yx = wi;
+  for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
+    sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+    if (debug && wi == 0) {
+      printf("i=%d,sum=%d\n", yy, sad);
+    }
+  }
+  if (CHROMA) {
+    // UVは8x8
+    int uvx = wi % BLK_SIZE_UV;
+    int uvy = wi / BLK_SIZE_UV;
+    for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4回ループ
+      sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+      sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+      if (debug && wi == 0) {
+        printf("i=%d,sum=%d\n", uvy, sad);
+      }
+    }
+  }
   dev_reduce_warp<int, BLK_SIZE, AddReducer<int>>(wi, sad);
   return sad;
 }
@@ -371,15 +371,15 @@ __device__ void dev_reduce_result(CostResult* tmp, int tid)
 
 // 順番はCPU版に合わせる
 __constant__ int2 c_expanding_search_1_area[] = {
-	{ 0, -1 },
-	{ 0, 1 },
-	{ -1, 0 },
-	{ 1, 0 },
+  { 0, -1 },
+  { 0, 1 },
+  { -1, 0 },
+  { 1, 0 },
 
-	{ -1, -1 },
-	{ -1, 1 },
-	{ 1, -1 },
-	{ 1, 1 },
+  { -1, -1 },
+  { -1, 1 },
+  { 1, -1 },
+  { 1, 1 },
 };
 
 // __syncthreads()を呼び出しているので全員で呼ぶ
@@ -421,8 +421,8 @@ __device__ void dev_expanding_search_1(
 
     pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
     if (CHROMA) {
-			pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
-			pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
+      pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
+      pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
     }
   }
 
@@ -472,24 +472,24 @@ __device__ void dev_expanding_search_1(
 // 順番はCPU版に合わせる
 __constant__ int2 c_expanding_search_2_area[] = {
 
-	{ -1, -2 },
-	{ -1, 2 },
-	{ 0, -2 },
-	{ 0, 2 },
-	{ 1, -2 },
-	{ 1, 2 },
+  { -1, -2 },
+  { -1, 2 },
+  { 0, -2 },
+  { 0, 2 },
+  { 1, -2 },
+  { 1, 2 },
 
-	{ -2, -1 },
-	{ 2, -1 },
-	{ -2, 0 },
-	{ 2, 0 },
-	{ -2, 1 },
-	{ 2, 1 },
+  { -2, -1 },
+  { 2, -1 },
+  { -2, 0 },
+  { 2, 0 },
+  { -2, 1 },
+  { 2, 1 },
 
-	{ -2, -2 },
-	{ -2, 2 },
-	{ 2, -2 },
-	{ 2, 2 },
+  { -2, -2 },
+  { -2, 2 },
+  { 2, -2 },
+  { 2, 2 },
 };
 
 // __syncthreads()を呼び出しているので全員で呼ぶ
@@ -526,8 +526,8 @@ __device__ void dev_expanding_search_2(
 
     pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
     if (CHROMA) {
-			pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
-			pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
+      pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
+      pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
     }
   }
 
@@ -562,7 +562,7 @@ __device__ void dev_expanding_search_2(
 }
 
 __constant__ int2 c_hex2_search_1_area[] = {
-	{ -2, 0 }, { -1, 2 }, { 1, 2 }, { 2, 0 }, { 1, -2 }, { -1, -2 }
+  { -2, 0 }, { -1, 2 }, { 1, 2 }, { 2, 0 }, { 1, -2 }, { -1, -2 }
 };
 
 // __syncthreads()を呼び出しているので全員で呼ぶ
@@ -603,8 +603,8 @@ __device__ void dev_hex2_search_1(
 
     pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
     if (CHROMA) {
-			pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
-			pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
+      pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchU, nImgPitchU, x >> 1, y >> 1);
+      pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchV, nImgPitchV, x >> 1, y >> 1);
     }
   }
 
@@ -633,52 +633,52 @@ __device__ void dev_hex2_search_1(
 
 template <typename pixel_t, int BLK_SIZE, bool CHROMA>
 __device__ void dev_read_pixels(int tx,
-	const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
-	pixel_t *pDstY, pixel_t *pDstU, pixel_t *pDstV,
-	int nPitchY, int nPitchU, int nPitchV,
-	int offx, int offy)
+  const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
+  pixel_t *pDstY, pixel_t *pDstU, pixel_t *pDstV,
+  int nPitchY, int nPitchU, int nPitchV,
+  int offx, int offy)
 {
-	enum {
-		BLK_SIZE_UV = BLK_SIZE / 2,
-		HALF_UV = BLK_SIZE / 4,
-	};
-	int x = tx % BLK_SIZE;
-	int y = tx / BLK_SIZE;
-	// range(x,y)=(BLK_SIZE,8)
-	for (int t = 0, yy = y; t < BLK_SIZE / 8; ++t, yy += 8) {
-		pDstY[x + yy * BLK_SIZE] = pSrcY[(x + offx) + (yy + offy) * nPitchY];
-	}
-	if (CHROMA) {
-		offx >>= 1;
-		offy >>= 1;
-		if (BLK_SIZE_UV == 4) {
-			if (x < BLK_SIZE_UV) {
-				if (y < BLK_SIZE_UV) { // 0-4
-					pDstU[x + y * BLK_SIZE_UV] = pSrcU[(x + offx) + (y + offy) * nPitchU];
-				}
-				else { // 4-8
-					y -= BLK_SIZE_UV;
-					pDstV[x + y * BLK_SIZE_UV] = pSrcV[(x + offx) + (y + offy) * nPitchV];
-				}
-			}
-		}
-		else if (BLK_SIZE_UV == 8) {
-			if (x < BLK_SIZE_UV) {
-				pDstU[x + y * BLK_SIZE_UV] = pSrcU[(x + offx) + (y + offy) * nPitchU];
-			}
-			else {
-				x -= BLK_SIZE_UV;
-				pDstV[x + y * BLK_SIZE_UV] = pSrcV[(x + offx) + (y + offy) * nPitchV];
-			}
-		}
-		else if (BLK_SIZE_UV == 16) {
-			int uvx = tx % BLK_SIZE_UV;
-			int uvy = tx / BLK_SIZE_UV;
-			// range(uvx,uvy)=(BLK_SIZE_UV,16)
-			pDstU[uvx + uvy * BLK_SIZE_UV] = pSrcU[(uvx + offx) + (uvy + offy) * nPitchU];
-			pDstV[uvx + uvy * BLK_SIZE_UV] = pSrcV[(uvx + offx) + (uvy + offy) * nPitchV];
-		}
-	}
+  enum {
+    BLK_SIZE_UV = BLK_SIZE / 2,
+    HALF_UV = BLK_SIZE / 4,
+  };
+  int x = tx % BLK_SIZE;
+  int y = tx / BLK_SIZE;
+  // range(x,y)=(BLK_SIZE,8)
+  for (int t = 0, yy = y; t < BLK_SIZE / 8; ++t, yy += 8) {
+    pDstY[x + yy * BLK_SIZE] = pSrcY[(x + offx) + (yy + offy) * nPitchY];
+  }
+  if (CHROMA) {
+    offx >>= 1;
+    offy >>= 1;
+    if (BLK_SIZE_UV == 4) {
+      if (x < BLK_SIZE_UV) {
+        if (y < BLK_SIZE_UV) { // 0-4
+          pDstU[x + y * BLK_SIZE_UV] = pSrcU[(x + offx) + (y + offy) * nPitchU];
+        }
+        else { // 4-8
+          y -= BLK_SIZE_UV;
+          pDstV[x + y * BLK_SIZE_UV] = pSrcV[(x + offx) + (y + offy) * nPitchV];
+        }
+      }
+    }
+    else if (BLK_SIZE_UV == 8) {
+      if (x < BLK_SIZE_UV) {
+        pDstU[x + y * BLK_SIZE_UV] = pSrcU[(x + offx) + (y + offy) * nPitchU];
+      }
+      else {
+        x -= BLK_SIZE_UV;
+        pDstV[x + y * BLK_SIZE_UV] = pSrcV[(x + offx) + (y + offy) * nPitchV];
+      }
+    }
+    else if (BLK_SIZE_UV == 16) {
+      int uvx = tx % BLK_SIZE_UV;
+      int uvy = tx / BLK_SIZE_UV;
+      // range(uvx,uvy)=(BLK_SIZE_UV,16)
+      pDstU[uvx + uvy * BLK_SIZE_UV] = pSrcU[(uvx + offx) + (uvy + offy) * nPitchU];
+      pDstV[uvx + uvy * BLK_SIZE_UV] = pSrcV[(uvx + offx) + (uvy + offy) * nPitchV];
+    }
+  }
 }
 
 template <typename pixel_t>
@@ -709,7 +709,7 @@ union SearchBatchData {
 
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
 __global__ void kl_search(
-	SearchBatchData<pixel_t> *pdata,
+  SearchBatchData<pixel_t> *pdata,
   int nBlkX, int nBlkY, int nPad,
   int nPitchY, int nPitchUV,
   int nImgPitchY, int nImgPitchUV
@@ -726,9 +726,9 @@ __global__ void kl_search(
   const int wi = tx % BLK_SIZE;
   const int bx = tx / BLK_SIZE;
 
-	__shared__ SearchBatchData<pixel_t> d;
+  __shared__ SearchBatchData<pixel_t> d;
 
-	if (tx < SearchBatchData<pixel_t>::LEN) {
+  if (tx < SearchBatchData<pixel_t>::LEN) {
     d.data[tx] = pdata[blockIdx.x].data[tx];
   }
   __syncthreads();
@@ -757,8 +757,8 @@ __global__ void kl_search(
       __shared__ pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
 
       dev_read_pixels<pixel_t, BLK_SIZE, CHROMA>(tx,
-				d.d.pSrcY, d.d.pSrcU, d.d.pSrcV, srcY, srcU, srcV, 
-				nPitchY, nPitchUV, nPitchUV, offx, offy);
+        d.d.pSrcY, d.d.pSrcU, d.d.pSrcV, srcY, srcU, srcV,
+        nPitchY, nPitchUV, nPitchUV, offx, offy);
 
       __shared__ const pixel_t* pRefBY;
       __shared__ const pixel_t* pRefBU;
@@ -849,8 +849,8 @@ __global__ void kl_search(
 
         pRefY[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, x, y);
         if (CHROMA) {
-					pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, x >> 1, y >> 1);
-					pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, x >> 1, y >> 1);
+          pRefU[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, x >> 1, y >> 1);
+          pRefV[tx] = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, x >> 1, y >> 1);
         }
       }
 
@@ -866,8 +866,8 @@ __global__ void kl_search(
           printf("1:[%d]: x=%d,y=%d,cost=%d\n", bx, result[bx].xy.x, result[bx].xy.y, result[bx].cost);
         }
 #endif
-				sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
-				//sad_t sad = dev_calc_sad_debug<pixel_t, BLK_SIZE, CHROMA>(debug && bx == 3, wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
+        sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
+        //sad_t sad = dev_calc_sad_debug<pixel_t, BLK_SIZE, CHROMA>(debug && bx == 3, wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
 
 #if 0
         if (blkx == 0 && blky == 0) {
@@ -934,22 +934,22 @@ __global__ void kl_search(
         // EXHAUSTIVE
         int bmx = result[0].xy.x;
         int bmy = result[0].xy.y;
-				dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
+        dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
           tx, wi, bx, bmx, bmy, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
-				dev_expanding_search_2<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
+        dev_expanding_search_2<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
           tx, wi, bx, bmx, bmy, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
       }
       else if (SEARCH == 2) {
         // HEX2SEARCH
-				dev_hex2_search_1<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
+        dev_hex2_search_1<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
           tx, wi, bx, result[0].xy.x, result[0].xy.y, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
-				dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
+        dev_expanding_search_1<pixel_t, BLK_SIZE, NPEL, CHROMA, CPU_EMU>(debug,
           tx, wi, bx, result[0].xy.x, result[0].xy.y, data, dataf, result[0],
           srcY, srcU, srcV, pRefBY, pRefBU, pRefBV,
           nPitchY, nPitchUV, nPitchUV, nImgPitchY, nImgPitchUV, nImgPitchUV);
@@ -1020,8 +1020,8 @@ __global__ void kl_calc_all_sad(
 
     pRefBY = dev_get_ref_block<pixel_t, NPEL>(pRefBY, nPitchY, nImgPitchY, xy.x, xy.y);
     if (CHROMA) {
-			pRefBU = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, xy.x >> 1, xy.y >> 1);
-			pRefBV = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, xy.x >> 1, xy.y >> 1);
+      pRefBU = dev_get_ref_block<pixel_t, NPEL>(pRefBU, nPitchUV, nImgPitchUV, xy.x >> 1, xy.y >> 1);
+      pRefBV = dev_get_ref_block<pixel_t, NPEL>(pRefBV, nPitchUV, nImgPitchUV, xy.x >> 1, xy.y >> 1);
     }
 
 #if 0
@@ -1046,46 +1046,46 @@ __global__ void kl_calc_all_sad(
 
   int sad = 0;
 
-	int x = tid % BLK_SIZE;
-	int y = tid / BLK_SIZE;
-	// range(x,y)=(BLK_SIZE,8)
-	for (int t = 0, yy = y; t < BLK_SIZE / 8; ++t, yy += 8) {
-		sad = __sad(pSrcBY[x + yy * nPitchY], pRefBY[x + yy * nPitchY], sad);
+  int x = tid % BLK_SIZE;
+  int y = tid / BLK_SIZE;
+  // range(x,y)=(BLK_SIZE,8)
+  for (int t = 0, yy = y; t < BLK_SIZE / 8; ++t, yy += 8) {
+    sad = __sad(pSrcBY[x + yy * nPitchY], pRefBY[x + yy * nPitchY], sad);
 #if 0
-		if (bx == 2 && by == 0) {
-			printf("Y,%d,%d,%d\n", yx, yy, __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], 0));
-		}
+    if (bx == 2 && by == 0) {
+      printf("Y,%d,%d,%d\n", yx, yy, __sad(pSrcBY[yx + yy * nPitchY], pRefBY[yx + yy * nPitchY], 0));
+    }
 #endif
-	}
-	if (CHROMA) {
-		if (BLK_SIZE_UV == 4) {
-			if (x < BLK_SIZE_UV) {
-				if (y < BLK_SIZE_UV) { // 0-4
-					sad = __sad(pSrcBU[x + y * nPitchUV], pRefBU[x + y * nPitchUV], sad);
-				}
-				else { // 4-8
-					y -= BLK_SIZE_UV;
-					sad = __sad(pSrcBV[x + y * nPitchUV], pRefBV[x + y * nPitchUV], sad);
-				}
-			}
-		}
-		else if (BLK_SIZE_UV == 8) {
-			if (x < BLK_SIZE_UV) {
-				sad = __sad(pSrcBU[x + y * nPitchUV], pRefBU[x + y * nPitchUV], sad);
-			}
-			else {
-				x -= BLK_SIZE_UV;
-				sad = __sad(pSrcBV[x + y * nPitchUV], pRefBV[x + y * nPitchUV], sad);
-			}
-		}
-		else if (BLK_SIZE_UV == 16) {
-			int uvx = tid % BLK_SIZE_UV;
-			int uvy = tid / BLK_SIZE_UV;
-			// range(uvx,uvy)=(BLK_SIZE_UV,16)
-			sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
-			sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
-		}
-	}
+  }
+  if (CHROMA) {
+    if (BLK_SIZE_UV == 4) {
+      if (x < BLK_SIZE_UV) {
+        if (y < BLK_SIZE_UV) { // 0-4
+          sad = __sad(pSrcBU[x + y * nPitchUV], pRefBU[x + y * nPitchUV], sad);
+        }
+        else { // 4-8
+          y -= BLK_SIZE_UV;
+          sad = __sad(pSrcBV[x + y * nPitchUV], pRefBV[x + y * nPitchUV], sad);
+        }
+      }
+    }
+    else if (BLK_SIZE_UV == 8) {
+      if (x < BLK_SIZE_UV) {
+        sad = __sad(pSrcBU[x + y * nPitchUV], pRefBU[x + y * nPitchUV], sad);
+      }
+      else {
+        x -= BLK_SIZE_UV;
+        sad = __sad(pSrcBV[x + y * nPitchUV], pRefBV[x + y * nPitchUV], sad);
+      }
+    }
+    else if (BLK_SIZE_UV == 16) {
+      int uvx = tid % BLK_SIZE_UV;
+      int uvy = tid / BLK_SIZE_UV;
+      // range(uvx,uvy)=(BLK_SIZE_UV,16)
+      sad = __sad(pSrcBU[uvx + uvy * nPitchUV], pRefBU[uvx + uvy * nPitchUV], sad);
+      sad = __sad(pSrcBV[uvx + uvy * nPitchUV], pRefBV[uvx + uvy * nPitchUV], sad);
+    }
+  }
 #if 0
   if (bx == 2 && by == 0) {
     printf("tid=%d,sad=%d\n", tid, sad);
@@ -1790,7 +1790,7 @@ static __global__ void kl_degrain_2x3(
 )
 {
   enum {
-		VLEN = VHelper<vtmp_t>::VLEN,
+    VLEN = VHelper<vtmp_t>::VLEN,
     SPAN_X = 3,
     SPAN_Y = 2,
     BLK_STEP = BLK_SIZE / 2,
@@ -1851,14 +1851,14 @@ static __global__ void kl_degrain_2x3(
       }
       __syncthreads();
 
-			vint_t val = { 0 };
+      vint_t val = { 0 };
       if (N == 1)
         val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
-					VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
+        VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
       else if (N == 2)
         val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
-					VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
-					VLoad<VLEN>::to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + VLoad<VLEN>::to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
+        VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
+        VLoad<VLEN>::to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + VLoad<VLEN>::to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
 
       int dstx = bbx * BLK_STEP4 + tx;
       int dsty = bby * BLK_STEP + ty;
@@ -2000,7 +2000,7 @@ static __global__ void kl_compensate_2x3(
 )
 {
   enum {
-		VLEN = VHelper<vtmp_t>::VLEN,
+    VLEN = VHelper<vtmp_t>::VLEN,
     SPAN_X = 3,
     SPAN_Y = 2,
     BLK_STEP = BLK_SIZE / 2,
@@ -2069,7 +2069,7 @@ static __global__ void kl_compensate_2x3(
       }
       __syncthreads();
 
-			vint_t val = VLoad<VLEN>::to_int(&info.d.pRef[offsetSuper]);
+      vint_t val = VLoad<VLEN>::to_int(&info.d.pRef[offsetSuper]);
 
       int dstx = bbx * BLK_STEP4 + tx;
       int dsty = bby * BLK_STEP + ty;
@@ -2254,7 +2254,7 @@ public:
     dim3 threads(BLK_SIZE * 8);
     // 余分なブロックは仕事せずに終了するので問題ない
     dim3 blocks(batch, std::min(nBlkX, nBlkY));
-    kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> >(
+    kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> > (
       pdata, nBlkX, nBlkY, nPad,
       nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
     DebugSync();
@@ -2279,7 +2279,7 @@ public:
   {
     dim3 threads(BLK_SIZE * 8);
     dim3 blocks(nBlkX, nBlkY);
-    kl_calc_all_sad <pixel_t, BLK_SIZE, NPEL, CHROMA> << <blocks, threads, 0, stream >> >(
+    kl_calc_all_sad <pixel_t, BLK_SIZE, NPEL, CHROMA> << <blocks, threads, 0, stream >> > (
       nBlkX, nBlkY, vectors, dst_sad, nPad,
       pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
       nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
@@ -2323,14 +2323,14 @@ public:
 
     {
       // set zeroMV and globalMV
-      kl_init_const_vec << <dim3(2, batch), 1, 0, stream >> >(vectors, vectorsPitch, globalMV, nPel);
+      kl_init_const_vec << <dim3(2, batch), 1, 0, stream >> > (vectors, vectorsPitch, globalMV, nPel);
       DebugSync();
     }
 
     { // prepare
       dim3 threads(32, 8);
       dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y), batch);
-      kl_prepare_search << <blocks, threads, 0, stream >> >(
+      kl_prepare_search << <blocks, threads, 0, stream >> > (
         nBlkX, nBlkY, nBlkSize, nLogScale, nLambdaLevel, lsad,
         penaltyZero, penaltyGlobal, penaltyNew,
         nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
@@ -2352,10 +2352,10 @@ public:
       LAUNCH_SEARCH table[2][12] =
       {
         { // exhaustive
-					&Me::launch_search<8, 1, 1, true, CPU_EMU>,
-					&Me::launch_search<8, 1, 1, false, CPU_EMU>,
-					NULL,
-					NULL,
+          &Me::launch_search<8, 1, 1, true, CPU_EMU>,
+          &Me::launch_search<8, 1, 1, false, CPU_EMU>,
+          NULL,
+          NULL,
           &Me::launch_search<16, 1, 1, true, CPU_EMU>,
           &Me::launch_search<16, 1, 1, false, CPU_EMU>,
           NULL,
@@ -2366,10 +2366,10 @@ public:
           NULL,
         },
         { // hex
-					&Me::launch_search<8, 2, 1, true, CPU_EMU>,
-					&Me::launch_search<8, 2, 1, false, CPU_EMU>,
-					&Me::launch_search<8, 2, 2, true, CPU_EMU>,
-					&Me::launch_search<8, 2, 2, false, CPU_EMU>,
+          &Me::launch_search<8, 2, 1, true, CPU_EMU>,
+          &Me::launch_search<8, 2, 1, false, CPU_EMU>,
+          &Me::launch_search<8, 2, 2, true, CPU_EMU>,
+          &Me::launch_search<8, 2, 2, false, CPU_EMU>,
           &Me::launch_search<16, 2, 1, true, CPU_EMU>,
           &Me::launch_search<16, 2, 1, false, CPU_EMU>,
           &Me::launch_search<16, 2, 2, true, CPU_EMU>,
@@ -2417,10 +2417,10 @@ public:
     { // calc sad
       LAUNCH_CALC_ALL_SAD table[] =
       {
-				&Me::launch_calc_all_sad<8, 1, true>,
-				&Me::launch_calc_all_sad<8, 1, false>,
-				&Me::launch_calc_all_sad<8, 2, true>,
-				&Me::launch_calc_all_sad<8, 2, false>,
+        &Me::launch_calc_all_sad<8, 1, true>,
+        &Me::launch_calc_all_sad<8, 1, false>,
+        &Me::launch_calc_all_sad<8, 2, true>,
+        &Me::launch_calc_all_sad<8, 2, false>,
         &Me::launch_calc_all_sad<16, 1, true>,
         &Me::launch_calc_all_sad<16, 1, false>,
         &Me::launch_calc_all_sad<16, 2, true>,
@@ -2447,11 +2447,11 @@ public:
 
   void EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV)
   {
-    kl_most_freq_mv << <dim3(2, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
+    kl_most_freq_mv << <dim3(2, batch), 1024, 0, stream >> > (vectors, vectorsPitch, nBlkCount, globalMV);
     DebugSync();
     //DataDebug<short2> v1(globalMV, 1, env);
     //v1.Show();
-    kl_mean_global_mv << <dim3(1, batch), 1024, 0, stream >> >(vectors, vectorsPitch, nBlkCount, globalMV);
+    kl_mean_global_mv << <dim3(1, batch), 1024, 0, stream >> > (vectors, vectorsPitch, nBlkCount, globalMV);
     DebugSync();
     //DataDebug<short2> v2(globalMV, 1, env);
     //v2.Show();
@@ -2466,7 +2466,7 @@ public:
   {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nDstBlkX, threads.x), nblocks(nDstBlkY, threads.y), batch);
-    kl_interpolate_prediction << <blocks, threads, 0, stream >> >(
+    kl_interpolate_prediction << <blocks, threads, 0, stream >> > (
       src_vector, srcVectorPitch, src_sad, srcSadPitch,
       dst_vector, dstVectorPitch, dst_sad, dstSadPitch,
       nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
@@ -2478,7 +2478,7 @@ public:
   {
     dim3 threads(256);
     dim3 blocks(nblocks(nBlkCount, threads.x));
-    kl_load_mv << <blocks, threads, 0, stream >> >(in, vectors, sads, nBlkCount);
+    kl_load_mv << <blocks, threads, 0, stream >> > (in, vectors, sads, nBlkCount);
     DebugSync();
   }
 
@@ -2486,7 +2486,7 @@ public:
   {
     dim3 threads(256);
     dim3 blocks(nblocks(nBlkCount, threads.x));
-    kl_store_mv << <blocks, threads, 0, stream >> >(out, vectors, sads, nBlkCount);
+    kl_store_mv << <blocks, threads, 0, stream >> > (out, vectors, sads, nBlkCount);
     DebugSync();
   }
 
@@ -2494,7 +2494,7 @@ public:
   {
     dim3 threads(256);
     dim3 blocks(nblocks(nBlkCount, threads.x));
-    kl_write_default_mv << <blocks, threads, 0, stream >> >(dst, nBlkCount, verybigSAD);
+    kl_write_default_mv << <blocks, threads, 0, stream >> > (dst, nBlkCount, verybigSAD);
     DebugSync();
   }
   void GetDegrainStructSize(int N, int& degrainBlock, int& degrainArg)
@@ -2530,17 +2530,17 @@ public:
     DebugSync();
   }
 
-	template <int N, int BLK_SIZE, int M>
-	void launch_degrain_2x3_small(
-		int nPatternX, int nPatternY,
-		int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch, int pitchsuper)
-	{
-		dim3 threads(BLK_SIZE, BLK_SIZE, M);
-		dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-		kl_degrain_2x3<pixel_t, pixel_t, tmp_t, int, short, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
-			nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
-		DebugSync();
-	}
+  template <int N, int BLK_SIZE, int M>
+  void launch_degrain_2x3_small(
+    int nPatternX, int nPatternY,
+    int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch, int pitchsuper)
+  {
+    dim3 threads(BLK_SIZE, BLK_SIZE, M);
+    dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
+    kl_degrain_2x3<pixel_t, pixel_t, tmp_t, int, short, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
+    DebugSync();
+  }
 
   template <int N, int BLK_SIZE, int M>
   void launch_degrain_2x3(
@@ -2575,7 +2575,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitch, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitch, int nImgPitchUV,
     void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
-  );
+    );
 
   // pTmpはpSrcと同じpitchであること
   template <int N>
@@ -2702,20 +2702,20 @@ public:
           int nPatternX, int nPatternY,
           int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitchX, int pitchsuperX);
 
-				int pitchX, pitchsuperX;
-				if (blksize < 8) {
-					pitchX = pitch;
-					pitchsuperX = pitchsuper;
-				}
-				else {
-					pitchX = pitch4;
-					pitchsuperX = pitchsuper4;
-				}
+        int pitchX, pitchsuperX;
+        if (blksize < 8) {
+          pitchX = pitch;
+          pitchsuperX = pitchsuper;
+        }
+        else {
+          pitchX = pitch4;
+          pitchsuperX = pitchsuper4;
+        }
 
         switch (blksize) {
-				case 4:
-					degrain_func = &Me::launch_degrain_2x3_small<N, 4, 8>;  // 4x4x16  = 128threads
-					break;
+        case 4:
+          degrain_func = &Me::launch_degrain_2x3_small<N, 4, 8>;  // 4x4x16  = 128threads
+          break;
         case 8:
           degrain_func = &Me::launch_degrain_2x3<N, 8, 8>;  // 8x2x8  = 128threads
           break;
@@ -2847,17 +2847,17 @@ public:
     DebugSync();
   }
 
-	template <int BLK_SIZE, int M>
-	void launch_compensate_2x3_small(
-		int nPatternX, int nPatternY,
-		int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch, int pitchsuper)
-	{
-		dim3 threads(BLK_SIZE, BLK_SIZE, M);
-		dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-		kl_compensate_2x3<pixel_t, tmp_t, int, short, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
-			nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
-		DebugSync();
-	}
+  template <int BLK_SIZE, int M>
+  void launch_compensate_2x3_small(
+    int nPatternX, int nPatternY,
+    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch, int pitchsuper)
+  {
+    dim3 threads(BLK_SIZE, BLK_SIZE, M);
+    dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
+    kl_compensate_2x3<pixel_t, tmp_t, int, short, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+      nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
+    DebugSync();
+  }
 
   template <int BLK_SIZE, int M>
   void launch_compensate_2x3(
@@ -2958,7 +2958,7 @@ public:
       (this->*prepare)(
         nBlkX, nBlkY, nPad >> shift, blksize, nTh2, time256, thSAD,
         (p == 0) ? ovrwins : overwinsUV,
-        sceneChange, mv, pRef[0 + p], pRef[3 + p], 
+        sceneChange, mv, pRef[0 + p], pRef[3 + p],
         compensateblocks, pitchsuper, imgpitch);
 
       // pTmp初期化
@@ -2970,20 +2970,20 @@ public:
         int nPatternX, int nPatternY,
         int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitchX, int pitchsuperX);
 
-			int pitchX, pitchsuperX;
-			if (blksize < 8) {
-				pitchX = pitch;
-				pitchsuperX = pitchsuper;
-			}
-			else {
-				pitchX = pitch4;
-				pitchsuperX = pitchsuper4;
-			}
+      int pitchX, pitchsuperX;
+      if (blksize < 8) {
+        pitchX = pitch;
+        pitchsuperX = pitchsuper;
+      }
+      else {
+        pitchX = pitch4;
+        pitchsuperX = pitchsuper4;
+      }
 
       switch (blksize) {
-			case 4:
-				compensate_func = &Me::launch_compensate_2x3_small<4, 8>;  // 4x4x8  = 128threads
-				break;
+      case 4:
+        compensate_func = &Me::launch_compensate_2x3_small<4, 8>;  // 4x4x8  = 128threads
+        break;
       case 8:
         compensate_func = &Me::launch_compensate_2x3<8, 8>;  // 8x2x8  = 128threads
         break;

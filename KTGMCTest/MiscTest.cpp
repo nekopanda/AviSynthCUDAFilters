@@ -99,25 +99,25 @@ TEST_F(MiscTest, KFMPerf)
 
 TEST_F(MiscTest, GenericScriptTest)
 {
-	PEnv env;
-	try {
-		env = PEnv(CreateScriptEnvironment2());
+  PEnv env;
+  try {
+    env = PEnv(CreateScriptEnvironment2());
 
-		std::string scriptpath = workDirPath + "\\script.avs";
+    std::string scriptpath = workDirPath + "\\script.avs";
 
-		std::ofstream out(scriptpath);
+    std::ofstream out(scriptpath);
 
-		out << "Import(\"T:\\sandbox\\t28\\AvsTest\\53_resize.avs\")" << std::endl;
+    out << "Import(\"T:\\sandbox\\t28\\AvsTest\\53_resize.avs\")" << std::endl;
 
-		out.close();
+    out.close();
 
-		{
-			PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
-			GetFrames(clip, TF_100, env.get());
-		}
-	}
-	catch (const AvisynthError& err) {
-		printf("%s\n", err.msg);
-		GTEST_FAIL();
-	}
+    {
+      PClip clip = env->Invoke("Import", scriptpath.c_str()).AsClip();
+      GetFrames(clip, TF_100, env.get());
+    }
+  }
+  catch (const AvisynthError& err) {
+    printf("%s\n", err.msg);
+    GTEST_FAIL();
+  }
 }

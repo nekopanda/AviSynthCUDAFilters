@@ -24,11 +24,11 @@ int Get8BitType(VideoInfo& vi) {
 }
 
 int Get16BitType(VideoInfo& vi) {
-	if (vi.Is420()) return VideoInfo::CS_YUV420P16;
-	else if (vi.Is422()) return VideoInfo::CS_YUV422P16;
-	else if (vi.Is444()) return VideoInfo::CS_YUV444P16;
-	// これ以外は知らん
-	return VideoInfo::CS_BGR48;
+  if (vi.Is420()) return VideoInfo::CS_YUV420P16;
+  else if (vi.Is422()) return VideoInfo::CS_YUV422P16;
+  else if (vi.Is444()) return VideoInfo::CS_YUV444P16;
+  // これ以外は知らん
+  return VideoInfo::CS_BGR48;
 }
 
 Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
@@ -44,7 +44,7 @@ Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
   if (IS_CUDA) {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(width, threads.x), nblocks(vi.height, threads.y));
-    kl_fill<vpixel_t, 0> << <blocks, threads >> >(flagp, width, vi.height, pitch);
+    kl_fill<vpixel_t, 0> << <blocks, threads >> > (flagp, width, vi.height, pitch);
   }
   else {
     cpu_fill<vpixel_t, 0>(flagp, width, vi.height, pitch);
@@ -490,15 +490,15 @@ void KFMFilterBase::CopyFrame(Frame& src, Frame& dst, PNeoEnv env)
 
   int srcPitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
   int srcPitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
-	int dstPitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
-	int dstPitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
+  int dstPitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
+  int dstPitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
 
   int widthUV = srcvi.width >> logUVx;
   int heightUV = srcvi.height >> logUVy;
 
-	Copy(dstY, dstPitchY, srcY, srcPitchY, srcvi.width, srcvi.height, env);
-	Copy(dstU, dstPitchUV, srcU, srcPitchUV, widthUV, heightUV, env);
-	Copy(dstV, dstPitchUV, srcV, srcPitchUV, widthUV, heightUV, env);
+  Copy(dstY, dstPitchY, srcY, srcPitchY, srcvi.width, srcvi.height, env);
+  Copy(dstU, dstPitchUV, srcU, srcPitchUV, widthUV, heightUV, env);
+  Copy(dstV, dstPitchUV, srcV, srcPitchUV, widthUV, heightUV, env);
 }
 
 template void KFMFilterBase::CopyFrame<uint8_t>(Frame& src, Frame& dst, PNeoEnv env);
@@ -525,11 +525,11 @@ void KFMFilterBase::PadFrame(Frame& dst, PNeoEnv env)
     dim3 blocks(nblocks(width4, threads.x));
     dim3 threadsUV(32, vpadUV);
     dim3 blocksUV(nblocks(width4UV, threads.x));
-    kl_padv << <blocks, threads >> >(dstY, width4, srcvi.height, pitchY, VPAD);
+    kl_padv << <blocks, threads >> > (dstY, width4, srcvi.height, pitchY, VPAD);
     DEBUG_SYNC;
-    kl_padv << <blocksUV, threadsUV >> >(dstU, width4UV, heightUV, pitchUV, vpadUV);
+    kl_padv << <blocksUV, threadsUV >> > (dstU, width4UV, heightUV, pitchUV, vpadUV);
     DEBUG_SYNC;
-    kl_padv << <blocksUV, threadsUV >> >(dstV, width4UV, heightUV, pitchUV, vpadUV);
+    kl_padv << <blocksUV, threadsUV >> > (dstV, width4UV, heightUV, pitchUV, vpadUV);
     DEBUG_SYNC;
   }
   else {
@@ -551,7 +551,7 @@ void KFMFilterBase::LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
   if (IS_CUDA) {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-    kl_analyze_frame << <blocks, threads >> >(
+    kl_analyze_frame << <blocks, threads >> > (
       dst, dstPitch, base, sref, mref, width, height, pitch, threshM, threshS, threshLS);
   }
   else {
@@ -632,7 +632,7 @@ void KFMFilterBase::MergeUVFlags(Frame& flag, PNeoEnv env)
   if (IS_CUDA) {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(srcvi.width, threads.x), nblocks(srcvi.height, threads.y));
-    kl_merge_uvflags << <blocks, threads >> >(fY,
+    kl_merge_uvflags << <blocks, threads >> > (fY,
       fU, fV, srcvi.width, srcvi.height, pitchY, pitchUV, logUVx, logUVy);
     DEBUG_SYNC;
   }
@@ -654,7 +654,7 @@ void KFMFilterBase::MergeUVCoefs(Frame& flag, PNeoEnv env)
   if (IS_CUDA) {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
-    kl_merge_uvcoefs << <blocks, threads >> >(fY,
+    kl_merge_uvcoefs << <blocks, threads >> > (fY,
       fU, fV, vi.width, vi.height, pitchY, pitchUV, logUVx, logUVy);
     DEBUG_SYNC;
   }
@@ -681,7 +681,7 @@ void KFMFilterBase::ApplyUVCoefs(Frame& flag, PNeoEnv env)
   if (IS_CUDA) {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-    kl_apply_uvcoefs_420 << <blocks, threads >> >(fY,
+    kl_apply_uvcoefs_420 << <blocks, threads >> > (fY,
       fU, fV, widthUV, heightUV, pitchY, pitchUV);
     DEBUG_SYNC;
   }
@@ -706,7 +706,7 @@ void KFMFilterBase::ExtendCoefs(Frame& src, Frame& dst, PNeoEnv env)
   if (IS_CUDA) {
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
-    kl_extend_coef << <blocks, threads >> >(
+    kl_extend_coef << <blocks, threads >> > (
       dstY + pitchY, srcY + pitchY, width4, vi.height - 2, pitchY);
     DEBUG_SYNC;
     dim3 threadsB(32, 1);
@@ -745,11 +745,11 @@ void KFMFilterBase::CompareFields(Frame& src, Frame& flag, PNeoEnv env)
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
     dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-    kl_calc_combe << <blocks, threads >> >(dstY, srcY, width4, vi.height, pitchY);
+    kl_calc_combe << <blocks, threads >> > (dstY, srcY, width4, vi.height, pitchY);
     DEBUG_SYNC;
-    kl_calc_combe << <blocksUV, threads >> >(dstU, srcU, width4UV, heightUV, pitchUV);
+    kl_calc_combe << <blocksUV, threads >> > (dstU, srcU, width4UV, heightUV, pitchUV);
     DEBUG_SYNC;
-    kl_calc_combe << <blocksUV, threads >> >(dstV, srcV, width4UV, heightUV, pitchUV);
+    kl_calc_combe << <blocksUV, threads >> > (dstV, srcV, width4UV, heightUV, pitchUV);
     DEBUG_SYNC;
   }
   else {
@@ -846,8 +846,8 @@ void KFMFilterBase::ExtendBlocks(Frame& dst, Frame& tmp, bool uv, PNeoEnv env)
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
     dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-    kl_max_extend_blocks_h << <blocks, threads >> >(tmpY, dstY, pitchY, width, height);
-    kl_max_extend_blocks_v << <blocks, threads >> >(dstY, tmpY, pitchY, width, height);
+    kl_max_extend_blocks_h << <blocks, threads >> > (tmpY, dstY, pitchY, width, height);
+    kl_max_extend_blocks_v << <blocks, threads >> > (dstY, tmpY, pitchY, width, height);
     DEBUG_SYNC;
     if (uv) {
       kl_max_extend_blocks_h << <blocksUV, threads >> > (tmpU, dstU, pitchUV, widthUV, heightUV);
@@ -931,13 +931,13 @@ void KFMFilterBase::MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& d
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
     dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-    kl_merge << <blocks, threads >> >(
+    kl_merge << <blocks, threads >> > (
       dstY, src24Y, src60Y, width4, vi.height, pitchY, flagY, fpitchY);
     DEBUG_SYNC;
-    kl_merge << <blocksUV, threads >> >(
+    kl_merge << <blocksUV, threads >> > (
       dstU, src24U, src60U, width4UV, heightUV, pitchUV, flagC, fpitchUV);
     DEBUG_SYNC;
-    kl_merge << <blocksUV, threads >> >(
+    kl_merge << <blocksUV, threads >> > (
       dstV, src24V, src60V, width4UV, heightUV, pitchUV, flagC, fpitchUV);
     DEBUG_SYNC;
   }

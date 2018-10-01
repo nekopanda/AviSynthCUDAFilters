@@ -18,16 +18,16 @@ bool hasEnding(std::string const &fullString, std::string const &ending) {
 }
 
 AVSValue __cdecl IsProcess(AVSValue args, void* user_data, IScriptEnvironment* env) {
-	std::string exe = args[0].AsString("");
-	if (exe.empty()) {
-		env->ThrowError("IsProcess: exe is empty!");
-	}
+  std::string exe = args[0].AsString("");
+  if (exe.empty()) {
+    env->ThrowError("IsProcess: exe is empty!");
+  }
 
   char buf[MAX_PATH];
   if (GetProcessImageFileName(GetCurrentProcess(), buf, MAX_PATH)) {
     std::string name(buf);
-		std::transform(name.begin(), name.end(), name.begin(), ::tolower);
-		std::transform(exe.begin(), exe.end(), exe.begin(), ::tolower);
+    std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+    std::transform(exe.begin(), exe.end(), exe.begin(), ::tolower);
     return hasEnding(name, exe);
   }
   return false;

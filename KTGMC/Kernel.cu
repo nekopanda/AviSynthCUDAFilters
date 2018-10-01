@@ -39,9 +39,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return DEV_TYPE_CUDA;
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
     return 0;
   };
 };
@@ -49,109 +49,109 @@ public:
 #pragma region resample
 
 struct ResamplingProgram {
-	PNeoEnv env;
-	int source_size, target_size;
-	double crop_start, crop_size;
-	int filter_size;
+  PNeoEnv env;
+  int source_size, target_size;
+  double crop_start, crop_size;
+  int filter_size;
 
-	// Array of Integer indicate starting point of sampling
-	std::unique_ptr<DeviceLocalData<int>> pixel_offset;
+  // Array of Integer indicate starting point of sampling
+  std::unique_ptr<DeviceLocalData<int>> pixel_offset;
 
-	// Array of array of coefficient for each pixel
-	// {{pixel[0]_coeff}, {pixel[1]_coeff}, ...}
+  // Array of array of coefficient for each pixel
+  // {{pixel[0]_coeff}, {pixel[1]_coeff}, ...}
   std::unique_ptr<DeviceLocalData<float>> pixel_coefficient_float;
 
-	ResamplingProgram(int filter_size, int source_size, int target_size, double crop_start, double crop_size, 
+  ResamplingProgram(int filter_size, int source_size, int target_size, double crop_start, double crop_size,
     int* ppixel_offset, float* ppixel_coefficient_float, PNeoEnv env)
-		: filter_size(filter_size), source_size(source_size), target_size(target_size), crop_start(crop_start), crop_size(crop_size),
-		env(env)
-	{
-		pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
+    : filter_size(filter_size), source_size(source_size), target_size(target_size), crop_start(crop_start), crop_size(crop_size),
+    env(env)
+  {
+    pixel_offset = std::unique_ptr<DeviceLocalData<int>>(
       new DeviceLocalData<int>(ppixel_offset, target_size, env));
     pixel_coefficient_float = std::unique_ptr<DeviceLocalData<float>>(
       new DeviceLocalData<float>(ppixel_coefficient_float, target_size * filter_size, env));
-	};
+  };
 };
 
 class ResamplingFunction
-	/**
-	* Pure virtual base class for resampling functions
-	*/
+  /**
+  * Pure virtual base class for resampling functions
+  */
 {
 public:
-	virtual double f(double x) = 0;
-	virtual double support() = 0;
+  virtual double f(double x) = 0;
+  virtual double support() = 0;
 
-	virtual std::unique_ptr<ResamplingProgram> GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, PNeoEnv env);
+  virtual std::unique_ptr<ResamplingProgram> GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, PNeoEnv env);
 };
 
 std::unique_ptr<ResamplingProgram> ResamplingFunction::GetResamplingProgram(int source_size, double crop_start, double crop_size, int target_size, PNeoEnv env)
 {
-	double filter_scale = double(target_size) / crop_size;
-	double filter_step = min(filter_scale, 1.0);
-	double filter_support = support() / filter_step;
-	int fir_filter_size = int(ceil(filter_support * 2));
+  double filter_scale = double(target_size) / crop_size;
+  double filter_step = min(filter_scale, 1.0);
+  double filter_support = support() / filter_step;
+  int fir_filter_size = int(ceil(filter_support * 2));
 
   std::unique_ptr<int[]> pixel_offset = std::unique_ptr<int[]>(new int[target_size]);
   std::unique_ptr<float[]> pixel_coefficient_float = std::unique_ptr<float[]>(new float[target_size * fir_filter_size]);
-	//ResamplingProgram* program = new ResamplingProgram(fir_filter_size, source_size, target_size, crop_start, crop_size, env);
+  //ResamplingProgram* program = new ResamplingProgram(fir_filter_size, source_size, target_size, crop_start, crop_size, env);
 
-	// this variable translates such that the image center remains fixed
-	double pos;
-	double pos_step = crop_size / target_size;
+  // this variable translates such that the image center remains fixed
+  double pos;
+  double pos_step = crop_size / target_size;
 
-	if (source_size <= filter_support) {
-		env->ThrowError("Resize: Source image too small for this resize method. Width=%d, Support=%d", source_size, int(ceil(filter_support)));
-	}
+  if (source_size <= filter_support) {
+    env->ThrowError("Resize: Source image too small for this resize method. Width=%d, Support=%d", source_size, int(ceil(filter_support)));
+  }
 
-	if (fir_filter_size == 1) // PointResize
-		pos = crop_start;
-	else
-		pos = crop_start + ((crop_size - target_size) / (target_size * 2)); // TODO this look wrong, gotta check
+  if (fir_filter_size == 1) // PointResize
+    pos = crop_start;
+  else
+    pos = crop_start + ((crop_size - target_size) / (target_size * 2)); // TODO this look wrong, gotta check
 
-	for (int i = 0; i < target_size; ++i) {
-		// Clamp start and end position such that it does not exceed frame size
-		int end_pos = int(pos + filter_support);
+  for (int i = 0; i < target_size; ++i) {
+    // Clamp start and end position such that it does not exceed frame size
+    int end_pos = int(pos + filter_support);
 
-		if (end_pos > source_size - 1)
-			end_pos = source_size - 1;
+    if (end_pos > source_size - 1)
+      end_pos = source_size - 1;
 
-		int start_pos = end_pos - fir_filter_size + 1;
+    int start_pos = end_pos - fir_filter_size + 1;
 
-		if (start_pos < 0)
-			start_pos = 0;
+    if (start_pos < 0)
+      start_pos = 0;
 
     pixel_offset[i] = start_pos;
 
-		// the following code ensures that the coefficients add to exactly FPScale
-		double total = 0.0;
+    // the following code ensures that the coefficients add to exactly FPScale
+    double total = 0.0;
 
-		// Ensure that we have a valid position
-		double ok_pos = clamp(pos, 0.0, (double)(source_size - 1));
+    // Ensure that we have a valid position
+    double ok_pos = clamp(pos, 0.0, (double)(source_size - 1));
 
-		// Accumulate all coefficients for weighting
-		for (int j = 0; j < fir_filter_size; ++j) {
-			total += f((start_pos + j - ok_pos) * filter_step);
-		}
+    // Accumulate all coefficients for weighting
+    for (int j = 0; j < fir_filter_size; ++j) {
+      total += f((start_pos + j - ok_pos) * filter_step);
+    }
 
-		if (total == 0.0) {
-			// Shouldn't happened for valid positions.
-			total = 1.0;
-		}
+    if (total == 0.0) {
+      // Shouldn't happened for valid positions.
+      total = 1.0;
+    }
 
-		double value = 0.0;
+    double value = 0.0;
 
-		// Now we generate real coefficient
-		for (int k = 0; k < fir_filter_size; ++k) {
-			double new_value = value + f((start_pos + k - ok_pos) * filter_step) / total;
+    // Now we generate real coefficient
+    for (int k = 0; k < fir_filter_size; ++k) {
+      double new_value = value + f((start_pos + k - ok_pos) * filter_step) / total;
       pixel_coefficient_float[i*fir_filter_size + k] = float(new_value - value); // no scaling for float
-			value = new_value;
-		}
+      value = new_value;
+    }
 
-		pos += pos_step;
-	}
+    pos += pos_step;
+  }
 
-	return std::unique_ptr<ResamplingProgram>(new ResamplingProgram(
+  return std::unique_ptr<ResamplingProgram>(new ResamplingProgram(
     fir_filter_size, source_size, target_size, crop_start, crop_size,
     pixel_offset.get(), pixel_coefficient_float.get(), env));
 }
@@ -161,32 +161,32 @@ std::unique_ptr<ResamplingProgram> ResamplingFunction::GetResamplingProgram(int 
 *********************************/
 
 class MitchellNetravaliFilter : public ResamplingFunction
-	/**
-	* Mitchell-Netraveli filter, used in BicubicResize
-	**/
+  /**
+  * Mitchell-Netraveli filter, used in BicubicResize
+  **/
 {
 public:
-	MitchellNetravaliFilter(double b = 1. / 3., double c = 1. / 3.);
-	double f(double x);
-	double support() { return 2.0; }
+  MitchellNetravaliFilter(double b = 1. / 3., double c = 1. / 3.);
+  double f(double x);
+  double support() { return 2.0; }
 
 private:
-	double p0, p2, p3, q0, q1, q2, q3;
+  double p0, p2, p3, q0, q1, q2, q3;
 };
 
 MitchellNetravaliFilter::MitchellNetravaliFilter(double b, double c) {
-	p0 = (6. - 2.*b) / 6.;
-	p2 = (-18. + 12.*b + 6.*c) / 6.;
-	p3 = (12. - 9.*b - 6.*c) / 6.;
-	q0 = (8.*b + 24.*c) / 6.;
-	q1 = (-12.*b - 48.*c) / 6.;
-	q2 = (6.*b + 30.*c) / 6.;
-	q3 = (-b - 6.*c) / 6.;
+  p0 = (6. - 2.*b) / 6.;
+  p2 = (-18. + 12.*b + 6.*c) / 6.;
+  p3 = (12. - 9.*b - 6.*c) / 6.;
+  q0 = (8.*b + 24.*c) / 6.;
+  q1 = (-12.*b - 48.*c) / 6.;
+  q2 = (6.*b + 30.*c) / 6.;
+  q3 = (-b - 6.*c) / 6.;
 }
 
 double MitchellNetravaliFilter::f(double x) {
-	x = fabs(x);
-	return (x<1) ? (p0 + x*x*(p2 + x*p3)) : (x<2) ? (q0 + x*(q1 + x*(q2 + x*q3))) : 0.0;
+  x = fabs(x);
+  return (x < 1) ? (p0 + x*x*(p2 + x*p3)) : (x < 2) ? (q0 + x*(q1 + x*(q2 + x*q3))) : 0.0;
 }
 
 /***********************
@@ -225,28 +225,28 @@ double GaussianFilter::f(double value) {
 
 template <typename vpixel_t, int filter_size>
 __global__ void kl_resample_v(
-	const vpixel_t* __restrict__ src, vpixel_t* dst,
-	int src_pitch4, int dst_pitch4,
-	int width4, int height,
-	const int* __restrict__ offset, const float* __restrict__ coef)
+  const vpixel_t* __restrict__ src, vpixel_t* dst,
+  int src_pitch4, int dst_pitch4,
+  int width4, int height,
+  const int* __restrict__ offset, const float* __restrict__ coef)
 {
-	int x = threadIdx.x + blockIdx.x * blockDim.x;
-	int y = threadIdx.y + blockIdx.y * blockDim.y;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
 
-	if (x < width4 && y < height) {
-		int begin = offset[y];
+  if (x < width4 && y < height) {
+    int begin = offset[y];
     float4 result = { 0 };
-		for (int i = 0; i < filter_size; ++i) {
-			result += to_float(src[x + (begin + i) * src_pitch4]) * coef[y * filter_size + i];
-		}
-		result = clamp(result, 0, (sizeof(src[0].x) == 1) ? 255 : 65535);
+    for (int i = 0; i < filter_size; ++i) {
+      result += to_float(src[x + (begin + i) * src_pitch4]) * coef[y * filter_size + i];
+    }
+    result = clamp(result, 0, (sizeof(src[0].x) == 1) ? 255 : 65535);
 #if 0
     if (x == 1200 && y == 0) {
       printf("! %f\n", result);
     }
 #endif
-		dst[x + y * dst_pitch4] = VHelper<vpixel_t>::cast_to(result + 0.5f);
-	}
+    dst[x + y * dst_pitch4] = VHelper<vpixel_t>::cast_to(result + 0.5f);
+  }
 }
 
 template <typename vpixel_t, int filter_size>
@@ -258,7 +258,7 @@ void launch_resmaple_v(
 {
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-  kl_resample_v<vpixel_t, filter_size> << <blocks, threads, 0, stream >> >(
+  kl_resample_v<vpixel_t, filter_size> << <blocks, threads, 0, stream >> > (
     src, dst, src_pitch4, dst_pitch4, width4, height, offset, coef);
 }
 
@@ -371,64 +371,64 @@ void launch_resmaple_h(
 {
   dim3 threads(RESAMPLE_H_W, RESAMPLE_H_H);
   dim3 blocks(nblocks(width / 4, threads.x), nblocks(height, threads.y));
-  kl_resample_h<pixel_t, filter_size> << <blocks, threads, 0, stream>> >(
+  kl_resample_h<pixel_t, filter_size> << <blocks, threads, 0, stream >> > (
     src, dst, src_pitch, dst_pitch, width, height, offset, coef);
 }
 
 #pragma endregion
 
 class KTGMC_Bob : public CUDAFilterBase {
-	std::unique_ptr<ResamplingProgram> program_e_y;
-	std::unique_ptr<ResamplingProgram> program_e_uv;
-	std::unique_ptr<ResamplingProgram> program_o_y;
-	std::unique_ptr<ResamplingProgram> program_o_uv;
+  std::unique_ptr<ResamplingProgram> program_e_y;
+  std::unique_ptr<ResamplingProgram> program_e_uv;
+  std::unique_ptr<ResamplingProgram> program_o_y;
+  std::unique_ptr<ResamplingProgram> program_o_uv;
 
-	bool parity;
+  bool parity;
   int logUVx;
   int logUVy;
 
-	// 1フレーム分キャッシュしておく
-	std::mutex mtx_;
-	int cacheN;
-	PVideoFrame cache[2];
+  // 1フレーム分キャッシュしておく
+  std::mutex mtx_;
+  int cacheN;
+  PVideoFrame cache[2];
 
   template <typename pixel_t>
-	void MakeFrameT(bool top, PVideoFrame& src, PVideoFrame& dst,
-		ResamplingProgram* program_y, ResamplingProgram* program_uv, PNeoEnv env)
-	{
+  void MakeFrameT(bool top, PVideoFrame& src, PVideoFrame& dst,
+    ResamplingProgram* program_y, ResamplingProgram* program_uv, PNeoEnv env)
+  {
     typedef typename VectorType<pixel_t>::type vpixel_t;
     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
-		for (int p = 0; p < 3; ++p) {
+    for (int p = 0; p < 3; ++p) {
       const vpixel_t* srcptr = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
-			int src_pitch4 = src->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
+      int src_pitch4 = src->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
 
-			// separate field
-			srcptr += top ? 0 : src_pitch4;
+      // separate field
+      srcptr += top ? 0 : src_pitch4;
       src_pitch4 *= 2;
 
       vpixel_t* dstptr = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
-			int dst_pitch4 = dst->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
+      int dst_pitch4 = dst->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
 
-			ResamplingProgram* prog = (p == 0) ? program_y : program_uv;
+      ResamplingProgram* prog = (p == 0) ? program_y : program_uv;
 
       int width4 = vi.width / 4;
       int height = vi.height;
-      
+
       if (p > 0) {
         width4 >>= logUVx;
         height >>= logUVy;
       }
 
       launch_resmaple_v<vpixel_t, 4>(
-				srcptr, dstptr, src_pitch4, dst_pitch4, width4, height,
-				prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env), stream);
+        srcptr, dstptr, src_pitch4, dst_pitch4, width4, height,
+        prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env), stream);
 
       DEBUG_SYNC;
-		}
-	}
+    }
+  }
 
   void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
     ResamplingProgram* program_y, ResamplingProgram* program_uv, PNeoEnv env)
@@ -448,32 +448,32 @@ class KTGMC_Bob : public CUDAFilterBase {
 
 public:
   KTGMC_Bob(PClip _child, double b, double c, IScriptEnvironment* env_)
-		: CUDAFilterBase(_child)
-		, parity(_child->GetParity(0))
-		, cacheN(-1)
+    : CUDAFilterBase(_child)
+    , parity(_child->GetParity(0))
+    , cacheN(-1)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-	{
-		PNeoEnv env = env_;
+  {
+    PNeoEnv env = env_;
 
-		// フレーム数、FPSを2倍
-		vi.num_frames *= 2;
-		vi.MulDivFPS(2, 1);
-		
-		double shift = parity ? 0.25 : -0.25;
+    // フレーム数、FPSを2倍
+    vi.num_frames *= 2;
+    vi.MulDivFPS(2, 1);
 
-		int y_height = vi.height;
-		int uv_height = vi.height >> logUVy;
+    double shift = parity ? 0.25 : -0.25;
 
-		program_e_y = MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, shift, y_height / 2, y_height, env);
-		program_e_uv = MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, shift, uv_height / 2, uv_height, env);
-		program_o_y = MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, -shift, y_height / 2, y_height, env);
-		program_o_uv = MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, -shift, uv_height / 2, uv_height, env);
-	}
+    int y_height = vi.height;
+    int uv_height = vi.height >> logUVy;
 
-	PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
-	{
-		PNeoEnv env = env_;
+    program_e_y = MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, shift, y_height / 2, y_height, env);
+    program_e_uv = MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, shift, uv_height / 2, uv_height, env);
+    program_o_y = MitchellNetravaliFilter(b, c).GetResamplingProgram(y_height / 2, -shift, y_height / 2, y_height, env);
+    program_o_uv = MitchellNetravaliFilter(b, c).GetResamplingProgram(uv_height / 2, -shift, uv_height / 2, uv_height, env);
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
+  {
+    PNeoEnv env = env_;
 
     if (!IS_CUDA) {
       env->ThrowError("[KTGMC_Bob] CUDAフレームを入力してください");
@@ -484,53 +484,53 @@ public:
     }
 #endif
 
-		int srcN = n >> 1;
+    int srcN = n >> 1;
 
-		{
-			std::lock_guard<std::mutex> lock(mtx_);
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
 
-			if (cacheN >= 0 && srcN == cacheN) {
-				return cache[n % 2];
-			}
-		}
+      if (cacheN >= 0 && srcN == cacheN) {
+        return cache[n % 2];
+      }
+    }
 
-		PVideoFrame src = child->GetFrame(srcN, env);
+    PVideoFrame src = child->GetFrame(srcN, env);
 
-		PVideoFrame bobE = env->NewVideoFrame(vi);
-		PVideoFrame bobO = env->NewVideoFrame(vi);
+    PVideoFrame bobE = env->NewVideoFrame(vi);
+    PVideoFrame bobO = env->NewVideoFrame(vi);
 
-		MakeFrame(parity, src, bobE, program_e_y.get(), program_e_uv.get(), env);
-		MakeFrame(!parity, src, bobO, program_o_y.get(), program_o_uv.get(), env);
+    MakeFrame(parity, src, bobE, program_e_y.get(), program_e_uv.get(), env);
+    MakeFrame(!parity, src, bobO, program_o_y.get(), program_o_uv.get(), env);
 
-		{
-			std::lock_guard<std::mutex> lock(mtx_);
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
 
-			cacheN = n / 2;
-			cache[0] = bobE;
-			cache[1] = bobO;
+      cacheN = n / 2;
+      cache[0] = bobE;
+      cache[1] = bobO;
 
-			return cache[n % 2];
-		}
-	}
+      return cache[n % 2];
+    }
+  }
 
   bool __stdcall GetParity(int n) {
     return child->GetParity(0);
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return CUDAFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return CUDAFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
-	static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
-		return new KTGMC_Bob(
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env) {
+    return new KTGMC_Bob(
       args[0].AsClip(),
       args[1].AsFloat(0),
       args[2].AsFloat(0.5),
       env);
-	}
+  }
 };
 
 enum { CALC_SAD_THREADS = 256 };
@@ -658,7 +658,7 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
 
     PVideoFrame dst = env->NewVideoFrame(vi);
 
-    kl_init_sad << <1, radius * 2 * 3, 0, stream>> > (sad);
+    kl_init_sad << <1, radius * 2 * 3, 0, stream >> > (sad);
     DEBUG_SYNC;
 
     int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
@@ -787,7 +787,7 @@ __global__ void kl_copy_boarder1(
 
   switch (blockIdx.y) {
   case 0: // top
-    if(x < width) pDst[x] = pSrc[x];
+    if (x < width) pDst[x] = pSrc[x];
     break;
   case 1: // left
     if (x < height) pDst[x * pitch] = pSrc[x * pitch];
@@ -877,7 +877,7 @@ __device__ void dev_sort_8elem(T& a0, T& a1, T& a2, T& a3, T& a4, T& a5, T& a6, 
   cas(a1, a3);
   cas(a4, a6);
   cas(a5, a7);
-  
+
   cas(a1, a2);
   cas(a5, a6);
 
@@ -1023,7 +1023,7 @@ __global__ void kl_repair_clip(
 }
 
 class KRemoveGrain : public CUDAFilterBase {
-  
+
   int mode;
   int modeU;
   int modeV;
@@ -1519,7 +1519,7 @@ class KGaussResize : public CUDAFilterBase {
 
     const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
-    typedef void (*RESAMPLE_V)(
+    typedef void(*RESAMPLE_V)(
       const vpixel_t* src, vpixel_t* dst,
       int src_pitch4, int dst_pitch4,
       int width4, int height,
@@ -1803,7 +1803,7 @@ template <typename vpixel_t, typename Op>
 __global__ void kl_makediff(
   vpixel_t* pDst,
   const vpixel_t* __restrict__ pA,
-  const vpixel_t* __restrict__ pB, 
+  const vpixel_t* __restrict__ pB,
   int width4, int height, int pitch4, int range_half
 )
 {
@@ -1864,7 +1864,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_makediff<vpixel_t, Op><<<blocks, threads, 0, stream>>>(
+    kl_makediff<vpixel_t, Op> << <blocks, threads, 0, stream >> > (
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4, 1 << (bits - 1));
     DEBUG_SYNC;
   }
@@ -1889,7 +1889,7 @@ public:
 template <typename vpixel_t, typename F>
 __global__ void kl_box5_v(
   vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc, 
+  const vpixel_t* __restrict__ pSrc,
   int width4, int height, int pitch4
 )
 {
@@ -1986,14 +1986,14 @@ protected:
     {
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height - 4, threads.y));
-      kl_box5_v<vpixel_t, F> << <blocks, threads, 0, stream >> >(
+      kl_box5_v<vpixel_t, F> << <blocks, threads, 0, stream >> > (
         (vpixel_t*)(pDst + pitch * 2), (const vpixel_t*)(pSrc0 + pitch * 2), width4, height - 4, pitch4);
       DEBUG_SYNC;
     }
     {
       dim3 threads(32, 4);
       dim3 blocks(nblocks(width4, threads.x));
-      kl_box5_v_border<vpixel_t, F> << <blocks, threads, 0, stream >> >(
+      kl_box5_v_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
         (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
       DEBUG_SYNC;
     }
@@ -2016,8 +2016,8 @@ public:
 
 template <typename vpixel_t, typename F>
 __global__ void kl_logic1(
-  vpixel_t* pDst, 
-  const vpixel_t* __restrict__ pSrc, 
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc,
   int width4, int height, int pitch4
 )
 {
@@ -2035,7 +2035,7 @@ __global__ void kl_logic1(
 template <typename vpixel_t, typename F>
 __global__ void kl_logic2(
   vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0, 
+  const vpixel_t* __restrict__ pSrc0,
   const vpixel_t* __restrict__ pSrc1,
   int width4, int height, int pitch4
 )
@@ -2055,9 +2055,9 @@ __global__ void kl_logic2(
 template <typename vpixel_t, typename F>
 __global__ void kl_logic3(
   vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0, 
+  const vpixel_t* __restrict__ pSrc0,
   const vpixel_t* __restrict__ pSrc1,
-  const vpixel_t* __restrict__ pSrc2, 
+  const vpixel_t* __restrict__ pSrc2,
   int width4, int height, int pitch4
 )
 {
@@ -2117,7 +2117,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic1<vpixel_t, F> << <blocks, threads, 0, stream >> >(
+    kl_logic1<vpixel_t, F> << <blocks, threads, 0, stream >> > (
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
     DEBUG_SYNC;
   }
@@ -2160,7 +2160,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic2<vpixel_t, F> << <blocks, threads, 0, stream >> >(
+    kl_logic2<vpixel_t, F> << <blocks, threads, 0, stream >> > (
       (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4);
     DEBUG_SYNC;
   }
@@ -2203,7 +2203,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic3<vpixel_t, F> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst, 
+    kl_logic3<vpixel_t, F> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, (const vpixel_t*)pSrc2, width4, height, pitch4);
     DEBUG_SYNC;
   }
@@ -2309,7 +2309,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pSrc, (const vpixel_t*)pDiff,
       (const vpixel_t*)pChoke1, (const vpixel_t*)pChoke2,
       width4, height, pitch4, scale);
@@ -2426,14 +2426,14 @@ protected:
     {
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
-      kl_box3_v<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> >(
+      kl_box3_v<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> > (
         (vpixel_t*)(pDst + pitch), (const vpixel_t*)(pSrc0 + pitch), width4, height - 2, pitch4);
       DEBUG_SYNC;
     }
     {
       dim3 threads(32, 2);
       dim3 blocks(nblocks(width4, threads.x));
-      kl_box3_v_border<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> >(
+      kl_box3_v_border<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> > (
         (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
       DEBUG_SYNC;
     }
@@ -2497,7 +2497,7 @@ protected:
 
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, 
+    const pixel_t* pSrc0, const pixel_t* pSrc1,
     int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2506,12 +2506,12 @@ protected:
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
-      dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-      kl_resharpen<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
-        (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
-        width4, height, pitch4, sharpAdj);
-      DEBUG_SYNC;
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    kl_resharpen<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
+      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
+      width4, height, pitch4, sharpAdj);
+    DEBUG_SYNC;
   }
 
 public:
@@ -2604,7 +2604,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_limit_over_sharpen<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+    kl_limit_over_sharpen<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pSrc, (const vpixel_t*)pRef,
       (const vpixel_t*)pCompB, (const vpixel_t*)pCompF,
       width4, height, pitch4, ovs << scale);
@@ -2693,11 +2693,11 @@ protected:
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
     if (p == 0) {
-      kl_to_full_range<vpixel_t, false> << <blocks, threads, 0, stream >> >(
+      kl_to_full_range<vpixel_t, false> << <blocks, threads, 0, stream >> > (
         (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
     }
     else {
-      kl_to_full_range<vpixel_t, true> << <blocks, threads, 0, stream >> >(
+      kl_to_full_range<vpixel_t, true> << <blocks, threads, 0, stream >> > (
         (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
     }
     DEBUG_SYNC;
@@ -2802,7 +2802,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_lossless_proc<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+    kl_lossless_proc<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pX, (const vpixel_t*)pY,
       width4, height, pitch4, range_half, maxval);
     DEBUG_SYNC;
@@ -2865,7 +2865,7 @@ protected:
 
   template <typename pixel_t>
   void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, 
+    const pixel_t* pSrc0, const pixel_t* pSrc1,
     int width, int height, int pitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2876,7 +2876,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_merge<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+    kl_merge<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
       width4, height, pitch4, (int)(weight*32767.0f), 32767 - (int)(weight*32767.0f));
     DEBUG_SYNC;
@@ -2926,14 +2926,14 @@ __device__ float dev_tweak_search_clip(
   //float tweaked = ((repair + 3) < bobbed) ? (repair + 3) : ((repair - 3) > bobbed) ? (repair - 3) : bobbed;
   // 等価な処理に書き変え
   float tweaked = clamp(bobbed, repair - 3, repair + 3);
-  
+
   float ret = ((blur + 7) < tweaked) ? (blur + 2) : ((blur - 7) > tweaked) ? (blur - 2) : (((blur * 51) + (tweaked * 49)) * (1.0f / 100.0f));
 
   return ret * scale;
 }
 
 template <typename vpixel_t>
-__global__ void kl_tweak_search_clip (
+__global__ void kl_tweak_search_clip(
   vpixel_t* pDst,
   const vpixel_t* __restrict__ pRepair,
   const vpixel_t* __restrict__ pBobbed,
@@ -2995,7 +2995,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_tweak_search_clip<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+    kl_tweak_search_clip<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pRepair, (const vpixel_t*)pBobbed, (const vpixel_t*)pBlur,
       width4, height, pitch4, scale, invscale);
     DEBUG_SYNC;
@@ -3072,7 +3072,7 @@ protected:
 
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_error_adjust<vpixel_t> << <blocks, threads, 0, stream >> >((vpixel_t*)pDst,
+    kl_error_adjust<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
       (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
       width4, height, pitch4, errorAdj);
     DEBUG_SYNC;
@@ -3143,7 +3143,7 @@ class KDoubleWeave : public CUDAFilterBase
 
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height2, threads.y));
-      kl_weave << <blocks, threads, 0, stream >> >(
+      kl_weave << <blocks, threads, 0, stream >> > (
         pDst, dstPitch4, pTop, topPitch4, pBottom, bottomPitch4, width4, height2);
       DEBUG_SYNC;
     }
@@ -3241,7 +3241,7 @@ class KCopy : public GenericVideoFilter
 
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-        kl_copy << <blocks, threads, 0, stream >> >(
+        kl_copy << <blocks, threads, 0, stream >> > (
           pDst, dstPitch4, pSrc, srcPitch4, width4, height);
         DEBUG_SYNC;
       }

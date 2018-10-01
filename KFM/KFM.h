@@ -18,8 +18,8 @@ struct FMCount {
 };
 
 struct PulldownPatternField {
-	bool split; // 次のフィールドとは別フレーム
-	bool merge; // 3フィールドの最初のフィールド
+  bool split; // 次のフィールドとは別フレーム
+  bool merge; // 3フィールドの最初のフィールド
   bool shift; // 後の24pフレームを参照するフィールド
 };
 
@@ -27,8 +27,8 @@ struct PulldownPattern {
   PulldownPatternField fields[10 * 4];
   int cycle;
 
-	PulldownPattern(int nf0, int nf1, int nf2, int nf3); // 24p
-	PulldownPattern(); // 30p
+  PulldownPattern(int nf0, int nf1, int nf2, int nf3); // 24p
+  PulldownPattern(); // 30p
 
   // パターンは10フィールド+前後2フィールドずつの合わせて
   // 14フィールド分をみる想定。14フィールドの前頭へのポインタを返す
@@ -175,40 +175,40 @@ enum DECOMB_UCF_FLAG {
 };
 
 struct DecombUCFInfo {
-    enum
-    {
-        VERSION = 1,
-        MAGIC_KEY = 0x7080EDF8,
-    };
-    int nMagicKey;
-    int nVersion;
+  enum
+  {
+    VERSION = 1,
+    MAGIC_KEY = 0x7080EDF8,
+  };
+  int nMagicKey;
+  int nVersion;
 
-    int fpsType;
+  int fpsType;
 
-    DecombUCFInfo(int fpsType)
-        : nMagicKey(MAGIC_KEY)
-        , nVersion(VERSION)
-        , fpsType(fpsType)
-    { }
+  DecombUCFInfo(int fpsType)
+    : nMagicKey(MAGIC_KEY)
+    , nVersion(VERSION)
+    , fpsType(fpsType)
+  { }
 
-    static const DecombUCFInfo* GetParam(const VideoInfo& vi, PNeoEnv env)
-    {
-        if (vi.sample_type != MAGIC_KEY) {
-            env->ThrowError("Invalid source (sample_type signature does not match)");
-        }
-        const DecombUCFInfo* param = (const DecombUCFInfo*)(void*)vi.num_audio_samples;
-        if (param->nMagicKey != MAGIC_KEY) {
-            env->ThrowError("Invalid source (magic key does not match)");
-        }
-        return param;
+  static const DecombUCFInfo* GetParam(const VideoInfo& vi, PNeoEnv env)
+  {
+    if (vi.sample_type != MAGIC_KEY) {
+      env->ThrowError("Invalid source (sample_type signature does not match)");
     }
-
-    static void SetParam(VideoInfo& vi, const DecombUCFInfo* param)
-    {
-        vi.audio_samples_per_second = 0; // kill audio
-        vi.sample_type = MAGIC_KEY;
-        vi.num_audio_samples = (size_t)param;
+    const DecombUCFInfo* param = (const DecombUCFInfo*)(void*)vi.num_audio_samples;
+    if (param->nMagicKey != MAGIC_KEY) {
+      env->ThrowError("Invalid source (magic key does not match)");
     }
+    return param;
+  }
+
+  static void SetParam(VideoInfo& vi, const DecombUCFInfo* param)
+  {
+    vi.audio_samples_per_second = 0; // kill audio
+    vi.sample_type = MAGIC_KEY;
+    vi.num_audio_samples = (size_t)param;
+  }
 };
 
 int GetDeviceTypes(const PClip& clip);

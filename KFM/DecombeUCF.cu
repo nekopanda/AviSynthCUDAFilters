@@ -105,7 +105,7 @@ class KFieldDiff : public KFMFilterBase
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
       kl_init_uint64 << <1, 1 >> > (sum);
       DEBUG_SYNC;
-      kl_calculate_field_diff << <blocks, threads >> >(srcY, nt6, width4, vi.height, pitchY, sum);
+      kl_calculate_field_diff << <blocks, threads >> > (srcY, nt6, width4, vi.height, pitchY, sum);
       DEBUG_SYNC;
       if (chroma) {
         kl_calculate_field_diff << <blocksUV, threads >> > (srcU, nt6, width4UV, heightUV, pitchUV, sum);
@@ -159,12 +159,12 @@ public:
     workvi.height = nblocks(work_bytes, workvi.width * 4);
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   AVSValue ConditionalFieldDiff(int n, IScriptEnvironment* env_)
   {
@@ -302,7 +302,7 @@ void launch_add_block_sum(
 {
   dim3 threads(BLOCK_SIZE >> 2, BLOCK_SIZE, TH_Z);
   dim3 blocks(nblocks(blocks_w, TH_Z), blocks_h);
-  kl_add_block_sum<vpixel_t, BLOCK_SIZE, TH_Z> << <blocks, threads >> >(src0, src1,
+  kl_add_block_sum<vpixel_t, BLOCK_SIZE, TH_Z> << <blocks, threads >> > (src0, src1,
     width, height, pitch, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
 }
 
@@ -505,12 +505,12 @@ public:
     return 0;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl CFunc(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -530,7 +530,7 @@ public:
 
 __host__ __device__ int dev_limitter(int x, int nmin, int range) {
   return (x == 128)
-    ? 128 
+    ? 128
     : ((x < 128)
       ? ((((127 - range) < x)&(x < (128 - nmin))) ? 0 : 56)
       : ((((128 + nmin) < x)&(x < (129 + range))) ? 255 : 199));
@@ -609,11 +609,11 @@ class KNoiseClip : public KFMFilterBase
       dim3 threads(32, 8);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_noise_clip << <blocks, threads >> >(dstY, srcY, noiseY, width, height, pitchY, nmin_y, range_y);
+      kl_noise_clip << <blocks, threads >> > (dstY, srcY, noiseY, width, height, pitchY, nmin_y, range_y);
       DEBUG_SYNC;
-      kl_noise_clip << <blocksUV, threads >> >(dstU, srcU, noiseU, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
+      kl_noise_clip << <blocksUV, threads >> > (dstU, srcU, noiseU, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
       DEBUG_SYNC;
-      kl_noise_clip << <blocksUV, threads >> >(dstV, srcV, noiseV, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
+      kl_noise_clip << <blocksUV, threads >> > (dstV, srcV, noiseV, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
       DEBUG_SYNC;
     }
     else {
@@ -654,9 +654,9 @@ public:
     switch (pixelSize) {
     case 1:
       return GetFrameT(n, env);
-    //case 2:
-    //  dst = InternalGetFrame<uint16_t>(n60, fmframe, frameType, env);
-    //  break;
+      //case 2:
+      //  dst = InternalGetFrame<uint16_t>(n60, fmframe, frameType, env);
+      //  break;
     default:
       env->ThrowError("[KNoiseClip] Unsupported pixel format");
       break;
@@ -665,12 +665,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -905,7 +905,7 @@ class KAnalyzeNoise : public KFMFilterBase
 
   void InitAnalyze(uint64_t* result, PNeoEnv env) {
     if (IS_CUDA) {
-      kl_init_uint64 << <1, sizeof(NoiseResult) * 2 /sizeof(uint64_t) >> > (result);
+      kl_init_uint64 << <1, sizeof(NoiseResult) * 2 / sizeof(uint64_t) >> > (result);
       DEBUG_SYNC;
     }
     else {
@@ -938,11 +938,11 @@ class KAnalyzeNoise : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_analyze_noise << <blocks, threads >> >(resultY, src0Y, src1Y, src2Y, width, height, pitchY);
+      kl_analyze_noise << <blocks, threads >> > (resultY, src0Y, src1Y, src2Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_analyze_noise << <blocksUV, threads >> >(resultUV, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      kl_analyze_noise << <blocksUV, threads >> > (resultUV, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_analyze_noise << <blocksUV, threads >> >(resultUV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      kl_analyze_noise << <blocksUV, threads >> > (resultUV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -974,11 +974,11 @@ class KAnalyzeNoise : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_analyze_diff << <blocks, threads >> >(resultY, src0Y, src1Y, width, height, pitchY);
+      kl_analyze_diff << <blocks, threads >> > (resultY, src0Y, src1Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_analyze_diff << <blocksUV, threads >> >(resultUV, src0U, src1U, widthUV, heightUV, pitchUV);
+      kl_analyze_diff << <blocksUV, threads >> > (resultUV, src0U, src1U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_analyze_diff << <blocksUV, threads >> >(resultUV, src0V, src1V, widthUV, heightUV, pitchUV);
+      kl_analyze_diff << <blocksUV, threads >> > (resultUV, src0V, src1V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1075,12 +1075,12 @@ public:
     return PVideoFrame();
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1268,9 +1268,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return DEV_TYPE_CPU | DEV_TYPE_CUDA;
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
     return 0;
   }
 
@@ -1297,7 +1297,7 @@ DECOMB_UCF_RESULT CalcDecombUCF(
   double noisepixelsUV = meta->noiseUVw * meta->noiseUVh * 2;
 
   // 1次判定フィールド差分
-  double field_diff = (second 
+  double field_diff = (second
     ? (result0[0].diff1 + result0[1].diff1)
     : (result0[0].diff0 + result0[1].diff0)) / (6 * pixels) * 100;
 
@@ -1346,10 +1346,10 @@ DECOMB_UCF_RESULT CalcDecombUCF(
   double nmin = (nmin1 < 7) ? nmin1 * 4 : nmin1 + 21;
   double nmax = navg2 + absdiff1*param->nrw;
   double off_thresh = (diff1 < 0) ? param->off_t : param->off_b;
-  double min_thresh = (navg1 < param->namax_thresh) 
-    ? param->th_score.calc(nmin) + off_thresh 
+  double min_thresh = (navg1 < param->namax_thresh)
+    ? param->th_score.calc(nmin) + off_thresh
     : param->namax_diff + off_thresh;
-    // 符号付補正差分
+  // 符号付補正差分
   double diff = absdiff1 < 1.8 ? diff1 * 10
     : absdiff1 < 5 ? diff1 * 5 + (diff1 / absdiff1) * 9
     : absdiff1 < 10 ? diff1 * 2 + (diff1 / absdiff1) * 24
@@ -1538,12 +1538,12 @@ public:
     return child->GetFrame(n24, env);
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1778,12 +1778,12 @@ public:
     return child->GetFrame(n24, env);
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		// CPU仮定のクリップがあるので
-		if (cachehints == CACHE_GET_CHILD_DEV_TYPE) return DEV_TYPE_ANY;
-		else if (cachehints == CACHE_GET_MTMODE) return MT_NICE_FILTER;
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    // CPU仮定のクリップがあるので
+    if (cachehints == CACHE_GET_CHILD_DEV_TYPE) return DEV_TYPE_ANY;
+    else if (cachehints == CACHE_GET_MTMODE) return MT_NICE_FILTER;
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {
@@ -1961,9 +1961,9 @@ public:
       return GetDeviceTypes(child) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
     return 0;
   }
 
@@ -2123,12 +2123,12 @@ public:
     return res;
   }
 
-	int __stdcall SetCacheHints(int cachehints, int frame_range) {
-		if (cachehints == CACHE_GET_MTMODE) {
-			return MT_NICE_FILTER;
-		}
-		return KFMFilterBase::SetCacheHints(cachehints, frame_range);
-	}
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_MTMODE) {
+      return MT_NICE_FILTER;
+    }
+    return KFMFilterBase::SetCacheHints(cachehints, frame_range);
+  }
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
   {

@@ -27,7 +27,7 @@ protected:
   static const char* FormatString(FORMAT format) {
     switch (format) {
     case FORMAT_YV420: return "FORMAT_YV420";
-    //case FORMAT_YV411: return "FORMAT_YV411";
+      //case FORMAT_YV411: return "FORMAT_YV411";
     case FORMAT_YV422: return "FORMAT_YV422";
     case FORMAT_YV444: return "FORMAT_YV444";
     case FORMAT_YUY2: return "FORMAT_YUY2";
@@ -48,9 +48,9 @@ void AvsCUDATest::ConvertFormat(std::ofstream& out, FORMAT format, int bits)
   }
 
   switch (format) {
-  //case FORMAT_YV411:
-  //  out << "src = src.ConvertToYV411(interlaced=true)" << std::endl;
-  //  break;
+    //case FORMAT_YV411:
+    //  out << "src = src.ConvertToYV411(interlaced=true)" << std::endl;
+    //  break;
   case FORMAT_YV422:
     out << "src = src.ConvertToYUV422(interlaced=true)" << std::endl;
     break;
@@ -131,7 +131,7 @@ void CondFuncTest::CondTest_(const char* fname, bool is_cuda, FORMAT format, int
       if (two_arg) {
         out << "srcuda2 = src2.OnCPU(0)" << std::endl;
       }
-      out << "cuda = OnCUDA(function[srcuda" <<  (two_arg ? ", srcuda2" : "") << "](){srcuda." 
+      out << "cuda = OnCUDA(function[srcuda" << (two_arg ? ", srcuda2" : "") << "](){srcuda."
         << fname << "(" << (two_arg ? "srcuda2" : "") << ")})" << std::endl;
     }
     else {
@@ -501,10 +501,10 @@ struct ScriptGen
       out << "cuda = src." << fname << std::endl;
     }
   }
-	virtual double Thresh(
-		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		return 1;
-	}
+  virtual double Thresh(
+    std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+    return 1;
+  }
 };
 
 class GenericTest : public AvsCUDATest
@@ -540,7 +540,7 @@ void GenericTest::Test_(const char* fname, bool is_cuda, FORMAT format, int bits
     gen.Ref(out, fname, is_cuda);
     out << "LoadPlugin(\"" << pluginPath.c_str() << "\")" << std::endl;
     gen.Test(out, fname, is_cuda);
-    out << "ImageCompare(ref, cuda, "<< gen.Thresh(out, fname, is_cuda, bits) <<")" << std::endl;
+    out << "ImageCompare(ref, cuda, " << gen.Thresh(out, fname, is_cuda, bits) << ")" << std::endl;
 
     out.close();
 
@@ -741,230 +741,230 @@ TEST_F(GenericTest, Crop_2468)
 
 struct ConvBitsGen : ScriptGen
 {
-	virtual double Thresh(
-		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		return (bits == 32) ? 1 : 0;
-	}
+  virtual double Thresh(
+    std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+    return (bits == 32) ? 1 : 0;
+  }
 };
 
 struct ConvBits32Gen : ScriptGen
 {
-	virtual double Thresh(
-		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		return 0.25;
-	}
+  virtual double Thresh(
+    std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+    return 0.25;
+  }
 };
 
 TEST_F(GenericTest, ConvBitsTo8)
 {
-	// ビット変換はパターンとして full scale と shifted scale がある
-	// full scale は 0-255 を 0-65535 にマッピングする変換
-	// shifted scale は 0-255 を 0-65280 にマッピングする変換
-	// CUDA版はshifted scaleしかサポートしていない
-	// オプションなしだとRGBがfull scale変換されるので値が合わなくなるので注意
+  // ビット変換はパターンとして full scale と shifted scale がある
+  // full scale は 0-255 を 0-65535 にマッピングする変換
+  // shifted scale は 0-255 を 0-65280 にマッピングする変換
+  // CUDA版はshifted scaleしかサポートしていない
+  // オプションなしだとRGBがfull scale変換されるので値が合わなくなるので注意
 
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	int bits[] = { 8, 16, 10, 12, 14, 32 };
-	for (int i = 0; i < (int)formats.size(); ++i) {
-		int nbits = IsRGB(formats[i]) ? 2 : 6;
-		const char* fname = IsRGB(formats[i]) ? "ConvertBits(8,fulls=false,dither=-1)" : "ConvertBits(8,dither=-1)";
-		for (int b = 0; b < nbits; ++b) {
-			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
-			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
-		}
-	}
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  int bits[] = { 8, 16, 10, 12, 14, 32 };
+  for (int i = 0; i < (int)formats.size(); ++i) {
+    int nbits = IsRGB(formats[i]) ? 2 : 6;
+    const char* fname = IsRGB(formats[i]) ? "ConvertBits(8,fulls=false,dither=-1)" : "ConvertBits(8,dither=-1)";
+    for (int b = 0; b < nbits; ++b) {
+      Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+      Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+    }
+  }
 }
 
 TEST_F(GenericTest, ConvBitsTo8Dither)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	int bits[] = { 16, 10, 12, 14 };
-	for (int i = 0; i < (int)formats.size(); ++i) {
-		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
-			const char* fname = "ConvertBits(8,dither=0)";
-			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
-			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
-		}
-	}
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  int bits[] = { 16, 10, 12, 14 };
+  for (int i = 0; i < (int)formats.size(); ++i) {
+    for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+      const char* fname = "ConvertBits(8,dither=0)";
+      Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+      Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+    }
+  }
 }
 
 TEST_F(GenericTest, ConvBitsTo10)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	Test("ConvertBits(10,dither=-1)", formats, ConvBitsGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  Test("ConvertBits(10,dither=-1)", formats, ConvBitsGen());
 }
 
 TEST_F(GenericTest, ConvBitsTo10Dither)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	int bits[] = { 16, 12, 14 };
-	for (int i = 0; i < (int)formats.size(); ++i) {
-		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
-			const char* fname = "ConvertBits(10,dither=0)";
-			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
-			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
-		}
-	}
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  int bits[] = { 16, 12, 14 };
+  for (int i = 0; i < (int)formats.size(); ++i) {
+    for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+      const char* fname = "ConvertBits(10,dither=0)";
+      Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+      Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+    }
+  }
 }
 
 TEST_F(GenericTest, ConvBitsTo12)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	Test("ConvertBits(12,dither=-1)", formats, ConvBitsGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  Test("ConvertBits(12,dither=-1)", formats, ConvBitsGen());
 }
 
 TEST_F(GenericTest, ConvBitsTo12Dither)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	int bits[] = { 16, 14 };
-	for (int i = 0; i < (int)formats.size(); ++i) {
-		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
-			const char* fname = "ConvertBits(12,dither=0)";
-			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
-			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
-		}
-	}
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  int bits[] = { 16, 14 };
+  for (int i = 0; i < (int)formats.size(); ++i) {
+    for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+      const char* fname = "ConvertBits(12,dither=0)";
+      Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+      Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+    }
+  }
 }
 
 TEST_F(GenericTest, ConvBitsTo14)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	Test("ConvertBits(14,dither=-1)", formats, ConvBitsGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  Test("ConvertBits(14,dither=-1)", formats, ConvBitsGen());
 }
 
 TEST_F(GenericTest, ConvBitsTo14Dither)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	int bits[] = { 16 };
-	for (int i = 0; i < (int)formats.size(); ++i) {
-		for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
-			const char* fname = "ConvertBits(14,dither=0)";
-			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
-			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
-		}
-	}
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  int bits[] = { 16 };
+  for (int i = 0; i < (int)formats.size(); ++i) {
+    for (int b = 0; b < sizeof(bits) / sizeof(bits[0]); ++b) {
+      const char* fname = "ConvertBits(14,dither=0)";
+      Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+      Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+    }
+  }
 }
 
 TEST_F(GenericTest, ConvBitsTo16)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	int bits[] = { 8, 16, 10, 12, 14, 32 };
-	for (int i = 0; i < (int)formats.size(); ++i) {
-		int nbits = IsRGB(formats[i]) ? 2 : 6;
-		const char* fname = IsRGB(formats[i]) ? "ConvertBits(16,fulls=false,dither=-1)" : "ConvertBits(16,dither=-1)";
-		for (int b = 0; b < nbits; ++b) {
-			Test_(fname, false, formats[i], bits[b], ConvBitsGen());
-			Test_(fname, true, formats[i], bits[b], ConvBitsGen());
-		}
-	}
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  int bits[] = { 8, 16, 10, 12, 14, 32 };
+  for (int i = 0; i < (int)formats.size(); ++i) {
+    int nbits = IsRGB(formats[i]) ? 2 : 6;
+    const char* fname = IsRGB(formats[i]) ? "ConvertBits(16,fulls=false,dither=-1)" : "ConvertBits(16,dither=-1)";
+    for (int b = 0; b < nbits; ++b) {
+      Test_(fname, false, formats[i], bits[b], ConvBitsGen());
+      Test_(fname, true, formats[i], bits[b], ConvBitsGen());
+    }
+  }
 }
 
 TEST_F(GenericTest, ConvBitsTo32)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
-	Test("ConvertBits(32,dither=-1)", formats, ConvBits32Gen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y };
+  Test("ConvertBits(32,dither=-1)", formats, ConvBits32Gen());
 }
 
 struct PointResizeGen : ScriptGen
 {
-	virtual double Thresh(
-		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		return 0;
-	}
+  virtual double Thresh(
+    std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+    return 0;
+  }
 };
 
 TEST_F(GenericTest, Resize_Point)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("PointResize(600,800)", formats, PointResizeGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("PointResize(600,800)", formats, PointResizeGen());
 }
 
 struct Resize1DGen : ScriptGen
 {
-	virtual double Thresh(
-		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		// 整数演算ロジックは誤差があるっぽい
-		if (bits >= 12 && bits <= 16) return 1 << (bits - 11);
-		if (bits == 32) return 0.25;
-		return 1;
-	}
+  virtual double Thresh(
+    std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+    // 整数演算ロジックは誤差があるっぽい
+    if (bits >= 12 && bits <= 16) return 1 << (bits - 11);
+    if (bits == 32) return 0.25;
+    return 1;
+  }
 };
 struct Resize2DGen : Resize1DGen
 {
-	virtual double Thresh(
-		std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
-		return Resize1DGen::Thresh(out, fname, is_cuda, bits) * 2;
-	}
+  virtual double Thresh(
+    std::ofstream& out, const char* fname, bool is_cuda, int bits) const {
+    return Resize1DGen::Thresh(out, fname, is_cuda, bits) * 2;
+  }
 };
 
 TEST_F(GenericTest, Resize_BlackmanV)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("BlackmanResize(1920,800)", formats, Resize1DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("BlackmanResize(1920,800)", formats, Resize1DGen());
 }
 
 TEST_F(GenericTest, Resize_BlackmanH)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("BlackmanResize(600,1080)", formats, Resize1DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("BlackmanResize(600,1080)", formats, Resize1DGen());
 }
 
 TEST_F(GenericTest, Resize_BlackmanS)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("BlackmanResize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("BlackmanResize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_BlackmanL)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("BlackmanResize(2400,1600)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("BlackmanResize(2400,1600)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Bilinear)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("BilinearResize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("BilinearResize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Bicubic)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("BicubicResize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("BicubicResize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Lanczos)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("LanczosResize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("LanczosResize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Spline16)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("Spline16Resize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("Spline16Resize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Spline36)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("Spline36Resize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("Spline36Resize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Spline64)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("Spline64Resize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("Spline64Resize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Gauss)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("GaussResize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("GaussResize(600,800)", formats, Resize2DGen());
 }
 
 TEST_F(GenericTest, Resize_Sinc)
 {
-	std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
-	Test("SincResize(600,800)", formats, Resize2DGen());
+  std::vector<FORMAT> formats = { FORMAT_YV420, FORMAT_YV422, FORMAT_YV444, FORMAT_Y, FORMAT_RGB, FORMAT_RGBA, FORMAT_PLANAR_RGB, FORMAT_PLANAR_RGBA };
+  Test("SincResize(600,800)", formats, Resize2DGen());
 }

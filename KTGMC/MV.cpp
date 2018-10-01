@@ -78,7 +78,7 @@ unsigned int PlaneSuperOffset(bool chroma, int src_height, int level, int pel, i
   {
     offset = pel*pel*plane_pitch*(src_height + vpad * 2);
 
-    for (int i = 1; i<level; i++)
+    for (int i = 1; i < level; i++)
     {
       height = chroma ? PlaneHeightLuma(src_height*yRatioUV, i, yRatioUV, vpad*yRatioUV) / yRatioUV : PlaneHeightLuma(src_height, i, yRatioUV, vpad);
 
@@ -349,7 +349,7 @@ public:
 template <typename pixel_t>
 class KMPlane : public KMPlaneBase
 {
-	IKDeintKernel<pixel_t>* kernel;
+  IKDeintKernel<pixel_t>* kernel;
   std::unique_ptr<pixel_t*[]> pPlane;
   int nPel;
   int nWidth;
@@ -362,12 +362,12 @@ class KMPlane : public KMPlaneBase
   int nVPadPel;
   int nExtendedWidth;
   int nExtendedHeight;
-	int nBitsPerPixel;
+  int nBitsPerPixel;
 public:
 
-	KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, IMVCUDA* cuda)
-		: kernel(cuda->get(pixel_t()))
-		, pPlane(new pixel_t*[nPel * nPel])
+  KMPlane(int nWidth, int nHeight, int nPel, int nHPad, int nVPad, int nBitsPerPixel, IMVCUDA* cuda)
+    : kernel(cuda->get(pixel_t()))
+    , pPlane(new pixel_t*[nPel * nPel])
     , nPel(nPel)
     , nWidth(nWidth)
     , nHeight(nHeight)
@@ -460,7 +460,7 @@ public:
     const pixel_t* pNewPlane = (const pixel_t*)_pNewPlane;
 
     if (kernel->IsEnabled()) {
-			kernel->Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
+      kernel->Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
     }
     else {
       Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
@@ -468,9 +468,9 @@ public:
   }
 
   void Pad()
-	{
-		if (kernel->IsEnabled()) {
-			kernel->PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
+  {
+    if (kernel->IsEnabled()) {
+      kernel->PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
     }
     else {
       PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
@@ -478,8 +478,8 @@ public:
   }
 
   void Refine()
-	{
-		if (kernel->IsEnabled()) {
+  {
+    if (kernel->IsEnabled()) {
       switch (nPel)
       {
       case 2:
@@ -507,8 +507,8 @@ public:
 
   void ReduceTo(KMPlaneBase* dstPlane)
   {
-		KMPlane<pixel_t>&		red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
-		if (kernel->IsEnabled()) {
+    KMPlane<pixel_t>&		red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
+    if (kernel->IsEnabled()) {
       kernel->RB2BilinearFiltered(
         red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
         red.nPitch, nPitch,
@@ -527,8 +527,8 @@ public:
 
 class KMFrame
 {
-	const KMVParam* param;
-	IMVCUDA* cuda;
+  const KMVParam* param;
+  IMVCUDA* cuda;
 
   std::unique_ptr<KMPlaneBase> pYPlane;
   std::unique_ptr<KMPlaneBase> pUPlane;
@@ -538,21 +538,21 @@ class KMFrame
   void CreatePlanes(int nWidth, int nHeight, int nPel, int nHPad, int nVPad)
   {
     pYPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
-			nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, cuda));
+      nWidth, nHeight, nPel, nHPad, nVPad, param->nBitsPerPixel, cuda));
     if (param->chroma) {
       pUPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, cuda));
+        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, cuda));
       pVPlane = std::unique_ptr<KMPlaneBase>(new KMPlane<uint8_t>(
         nWidth / param->xRatioUV, nHeight / param->yRatioUV, nPel,
-				nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, cuda));
+        nHPad / param->xRatioUV, nVPad / param->yRatioUV, param->nBitsPerPixel, cuda));
     }
   }
 
 public:
-	KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, IMVCUDA* cuda)
+  KMFrame(int nWidth, int nHeight, int nPel, const KMVParam* param, IMVCUDA* cuda)
     : param(param)
-		, cuda(cuda)
+    , cuda(cuda)
   {
     if (param->nPixelSize == 1) {
       CreatePlanes<uint8_t>(nWidth, nHeight, nPel, param->nHPad, param->nVPad);
@@ -625,21 +625,21 @@ class KMSuperFrame
 {
   const KMVParam* param;
   std::unique_ptr<std::unique_ptr<KMFrame>[]> pFrames;
-	IMVCUDA* cuda;
+  IMVCUDA* cuda;
 
 public:
   // xRatioUV PF 160729
-	KMSuperFrame(const KMVParam* param, IMVCUDA* cuda)
+  KMSuperFrame(const KMVParam* param, IMVCUDA* cuda)
     : param(param)
     , pFrames(new std::unique_ptr<KMFrame>[param->nLevels])
-		, cuda(cuda)
+    , cuda(cuda)
   {
-		pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param, cuda));
+    pFrames[0] = std::unique_ptr<KMFrame>(new KMFrame(param->nWidth, param->nHeight, param->nPel, param, cuda));
     for (int i = 1; i < param->nLevels; i++)
     {
       int nWidthi = PlaneWidthLuma(param->nWidth, i, param->xRatioUV, param->nHPad);
       int nHeighti = PlaneHeightLuma(param->nHeight, i, param->yRatioUV, param->nVPad);
-			pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param, cuda));
+      pFrames[i] = std::unique_ptr<KMFrame>(new KMFrame(nWidthi, nHeighti, 1, param, cuda));
     }
   }
 
@@ -781,14 +781,14 @@ public:
 
     return dst;
   }
-  
+
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_MULTI_INSTANCE;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_MULTI_INSTANCE;
+    }
     return 0;
   };
 
@@ -865,9 +865,9 @@ static unsigned int Sad_C(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRe
 template<typename pixel_t>
 unsigned int(*get_sad_function(int nBlkWidth, int nBlkHeight, PNeoEnv env))(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch)
 {
-	if (nBlkWidth == 4 && nBlkHeight == 4) {
-		return Sad_C<4, 4, pixel_t>;
-	}
+  if (nBlkWidth == 4 && nBlkHeight == 4) {
+    return Sad_C<4, 4, pixel_t>;
+  }
   else if (nBlkWidth == 8 && nBlkHeight == 8) {
     return Sad_C<8, 8, pixel_t>;
   }
@@ -884,138 +884,138 @@ unsigned int(*get_sad_function(int nBlkWidth, int nBlkHeight, PNeoEnv env))(cons
 }
 
 struct MVPlaneParam {
-	int nBlkX;            /* width in number of blocks */
-	int nBlkY;            /* height in number of blocks */
-	int nBlkSizeX;        /* size of a block */
-	int nBlkSizeY;        /* size of a block */
-	int nBlkCount;        /* number of blocks in the plane */
-	int nPel;             /* pel refinement accuracy */
-	int nLogPel;          /* logarithm of the pel refinement accuracy */
-	int nScale;           /* scaling factor of the plane */
-	int nLogScale;        /* logarithm of the scaling factor */
-	bool smallestPlane;
-	bool chroma;            /* do we do chroma me */
-	int nOverlapX;        // overlap size
-	int nOverlapY;        // overlap size
-	int xRatioUV;        // PF
-	int nLogxRatioUV;     // log of xRatioUV (0 for 1 and 1 for 2)
-	int yRatioUV;
-	int nLogyRatioUV;     // log of yRatioUV (0 for 1 and 1 for 2)
-	int nPixelSize; // PF
-	int nPixelShift; // log of pixelsize (0,1,2) for shift instead of mul or div
-	int nBitsPerPixel;
-	bool _mt_flag;         // Allows multithreading
-	int chromaSADscale;   // PF experimental 2.7.18.22 allow e.g. YV24 chroma to have the same magnitude as for YV12
-	int batch;           // CUDA batch size
+  int nBlkX;            /* width in number of blocks */
+  int nBlkY;            /* height in number of blocks */
+  int nBlkSizeX;        /* size of a block */
+  int nBlkSizeY;        /* size of a block */
+  int nBlkCount;        /* number of blocks in the plane */
+  int nPel;             /* pel refinement accuracy */
+  int nLogPel;          /* logarithm of the pel refinement accuracy */
+  int nScale;           /* scaling factor of the plane */
+  int nLogScale;        /* logarithm of the scaling factor */
+  bool smallestPlane;
+  bool chroma;            /* do we do chroma me */
+  int nOverlapX;        // overlap size
+  int nOverlapY;        // overlap size
+  int xRatioUV;        // PF
+  int nLogxRatioUV;     // log of xRatioUV (0 for 1 and 1 for 2)
+  int yRatioUV;
+  int nLogyRatioUV;     // log of yRatioUV (0 for 1 and 1 for 2)
+  int nPixelSize; // PF
+  int nPixelShift; // log of pixelsize (0,1,2) for shift instead of mul or div
+  int nBitsPerPixel;
+  bool _mt_flag;         // Allows multithreading
+  int chromaSADscale;   // PF experimental 2.7.18.22 allow e.g. YV24 chroma to have the same magnitude as for YV12
+  int batch;           // CUDA batch size
 
-	SearchType searchType;
-	int nSearchParam;
-	int PelSearch;
-	int nLambda;
-	int lsad;
-	int penaltyNew;
-	int plevel;
-	bool global;
-	int penaltyZero;
-	int pglobal;
-	int badSAD;
-	int badrange;
-	bool meander;
-	bool tryMany;
+  SearchType searchType;
+  int nSearchParam;
+  int PelSearch;
+  int nLambda;
+  int lsad;
+  int penaltyNew;
+  int plevel;
+  bool global;
+  int penaltyZero;
+  int pglobal;
+  int badSAD;
+  int badrange;
+  bool meander;
+  bool tryMany;
 
-	int verybigSAD;
-	int nLambdaLevel;
+  int verybigSAD;
+  int nLambdaLevel;
 
-	MVPlaneParam(int _nBlkX, int _nBlkY, int _nBlkSizeX, int _nBlkSizeY, int nPel, int _nLevel,
-		bool smallestPlane, bool chroma,
-		int _nOverlapX, int _nOverlapY, int _xRatioUV, int _yRatioUV,
-		int nPixelSize, int nBitsPerPixel, bool mt_flag, int chromaSADscale, int batch,
+  MVPlaneParam(int _nBlkX, int _nBlkY, int _nBlkSizeX, int _nBlkSizeY, int nPel, int _nLevel,
+    bool smallestPlane, bool chroma,
+    int _nOverlapX, int _nOverlapY, int _xRatioUV, int _yRatioUV,
+    int nPixelSize, int nBitsPerPixel, bool mt_flag, int chromaSADscale, int batch,
 
-		SearchType searchType, int nSearchParam, int PelSearch, int nLambda,
-		int lsad, int penaltyNew, int plevel, bool global,
-		int penaltyZero, int pglobal, int badSAD,
-		int badrange, bool meander, bool tryMany)
-		: nBlkX(_nBlkX)
-		, nBlkY(_nBlkY)
-		, nBlkSizeX(_nBlkSizeX)
-		, nBlkSizeY(_nBlkSizeY)
-		, nBlkCount(_nBlkX * _nBlkY)
-		, nPel(nPel)
-		, nLogPel(nlog2(nPel))	// nLogPel=0 for nPel=1, 1 for nPel=2, 2 for nPel=4, i.e. (x*nPel) = (x<<nLogPel)
-		, nLogScale(_nLevel)
-		, nScale(1 << _nLevel)
-		, smallestPlane(smallestPlane)
-		, chroma(chroma)
-		, nOverlapX(_nOverlapX)
-		, nOverlapY(_nOverlapY)
-		, xRatioUV(_xRatioUV) // PF
-		, nLogxRatioUV(nlog2(_xRatioUV))
-		, yRatioUV(_yRatioUV)
-		, nLogyRatioUV(nlog2(_yRatioUV))
-		, nPixelSize(nPixelSize) // PF
-		, nPixelShift(nlog2(nPixelSize)) // 161201
-		, nBitsPerPixel(nBitsPerPixel) // PF
-		, _mt_flag(mt_flag)
-		, chromaSADscale(chromaSADscale)
-		, batch(batch)
-		, searchType(searchType)
-		, nSearchParam(nSearchParam)
-		, PelSearch(PelSearch)
-		, nLambda(nLambda)
-		, lsad(lsad)
-		, penaltyNew(penaltyNew)
-		, plevel(plevel)
-		, global(global)
-		, penaltyZero(penaltyZero)
-		, pglobal(pglobal)
-		, badSAD(badSAD)
-		, badrange(badrange)
-		, meander(meander)
-		, tryMany(tryMany)
-		, verybigSAD(3 * _nBlkSizeX * _nBlkSizeY * (nPixelSize == 4 ? 1 : (1 << nBitsPerPixel))) // * 256, pixelsize==2 -> 65536. Float:1
-	{
-		nLambdaLevel = nLambda / (nPel * nPel);
-		if (plevel == 1)
-		{
-			nLambdaLevel *= nScale;	// scale lambda - Fizick
-		}
-		else if (plevel == 2)
-		{
-			nLambdaLevel *= nScale*nScale;
-		}
-	}
+    SearchType searchType, int nSearchParam, int PelSearch, int nLambda,
+    int lsad, int penaltyNew, int plevel, bool global,
+    int penaltyZero, int pglobal, int badSAD,
+    int badrange, bool meander, bool tryMany)
+    : nBlkX(_nBlkX)
+    , nBlkY(_nBlkY)
+    , nBlkSizeX(_nBlkSizeX)
+    , nBlkSizeY(_nBlkSizeY)
+    , nBlkCount(_nBlkX * _nBlkY)
+    , nPel(nPel)
+    , nLogPel(nlog2(nPel))	// nLogPel=0 for nPel=1, 1 for nPel=2, 2 for nPel=4, i.e. (x*nPel) = (x<<nLogPel)
+    , nLogScale(_nLevel)
+    , nScale(1 << _nLevel)
+    , smallestPlane(smallestPlane)
+    , chroma(chroma)
+    , nOverlapX(_nOverlapX)
+    , nOverlapY(_nOverlapY)
+    , xRatioUV(_xRatioUV) // PF
+    , nLogxRatioUV(nlog2(_xRatioUV))
+    , yRatioUV(_yRatioUV)
+    , nLogyRatioUV(nlog2(_yRatioUV))
+    , nPixelSize(nPixelSize) // PF
+    , nPixelShift(nlog2(nPixelSize)) // 161201
+    , nBitsPerPixel(nBitsPerPixel) // PF
+    , _mt_flag(mt_flag)
+    , chromaSADscale(chromaSADscale)
+    , batch(batch)
+    , searchType(searchType)
+    , nSearchParam(nSearchParam)
+    , PelSearch(PelSearch)
+    , nLambda(nLambda)
+    , lsad(lsad)
+    , penaltyNew(penaltyNew)
+    , plevel(plevel)
+    , global(global)
+    , penaltyZero(penaltyZero)
+    , pglobal(pglobal)
+    , badSAD(badSAD)
+    , badrange(badrange)
+    , meander(meander)
+    , tryMany(tryMany)
+    , verybigSAD(3 * _nBlkSizeX * _nBlkSizeY * (nPixelSize == 4 ? 1 : (1 << nBitsPerPixel))) // * 256, pixelsize==2 -> 65536. Float:1
+  {
+    nLambdaLevel = nLambda / (nPel * nPel);
+    if (plevel == 1)
+    {
+      nLambdaLevel *= nScale;	// scale lambda - Fizick
+    }
+    else if (plevel == 2)
+    {
+      nLambdaLevel *= nScale*nScale;
+    }
+  }
 };
 
 enum {
-	MAX_BATCH = 8,
+  MAX_BATCH = 8,
 };
 
 // 必ずバッチ分まとめて処理する（最後とかでフレームがないときはポインタを複製して渡す）
 class PlaneOfBlocksBase {
 public:
-	virtual ~PlaneOfBlocksBase() { }
-	virtual int GetWorkSize() = 0;
-	virtual void SetWorkMemory(uint8_t* work) = 0;
-	virtual void InitializeGlobalMV(int batch, VECTOR* globalMV) = 0;
+  virtual ~PlaneOfBlocksBase() { }
+  virtual int GetWorkSize() = 0;
+  virtual void SetWorkMemory(uint8_t* work) = 0;
+  virtual void InitializeGlobalMV(int batch, VECTOR* globalMV) = 0;
   virtual void EstimateGlobalMVDoubled(int batch, VECTOR* globalMV) = 0;
   virtual void InterpolatePrediction(int batch, const PlaneOfBlocksBase* pob) = 0;
-	virtual void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount) = 0;
-	virtual void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount) = 0;
-	virtual void WriteDefault(VECTOR *out, int nCount) = 0;
+  virtual void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount) = 0;
+  virtual void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount) = 0;
+  virtual void WriteDefault(VECTOR *out, int nCount) = 0;
 };
 
 template <typename pixel_t>
 class PlaneOfBlocks : public PlaneOfBlocksBase
 {
   /* fields set at initialization */
-	const MVPlaneParam p;
+  const MVPlaneParam p;
 
-  unsigned int (* const SAD)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
-  unsigned int (* const SADCHROMA)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
+  unsigned int(*const SAD)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
+  unsigned int(*const SADCHROMA)(const pixel_t *pSrc, int nSrcPitch, const pixel_t *pRef, int nRefPitch);
 
-	std::vector<VECTOR> batchVectors[ANALYZE_MAX_BATCH];
+  std::vector<VECTOR> batchVectors[ANALYZE_MAX_BATCH];
 
-	VECTOR* vectors;
+  VECTOR* vectors;
   KMPlane<pixel_t> *pSrcYPlane, *pSrcUPlane, *pSrcVPlane;
   KMPlane<pixel_t> *pRefYPlane, *pRefUPlane, *pRefVPlane;
 
@@ -1076,23 +1076,23 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   /* fetch the block in the reference frame, which is pointed by the vector (vx, vy) */
   const pixel_t *	GetRefBlock(int nVx, int nVy)
   {
-		return (p.nPel == 2) ? pRefYPlane->GetAbsolutePointerPel <1>((x[0] << 1) + nVx, (y[0] << 1) + nVy) :
-			(p.nPel == 1) ? pRefYPlane->GetAbsolutePointerPel <0>((x[0]) + nVx, (y[0]) + nVy) :
+    return (p.nPel == 2) ? pRefYPlane->GetAbsolutePointerPel <1>((x[0] << 1) + nVx, (y[0] << 1) + nVy) :
+      (p.nPel == 1) ? pRefYPlane->GetAbsolutePointerPel <0>((x[0]) + nVx, (y[0]) + nVy) :
       pRefYPlane->GetAbsolutePointerPel <2>((x[0] << 2) + nVx, (y[0] << 2) + nVy);
   }
 
   const pixel_t *	GetRefBlockU(int nVx, int nVy)
   {
-		return (p.nPel == 2) ? pRefUPlane->GetAbsolutePointerPel <1>((x[1] << 1) + (nVx >> p.nLogxRatioUV), (y[1] << 1) + (nVy >> p.nLogyRatioUV)) :
-			(p.nPel == 1) ? pRefUPlane->GetAbsolutePointerPel <0>((x[1]) + (nVx >> p.nLogxRatioUV), (y[1]) + (nVy >> p.nLogyRatioUV)) :
-			pRefUPlane->GetAbsolutePointerPel <2>((x[1] << 2) + (nVx >> p.nLogxRatioUV), (y[1] << 2) + (nVy >> p.nLogyRatioUV));
+    return (p.nPel == 2) ? pRefUPlane->GetAbsolutePointerPel <1>((x[1] << 1) + (nVx >> p.nLogxRatioUV), (y[1] << 1) + (nVy >> p.nLogyRatioUV)) :
+      (p.nPel == 1) ? pRefUPlane->GetAbsolutePointerPel <0>((x[1]) + (nVx >> p.nLogxRatioUV), (y[1]) + (nVy >> p.nLogyRatioUV)) :
+      pRefUPlane->GetAbsolutePointerPel <2>((x[1] << 2) + (nVx >> p.nLogxRatioUV), (y[1] << 2) + (nVy >> p.nLogyRatioUV));
   }
 
   const pixel_t *	GetRefBlockV(int nVx, int nVy)
   {
-		return (p.nPel == 2) ? pRefVPlane->GetAbsolutePointerPel <1>((x[2] << 1) + (nVx >> p.nLogxRatioUV), (y[2] << 1) + (nVy >> p.nLogyRatioUV)) :
-			(p.nPel == 1) ? pRefVPlane->GetAbsolutePointerPel <0>((x[2]) + (nVx >> p.nLogxRatioUV), (y[2]) + (nVy >> p.nLogyRatioUV)) :
-			pRefVPlane->GetAbsolutePointerPel <2>((x[2] << 2) + (nVx >> p.nLogxRatioUV), (y[2] << 2) + (nVy >> p.nLogyRatioUV));
+    return (p.nPel == 2) ? pRefVPlane->GetAbsolutePointerPel <1>((x[2] << 1) + (nVx >> p.nLogxRatioUV), (y[2] << 1) + (nVy >> p.nLogyRatioUV)) :
+      (p.nPel == 1) ? pRefVPlane->GetAbsolutePointerPel <0>((x[2]) + (nVx >> p.nLogxRatioUV), (y[2]) + (nVy >> p.nLogyRatioUV)) :
+      pRefVPlane->GetAbsolutePointerPel <2>((x[2] << 2) + (nVx >> p.nLogxRatioUV), (y[2] << 2) + (nVy >> p.nLogyRatioUV));
   }
 
   /* clip a vector to the horizontal boundaries */
@@ -1157,7 +1157,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     // Up predictor
     if (blky > 0)
     {
-			predictors[2] = ClipMV(vectors[blkIdx - p.nBlkX]);
+      predictors[2] = ClipMV(vectors[blkIdx - p.nBlkX]);
     }
     else
     {
@@ -1165,14 +1165,14 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     }
 
     // bottom-right pridictor (from coarse level)
-		if ((blky < p.nBlkY - 1) && ((blkScanDir == 1 && blkx < p.nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
+    if ((blky < p.nBlkY - 1) && ((blkScanDir == 1 && blkx < p.nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
     {
-			predictors[3] = ClipMV(vectors[blkIdx + p.nBlkX + blkScanDir]);
+      predictors[3] = ClipMV(vectors[blkIdx + p.nBlkX + blkScanDir]);
     }
     // Up-right predictor
-		else if ((blky > 0) && ((blkScanDir == 1 && blkx < p.nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
+    else if ((blky > 0) && ((blkScanDir == 1 && blkx < p.nBlkX - 1) || (blkScanDir == -1 && blkx > 0)))
     {
-			predictors[3] = ClipMV(vectors[blkIdx - p.nBlkX + blkScanDir]);
+      predictors[3] = ClipMV(vectors[blkIdx - p.nBlkX + blkScanDir]);
     }
     else
     {
@@ -1198,82 +1198,82 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     }
 
     // if there are no other planes, predictor is the median
-		if (p.smallestPlane)
+    if (p.smallestPlane)
     {
       predictor = predictors[0];
     }
 
     typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
-		nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
+    nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
     // replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
     //	int a = LSAD/(LSAD + (predictor.sad>>1));
     //	nCurrentLambda = nCurrentLambda*a*a;
   }
 
-	void FetchPredictorsCudaEmu()
-	{
-		VECTOR zero = { 0,0,0 };
+  void FetchPredictorsCudaEmu()
+  {
+    VECTOR zero = { 0,0,0 };
 
-		// Left (or right) predictor
-		if (blkx > 0)
-		{
-			predictors[1] = ClipMV(vectors[blkIdx - 1]);
-		}
-		else
-		{
-			predictors[1] = ClipMV(zero); // v1.11.1 - values instead of pointer
-		}
+    // Left (or right) predictor
+    if (blkx > 0)
+    {
+      predictors[1] = ClipMV(vectors[blkIdx - 1]);
+    }
+    else
+    {
+      predictors[1] = ClipMV(zero); // v1.11.1 - values instead of pointer
+    }
 
-		// Up predictor
-		if (blky > 0)
-		{
-			predictors[2] = ClipMV(vectors[blkIdx - p.nBlkX]);
-		}
-		else
-		{
-			predictors[2] = ClipMV(zero);
-		}
+    // Up predictor
+    if (blky > 0)
+    {
+      predictors[2] = ClipMV(vectors[blkIdx - p.nBlkX]);
+    }
+    else
+    {
+      predictors[2] = ClipMV(zero);
+    }
 
-		// bottom-right pridictor (from coarse level)
-		if ((blky < p.nBlkY - 1) && (blkx < p.nBlkX - 1))
-		{
-			predictors[3] = ClipMV(vectors[blkIdx + p.nBlkX + blkScanDir]);
-		}
-		else
-		{
-			predictors[3] = ClipMV(zero);
-		}
+    // bottom-right pridictor (from coarse level)
+    if ((blky < p.nBlkY - 1) && (blkx < p.nBlkX - 1))
+    {
+      predictors[3] = ClipMV(vectors[blkIdx + p.nBlkX + blkScanDir]);
+    }
+    else
+    {
+      predictors[3] = ClipMV(zero);
+    }
 
-		// Median predictor
-		if (blky > 0) // replaced 1 by 0 - Fizick
-		{
-			predictors[0].x = Median(predictors[1].x, predictors[2].x, predictors[3].x);
-			predictors[0].y = Median(predictors[1].y, predictors[2].y, predictors[3].y);
-			//		predictors[0].sad = Median(predictors[1].sad, predictors[2].sad, predictors[3].sad);
-			// but it is not true median vector (x and y may be mixed) and not its sad ?!
-			// we really do not know SAD, here is more safe estimation especially for phaseshift method - v1.6.0
-			predictors[0].sad = std::max(predictors[1].sad, std::max(predictors[2].sad, predictors[3].sad));
-		}
-		else
-		{
-			// but for top line we have only left predictor[1] - v1.6.0
-			predictors[0].x = predictors[1].x;
-			predictors[0].y = predictors[1].y;
-			predictors[0].sad = predictors[1].sad;
-		}
+    // Median predictor
+    if (blky > 0) // replaced 1 by 0 - Fizick
+    {
+      predictors[0].x = Median(predictors[1].x, predictors[2].x, predictors[3].x);
+      predictors[0].y = Median(predictors[1].y, predictors[2].y, predictors[3].y);
+      //		predictors[0].sad = Median(predictors[1].sad, predictors[2].sad, predictors[3].sad);
+      // but it is not true median vector (x and y may be mixed) and not its sad ?!
+      // we really do not know SAD, here is more safe estimation especially for phaseshift method - v1.6.0
+      predictors[0].sad = std::max(predictors[1].sad, std::max(predictors[2].sad, predictors[3].sad));
+    }
+    else
+    {
+      // but for top line we have only left predictor[1] - v1.6.0
+      predictors[0].x = predictors[1].x;
+      predictors[0].y = predictors[1].y;
+      predictors[0].sad = predictors[1].sad;
+    }
 
-		// if there are no other planes, predictor is the median
-		if (p.smallestPlane)
-		{
-			predictor = predictors[0];
-		}
+    // if there are no other planes, predictor is the median
+    if (p.smallestPlane)
+    {
+      predictor = predictors[0];
+    }
 
-		typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
-		nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
-		// replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
-		//	int a = LSAD/(LSAD + (predictor.sad>>1));
-		//	nCurrentLambda = nCurrentLambda*a*a;
-	}
+    typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+    nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
+    // replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
+    //	int a = LSAD/(LSAD + (predictor.sad>>1));
+    //	nCurrentLambda = nCurrentLambda*a*a;
+  }
 
   void ExpandingSearch(int r, int s, int mvx, int mvy) // diameter = 2*r + 1, step=s
   { // part of true enhaustive search (thin expanding square) around mvx, mvy
@@ -1331,9 +1331,9 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         for (int i = 1; i < i_me_range / 2 && IsVectorOK(bmx, bmy); i++)
         {
           const int odir = mod6m1[dir + 1];
-          
+
           dir = -2;
-          
+
           CheckMVdir(bmx + hex2[odir + 0][0], bmy + hex2[odir + 0][1], &dir, odir - 1);
           CheckMVdir(bmx + hex2[odir + 1][0], bmy + hex2[odir + 1][1], &dir, odir);
           CheckMVdir(bmx + hex2[odir + 2][0], bmy + hex2[odir + 2][1], &dir, odir + 1);
@@ -1357,19 +1357,19 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   void Refine()
   {
     // then, we refine, according to the search type
-		switch (p.searchType) {
+    switch (p.searchType) {
     case EXHAUSTIVE: {
       //		ExhaustiveSearch(nSearchParam);
       int mvx = bestMV.x;
       int mvy = bestMV.y;
-			for (int i = 1; i <= p.nSearchParam; i++)// region is same as exhaustive, but ordered by radius (from near to far)
+      for (int i = 1; i <= p.nSearchParam; i++)// region is same as exhaustive, but ordered by radius (from near to far)
       {
         ExpandingSearch(i, 1, mvx, mvy);
       }
     }
-    break;
+                     break;
     case HEX2SEARCH:
-			Hex2Search(p.nSearchParam);
+      Hex2Search(p.nSearchParam);
       break;
     default:
       // Not implemented
@@ -1395,72 +1395,72 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
 #if 0
-			if (debug && vx == -2 && vy == 1) {
-				const pixel_t* pRefY = GetRefBlock(vx, vy);
-				const pixel_t* pRefU = GetRefBlockU(vx, vy);
-				const pixel_t* pRefV = GetRefBlockV(vx, vy);
+      if (debug && vx == -2 && vy == 1) {
+        const pixel_t* pRefY = GetRefBlock(vx, vy);
+        const pixel_t* pRefU = GetRefBlockU(vx, vy);
+        const pixel_t* pRefV = GetRefBlockV(vx, vy);
 
-				int sum = 0;
+        int sum = 0;
 #if 0 // blksize==16用
-				for (int i = 0; i < 16; ++i) {
-					int s = pSrc[0][nSrcPitch[0] * i];
-					int r = pRefY[nRefPitch[0] * i];
-					sum += std::abs(s - r);
-					printf("i=%d,sum=%d\n", i, sum);
-				}
-				for (int i = 0; i < 8; i += 2) {
-					int su = pSrc[1][nSrcPitch[1] * i];
-					int ru = pRefU[nRefPitch[1] * i];
-					int sv = pSrc[2][nSrcPitch[2] * i];
-					int rv = pRefV[nRefPitch[2] * i];
-					sum += std::abs(su - ru);
-					sum += std::abs(sv - rv);
-					printf("i=%d,sum=%d\n", i, sum);
-				}
+        for (int i = 0; i < 16; ++i) {
+          int s = pSrc[0][nSrcPitch[0] * i];
+          int r = pRefY[nRefPitch[0] * i];
+          sum += std::abs(s - r);
+          printf("i=%d,sum=%d\n", i, sum);
+        }
+        for (int i = 0; i < 8; i += 2) {
+          int su = pSrc[1][nSrcPitch[1] * i];
+          int ru = pRefU[nRefPitch[1] * i];
+          int sv = pSrc[2][nSrcPitch[2] * i];
+          int rv = pRefV[nRefPitch[2] * i];
+          sum += std::abs(su - ru);
+          sum += std::abs(sv - rv);
+          printf("i=%d,sum=%d\n", i, sum);
+        }
 #else // blksize==32用
-				for (int i = 0; i < 32; ++i) {
-					int s0 = pSrc[0][nSrcPitch[0] * i];
-					int r0 = pRefY[nRefPitch[0] * i];
-					int s1 = pSrc[0][16 + nSrcPitch[0] * i];
-					int r1 = pRefY[16 + nRefPitch[0] * i];
-					sum += std::abs(s0 - r0);
-					sum += std::abs(s1 - r1);
-					printf("i=%d,sum=%d\n", i, sum);
-				}
-				for (int i = 0; i < 16; ++i) {
-					int su = pSrc[1][nSrcPitch[1] * i];
-					int ru = pRefU[nRefPitch[1] * i];
-					int sv = pSrc[2][nSrcPitch[2] * i];
-					int rv = pRefV[nRefPitch[2] * i];
-					sum += std::abs(su - ru);
-					sum += std::abs(sv - rv);
-					printf("i=%d,sum=%d\n", i, sum);
-				}
+        for (int i = 0; i < 32; ++i) {
+          int s0 = pSrc[0][nSrcPitch[0] * i];
+          int r0 = pRefY[nRefPitch[0] * i];
+          int s1 = pSrc[0][16 + nSrcPitch[0] * i];
+          int r1 = pRefY[16 + nRefPitch[0] * i];
+          sum += std::abs(s0 - r0);
+          sum += std::abs(s1 - r1);
+          printf("i=%d,sum=%d\n", i, sum);
+        }
+        for (int i = 0; i < 16; ++i) {
+          int su = pSrc[1][nSrcPitch[1] * i];
+          int ru = pRefU[nRefPitch[1] * i];
+          int sv = pSrc[2][nSrcPitch[2] * i];
+          int rv = pRefV[nRefPitch[2] * i];
+          sum += std::abs(su - ru);
+          sum += std::abs(sv - rv);
+          printf("i=%d,sum=%d\n", i, sum);
+        }
 #endif
 
-				printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
-					pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
-					pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
-				);
-				printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
-					pSrc[1][0], pSrc[1][1], pSrc[1][0 + nSrcPitch[1]], pSrc[1][1 + nSrcPitch[1]],
-					pRefU[0], pRefU[1], pRefU[0 + nRefPitch[1]], pRefU[1 + nRefPitch[1]]
-				);
-				printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
-					pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
-					pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
-				);
-			}
+        printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
+          pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
+          pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
+        );
+        printf("srcU: %d,%d,...,%d,%d,... refU: %d,%d,...,%d,%d,... \n",
+          pSrc[1][0], pSrc[1][1], pSrc[1][0 + nSrcPitch[1]], pSrc[1][1 + nSrcPitch[1]],
+          pRefU[0], pRefU[1], pRefU[0 + nRefPitch[1]], pRefU[1 + nRefPitch[1]]
+        );
+        printf("srcV: %d,%d,...,%d,%d,... refV: %d,%d,...,%d,%d,... \n",
+          pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
+          pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
+        );
+      }
 #endif
 
 #if 1 // CUDA版と合わせる
-			int sad = LumaSAD(GetRefBlock(vx, vy));
-			if (p.chroma) {
-				sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
-					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
-			}
-			cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
-			int saduv = 0;
+      int sad = LumaSAD(GetRefBlock(vx, vy));
+      if (p.chroma) {
+        sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
+          + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+      }
+      cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
+      int saduv = 0;
 #else
       int sad = LumaSAD(GetRefBlock(vx, vy));
       cost += sad + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)sad) >> 8));
@@ -1468,7 +1468,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
 
       int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
-			cost += saduv + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)saduv) >> 8));
+      cost += saduv + (isFirst ? 0 : ((p.penaltyNew*(safe_sad_t)saduv) >> 8));
 #endif
       if (cost >= nMinCost) return;
 
@@ -1478,7 +1478,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       bestMV.sad = sad + saduv;
     }
   }
-  
+
   /* check if the vector (vx, vy) is better, and update dir accordingly, but not bestMV.x, y */
   void CheckMVdir(int vx, int vy, int *dir, int val)
   {
@@ -1491,21 +1491,21 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 
 #if 1 // CUDA版と合わせる
-			int sad = LumaSAD(GetRefBlock(vx, vy));
-			if (p.chroma) {
-				sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
-					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
-			}
-			cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
-			int saduv = 0;
+      int sad = LumaSAD(GetRefBlock(vx, vy));
+      if (p.chroma) {
+        sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
+          + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
+      }
+      cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
+      int saduv = 0;
 #else
       int sad = LumaSAD(GetRefBlock(vx, vy));
-			cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
+      cost += sad + ((p.penaltyNew*(safe_sad_t)sad) >> 8);
       if (cost >= nMinCost) return;
 
       int saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
         + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(vx, vy), nRefPitch[2]);
-			cost += saduv + ((p.penaltyNew*(safe_sad_t)saduv) >> 8);
+      cost += saduv + ((p.penaltyNew*(safe_sad_t)saduv) >> 8);
 #endif
       if (cost >= nMinCost) return;
       nMinCost = cost;
@@ -1514,12 +1514,12 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     }
   }
 
-	bool debug;
+  bool debug;
   void PseudoEPZSearch()
   {
     typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
 #if 1 // CUDA版と合わせる
-		FetchPredictorsCudaEmu();
+    FetchPredictorsCudaEmu();
 #else
     FetchPredictors();
 #endif
@@ -1528,22 +1528,22 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
     // Do we bias zero with not taking into account distorsion ?
     bestMV.x = 0;
     bestMV.y = 0;
-		int sad = LumaSAD(GetRefBlock(0, 0));
-		int saduv;
-		if (p.chroma) {
-			saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(0, 0), nRefPitch[1])
-				+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(0, 0), nRefPitch[2]);
-			sad += saduv;
-		}
+    int sad = LumaSAD(GetRefBlock(0, 0));
+    int saduv;
+    if (p.chroma) {
+      saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(0, 0), nRefPitch[1])
+        + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(0, 0), nRefPitch[2]);
+      sad += saduv;
+    }
     bestMV.sad = sad;
-		nMinCost = sad + ((p.penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
+    nMinCost = sad + ((p.penaltyZero*(safe_sad_t)sad) >> 8); // v.1.11.0.2
 
-		if (debug) {
-			printf("zero: sad=%d, mincost=%d\n", sad, nMinCost);
+    if (debug) {
+      printf("zero: sad=%d, mincost=%d\n", sad, nMinCost);
 #if 0
-			const pixel_t* pRefY = GetRefBlock(0, 0);
-			const pixel_t* pRefU = GetRefBlockU(0, 0);
-			const pixel_t* pRefV = GetRefBlockV(0, 0);
+      const pixel_t* pRefY = GetRefBlock(0, 0);
+      const pixel_t* pRefU = GetRefBlockU(0, 0);
+      const pixel_t* pRefV = GetRefBlockV(0, 0);
       printf("srcY: %d,%d,...,%d,%d,... refY: %d,%d,...,%d,%d,... \n",
         pSrc[0][0], pSrc[0][1], pSrc[0][0 + nSrcPitch[0]], pSrc[0][1 + nSrcPitch[0]],
         pRefY[0], pRefY[1], pRefY[0 + nRefPitch[0]], pRefY[1 + nRefPitch[0]]
@@ -1556,58 +1556,58 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         pSrc[2][0], pSrc[2][1], pSrc[2][0 + nSrcPitch[2]], pSrc[2][1 + nSrcPitch[2]],
         pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
       );
-			int sum = 0;
+      int sum = 0;
 #if 0 // blksize==16用
-			for (int i = 0; i < 16; ++i) {
-				int s = pSrc[0][nSrcPitch[0] * i];
-				int r = pRefY[nRefPitch[0] * i];
-				sum += std::abs(s - r);
-				printf("i=%d,sum=%d\n", i, sum);
-			}
-			for (int i = 0; i < 8; i += 2) {
-				int su = pSrc[1][nSrcPitch[1] * i];
-				int ru = pRefU[nRefPitch[1] * i];
-				int sv = pSrc[2][nSrcPitch[2] * i];
-				int rv = pRefV[nRefPitch[2] * i];
-				sum += std::abs(su - ru);
-				sum += std::abs(sv - rv);
-				printf("i=%d,sum=%d\n", i, sum);
-			}
+      for (int i = 0; i < 16; ++i) {
+        int s = pSrc[0][nSrcPitch[0] * i];
+        int r = pRefY[nRefPitch[0] * i];
+        sum += std::abs(s - r);
+        printf("i=%d,sum=%d\n", i, sum);
+      }
+      for (int i = 0; i < 8; i += 2) {
+        int su = pSrc[1][nSrcPitch[1] * i];
+        int ru = pRefU[nRefPitch[1] * i];
+        int sv = pSrc[2][nSrcPitch[2] * i];
+        int rv = pRefV[nRefPitch[2] * i];
+        sum += std::abs(su - ru);
+        sum += std::abs(sv - rv);
+        printf("i=%d,sum=%d\n", i, sum);
+      }
 #elif 0 // blksize==32用
-			for (int i = 0; i < 32; ++i) {
-				int s0 = pSrc[0][nSrcPitch[0] * i];
-				int r0 = pRefY[nRefPitch[0] * i];
-				int s1 = pSrc[0][16 + nSrcPitch[0] * i];
-				int r1 = pRefY[16 + nRefPitch[0] * i];
-				sum += std::abs(s0 - r0);
-				sum += std::abs(s1 - r1);
-				printf("i=%d,sum=%d\n", i, sum);
-			}
-			for (int i = 0; i < 16; ++i) {
-				int su = pSrc[1][nSrcPitch[1] * i];
-				int ru = pRefU[nRefPitch[1] * i];
-				int sv = pSrc[2][nSrcPitch[2] * i];
-				int rv = pRefV[nRefPitch[2] * i];
-				sum += std::abs(su - ru);
-				sum += std::abs(sv - rv);
-				printf("i=%d,sum=%d\n", i, sum);
-			}
+      for (int i = 0; i < 32; ++i) {
+        int s0 = pSrc[0][nSrcPitch[0] * i];
+        int r0 = pRefY[nRefPitch[0] * i];
+        int s1 = pSrc[0][16 + nSrcPitch[0] * i];
+        int r1 = pRefY[16 + nRefPitch[0] * i];
+        sum += std::abs(s0 - r0);
+        sum += std::abs(s1 - r1);
+        printf("i=%d,sum=%d\n", i, sum);
+      }
+      for (int i = 0; i < 16; ++i) {
+        int su = pSrc[1][nSrcPitch[1] * i];
+        int ru = pRefU[nRefPitch[1] * i];
+        int sv = pSrc[2][nSrcPitch[2] * i];
+        int rv = pRefV[nRefPitch[2] * i];
+        sum += std::abs(su - ru);
+        sum += std::abs(sv - rv);
+        printf("i=%d,sum=%d\n", i, sum);
+      }
 #endif
       //DebugWriteBitmap("analyze-srcblockY-%d.bmp", (const uint8_t*)pSrc[0], p.nBlkSizeX, p.nBlkSizeY, nSrcPitch[0], 1);
       //DebugWriteBitmap("analyze-refblockY-%d.bmp", (const uint8_t*)pRefY, p.nBlkSizeX, p.nBlkSizeY, nRefPitch[0], 1);
 #endif
-		}
-                                                                    // Global MV predictor  - added by Fizick
+    }
+    // Global MV predictor  - added by Fizick
     globalMVPredictor = ClipMV(globalMVPredictor);
     //	if ( IsVectorOK(globalMVPredictor.x, globalMVPredictor.y ) )
     {
-			sad = LumaSAD(GetRefBlock(globalMVPredictor.x, globalMVPredictor.y));
-			if (p.chroma) {
-				saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[1])
-					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[2]);
-				sad += saduv;
-			}
-			int cost = sad + ((p.pglobal*(safe_sad_t)sad) >> 8);
+      sad = LumaSAD(GetRefBlock(globalMVPredictor.x, globalMVPredictor.y));
+      if (p.chroma) {
+        saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[1])
+          + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(globalMVPredictor.x, globalMVPredictor.y), nRefPitch[2]);
+        sad += saduv;
+      }
+      int cost = sad + ((p.pglobal*(safe_sad_t)sad) >> 8);
 
       if (cost < nMinCost)
       {
@@ -1621,12 +1621,12 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       //	if (   (( predictor.x != zeroMVfieldShifted.x ) || ( predictor.y != zeroMVfieldShifted.y ))
       //	    && (( predictor.x != globalMVPredictor.x ) || ( predictor.y != globalMVPredictor.y )))
       //	{
-			sad = LumaSAD(GetRefBlock(predictor.x, predictor.y));
-			if (p.chroma) {
-				saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(predictor.x, predictor.y), nRefPitch[1])
-					+ SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(predictor.x, predictor.y), nRefPitch[2]);
-				sad += saduv;
-			}
+      sad = LumaSAD(GetRefBlock(predictor.x, predictor.y));
+      if (p.chroma) {
+        saduv = SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(predictor.x, predictor.y), nRefPitch[1])
+          + SADCHROMA(pSrc[2], nSrcPitch[2], GetRefBlockV(predictor.x, predictor.y), nRefPitch[2]);
+        sad += saduv;
+      }
       cost = sad;
 
       if (cost < nMinCost)
@@ -1649,66 +1649,66 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       // then, we refine, according to the search type
     Refine();
 
-      // we store the result
+    // we store the result
     vectors[blkIdx] = bestMV;
   }
 
 public:
-	PlaneOfBlocks(MVPlaneParam p, PNeoEnv env)
-		: p(p)
-		, SAD(get_sad_function<pixel_t>(p.nBlkSizeX, p.nBlkSizeY, env))
-		, SADCHROMA(get_sad_function<pixel_t>(p.nBlkSizeX / p.xRatioUV, p.nBlkSizeY / p.yRatioUV, env))
-	{ }
+  PlaneOfBlocks(MVPlaneParam p, PNeoEnv env)
+    : p(p)
+    , SAD(get_sad_function<pixel_t>(p.nBlkSizeX, p.nBlkSizeY, env))
+    , SADCHROMA(get_sad_function<pixel_t>(p.nBlkSizeX / p.xRatioUV, p.nBlkSizeY / p.yRatioUV, env))
+  { }
 
-	int GetWorkSize()
-	{
-		return 0;
-	}
-
-	void SetWorkMemory(uint8_t* work) { }
-
-	void InitializeGlobalMV(int batch, VECTOR* globalMV)
-	{
-		for (int b = 0; b < batch; ++b) {
-			globalMV[b].x = globalMV[b].y = 0;
-			globalMV[b].sad = -1;
-		}
-	}
-
-	void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount)
+  int GetWorkSize()
   {
-		assert(nCount == p.nBlkCount);
-		for (int b = 0; b < batch; ++b) {
-			const VECTOR *psrc = src[b];
-			VECTOR *pout = out[b];
-			std::vector<VECTOR>& dst_vectors = batchVectors[b];
-			dst_vectors.resize(p.nBlkCount);
-
-			for (int i = 0; i < p.nBlkCount; ++i) {
-				pout[i] = dst_vectors[i] = psrc[i];
-			}
-		}
+    return 0;
   }
 
-	void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount)
-	{
-		for (int b = 0; b < batch; ++b) {
-			batchVectors[b].resize(p.nBlkCount);
-			vectors = batchVectors[b].data();
-			SearchMVs(pSrcFrame[b], pRefFrame[b], &_globalMV[b], out[b], nCount);
-		}
-	}
+  void SetWorkMemory(uint8_t* work) { }
+
+  void InitializeGlobalMV(int batch, VECTOR* globalMV)
+  {
+    for (int b = 0; b < batch; ++b) {
+      globalMV[b].x = globalMV[b].y = 0;
+      globalMV[b].sad = -1;
+    }
+  }
+
+  void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount)
+  {
+    assert(nCount == p.nBlkCount);
+    for (int b = 0; b < batch; ++b) {
+      const VECTOR *psrc = src[b];
+      VECTOR *pout = out[b];
+      std::vector<VECTOR>& dst_vectors = batchVectors[b];
+      dst_vectors.resize(p.nBlkCount);
+
+      for (int i = 0; i < p.nBlkCount; ++i) {
+        pout[i] = dst_vectors[i] = psrc[i];
+      }
+    }
+  }
+
+  void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *_globalMV, VECTOR **out, int nCount)
+  {
+    for (int b = 0; b < batch; ++b) {
+      batchVectors[b].resize(p.nBlkCount);
+      vectors = batchVectors[b].data();
+      SearchMVs(pSrcFrame[b], pRefFrame[b], &_globalMV[b], out[b], nCount);
+    }
+  }
 
   /* search the vectors for the whole plane */
-	void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount)
-	{
-		assert(nCount == p.nBlkCount);
+  void SearchMVs(KMFrame *pSrcFrame, KMFrame *pRefFrame, const VECTOR *_globalMV, VECTOR *out, int nCount)
+  {
+    assert(nCount == p.nBlkCount);
     // -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
     // Frame- and plane-related data preparation
 
     VECTOR globalMV = *_globalMV;
-		globalMV.x *= p.nPel;
-		globalMV.y *= p.nPel;
+    globalMV.x *= p.nPel;
+    globalMV.y *= p.nPel;
 
     pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetYPlane());
     pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame->GetUPlane());
@@ -1718,13 +1718,13 @@ public:
     pRefVPlane = static_cast<KMPlane<pixel_t>*>(pRefFrame->GetVPlane());
 
     nSrcPitch[0] = pSrcYPlane->GetPitch();
-		if (p.chroma)
+    if (p.chroma)
     {
       nSrcPitch[1] = pSrcUPlane->GetPitch();
       nSrcPitch[2] = pSrcVPlane->GetPitch();
     }
     nRefPitch[0] = pRefYPlane->GetPitch();
-		if (p.chroma)
+    if (p.chroma)
     {
       nRefPitch[1] = pRefUPlane->GetPitch();
       nRefPitch[2] = pRefVPlane->GetPitch();
@@ -1732,11 +1732,11 @@ public:
 
     // -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
 
-		VECTOR *pBlkData = out;
+    VECTOR *pBlkData = out;
 
     y[0] = pSrcYPlane->GetVPadding();
 
-		if (p.chroma)
+    if (p.chroma)
     {
       y[1] = pSrcUPlane->GetVPadding();
       y[2] = pSrcVPlane->GetVPadding();
@@ -1744,18 +1744,18 @@ public:
 
     // Functions using float must not be used here
 
-		int nBlkSizeX_Ovr[3] = { (p.nBlkSizeX - p.nOverlapX), (p.nBlkSizeX - p.nOverlapX) >> p.nLogxRatioUV, (p.nBlkSizeX - p.nOverlapX) >> p.nLogxRatioUV };
-		int nBlkSizeY_Ovr[3] = { (p.nBlkSizeY - p.nOverlapY), (p.nBlkSizeY - p.nOverlapY) >> p.nLogyRatioUV, (p.nBlkSizeY - p.nOverlapY) >> p.nLogyRatioUV };
+    int nBlkSizeX_Ovr[3] = { (p.nBlkSizeX - p.nOverlapX), (p.nBlkSizeX - p.nOverlapX) >> p.nLogxRatioUV, (p.nBlkSizeX - p.nOverlapX) >> p.nLogxRatioUV };
+    int nBlkSizeY_Ovr[3] = { (p.nBlkSizeY - p.nOverlapY), (p.nBlkSizeY - p.nOverlapY) >> p.nLogyRatioUV, (p.nBlkSizeY - p.nOverlapY) >> p.nLogyRatioUV };
 
-		for (blky = 0; blky < p.nBlkY; blky++)
+    for (blky = 0; blky < p.nBlkY; blky++)
     {
-			blkScanDir = (blky % 2 == 0 || !p.meander) ? 1 : -1;
+      blkScanDir = (blky % 2 == 0 || !p.meander) ? 1 : -1;
       // meander (alternate) scan blocks (even row left to right, odd row right to left)
-			int blkxStart = (blky % 2 == 0 || !p.meander) ? 0 : p.nBlkX - 1;
+      int blkxStart = (blky % 2 == 0 || !p.meander) ? 0 : p.nBlkX - 1;
       if (blkScanDir == 1) // start with leftmost block
       {
         x[0] = pSrcYPlane->GetHPadding();
-				if (p.chroma)
+        if (p.chroma)
         {
           x[1] = pSrcUPlane->GetHPadding();
           x[2] = pSrcVPlane->GetHPadding();
@@ -1763,15 +1763,15 @@ public:
       }
       else // start with rightmost block, but it is already set at prev row
       {
-				x[0] = pSrcYPlane->GetHPadding() + nBlkSizeX_Ovr[0] * (p.nBlkX - 1);
-				if (p.chroma)
+        x[0] = pSrcYPlane->GetHPadding() + nBlkSizeX_Ovr[0] * (p.nBlkX - 1);
+        if (p.chroma)
         {
-					x[1] = pSrcUPlane->GetHPadding() + nBlkSizeX_Ovr[1] * (p.nBlkX - 1);
-					x[2] = pSrcVPlane->GetHPadding() + nBlkSizeX_Ovr[2] * (p.nBlkX - 1);
+          x[1] = pSrcUPlane->GetHPadding() + nBlkSizeX_Ovr[1] * (p.nBlkX - 1);
+          x[2] = pSrcVPlane->GetHPadding() + nBlkSizeX_Ovr[2] * (p.nBlkX - 1);
         }
       }
 
-			for (int iblkx = 0; iblkx < p.nBlkX; iblkx++)
+      for (int iblkx = 0; iblkx < p.nBlkX; iblkx++)
       {
         blkx = blkxStart + iblkx*blkScanDir;
         blkIdx = blky*p.nBlkX + blkx;
@@ -1783,7 +1783,7 @@ public:
         globalMVPredictor = globalMV;
 
         pSrc[0] = pSrcYPlane->GetAbsolutePelPointer(x[0], y[0]);
-				if (p.chroma)
+        if (p.chroma)
         {
           pSrc[1] = pSrcUPlane->GetAbsolutePelPointer(x[1], y[1]);
           pSrc[2] = pSrcVPlane->GetAbsolutePelPointer(x[2], y[2]);
@@ -1799,23 +1799,23 @@ public:
         }
 
         // decreased padding of coarse levels
-				int nHPaddingScaled = pSrcYPlane->GetHPadding() >> p.nLogScale;
-				int nVPaddingScaled = pSrcYPlane->GetVPadding() >> p.nLogScale;
+        int nHPaddingScaled = pSrcYPlane->GetHPadding() >> p.nLogScale;
+        int nVPaddingScaled = pSrcYPlane->GetVPadding() >> p.nLogScale;
         /* computes search boundaries */
-				nDxMax = p.nPel * (pSrcYPlane->GetExtendedWidth() - x[0] - p.nBlkSizeX - pSrcYPlane->GetHPadding() + nHPaddingScaled);
-				nDyMax = p.nPel * (pSrcYPlane->GetExtendedHeight() - y[0] - p.nBlkSizeY - pSrcYPlane->GetVPadding() + nVPaddingScaled);
-				nDxMin = -p.nPel * (x[0] - pSrcYPlane->GetHPadding() + nHPaddingScaled);
-				nDyMin = -p.nPel * (y[0] - pSrcYPlane->GetVPadding() + nVPaddingScaled);
+        nDxMax = p.nPel * (pSrcYPlane->GetExtendedWidth() - x[0] - p.nBlkSizeX - pSrcYPlane->GetHPadding() + nHPaddingScaled);
+        nDyMax = p.nPel * (pSrcYPlane->GetExtendedHeight() - y[0] - p.nBlkSizeY - pSrcYPlane->GetVPadding() + nVPaddingScaled);
+        nDxMin = -p.nPel * (x[0] - pSrcYPlane->GetHPadding() + nHPaddingScaled);
+        nDyMin = -p.nPel * (y[0] - pSrcYPlane->GetVPadding() + nVPaddingScaled);
 
         /* search the mv */
         predictor = ClipMV(vectors[blkIdx]);
-        
+
         // TODO: no need
         VECTOR zeroMV = { 0,0,0 };
         predictors[4] = ClipMV(zeroMV);
 
-				// debug
-				//debug = (p.nBlkY == 32 && blkIdx == 0);
+        // debug
+        //debug = (p.nBlkY == 32 && blkIdx == 0);
         debug = false;
 
         PseudoEPZSearch();
@@ -1824,7 +1824,7 @@ public:
         pBlkData[blkx] = bestMV;
 
         /* increment indexes & pointers */
-				if (iblkx < p.nBlkX - 1)
+        if (iblkx < p.nBlkX - 1)
         {
           x[0] += nBlkSizeX_Ovr[0] * blkScanDir;
           x[1] += nBlkSizeX_Ovr[1] * blkScanDir;
@@ -1832,7 +1832,7 @@ public:
         }
       }	// for iblkx
 
-			pBlkData += p.nBlkX;
+      pBlkData += p.nBlkX;
 
       y[0] += nBlkSizeY_Ovr[0];
       y[1] += nBlkSizeY_Ovr[1];
@@ -1844,452 +1844,452 @@ public:
 
   void EstimateGlobalMVDoubled(int batch, VECTOR *globalMVec)
   {
-		std::vector<int> freq_arr(8192 * p.nPel * 2);
+    std::vector<int> freq_arr(8192 * p.nPel * 2);
 
-		for (int b = 0; b < batch; ++b) {
-			std::vector<VECTOR>& src_vectors = batchVectors[b];
+    for (int b = 0; b < batch; ++b) {
+      std::vector<VECTOR>& src_vectors = batchVectors[b];
 
-			for (int y = 0; y < 2; ++y)
-			{
-				const int      freqSize = int(freq_arr.size());
-				memset(&freq_arr[0], 0, freqSize * sizeof(freq_arr[0])); // reset
+      for (int y = 0; y < 2; ++y)
+      {
+        const int      freqSize = int(freq_arr.size());
+        memset(&freq_arr[0], 0, freqSize * sizeof(freq_arr[0])); // reset
 
-				int            indmin = freqSize - 1;
-				int            indmax = 0;
+        int            indmin = freqSize - 1;
+        int            indmax = 0;
 
-				// find most frequent x
-				if (y == 0)
-				{
-					for (int i = 0; i < p.nBlkCount; i++)
-					{
-						int ind = (freqSize >> 1) + src_vectors[i].x;
-						if (ind >= 0 && ind < freqSize)
-						{
-							++freq_arr[ind];
-							if (ind > indmax)
-							{
-								indmax = ind;
-							}
-							if (ind < indmin)
-							{
-								indmin = ind;
-							}
-						}
-					}
-				}
+        // find most frequent x
+        if (y == 0)
+        {
+          for (int i = 0; i < p.nBlkCount; i++)
+          {
+            int ind = (freqSize >> 1) + src_vectors[i].x;
+            if (ind >= 0 && ind < freqSize)
+            {
+              ++freq_arr[ind];
+              if (ind > indmax)
+              {
+                indmax = ind;
+              }
+              if (ind < indmin)
+              {
+                indmin = ind;
+              }
+            }
+          }
+        }
 
-				// find most frequent y
-				else
-				{
-					for (int i = 0; i < p.nBlkCount; i++)
-					{
-						int ind = (freqSize >> 1) + src_vectors[i].y;
-						if (ind >= 0 && ind < freqSize)
-						{
-							++freq_arr[ind];
-							if (ind > indmax)
-							{
-								indmax = ind;
-							}
-							if (ind < indmin)
-							{
-								indmin = ind;
-							}
-						}
-					}	// i < nBlkCount
-				}
+        // find most frequent y
+        else
+        {
+          for (int i = 0; i < p.nBlkCount; i++)
+          {
+            int ind = (freqSize >> 1) + src_vectors[i].y;
+            if (ind >= 0 && ind < freqSize)
+            {
+              ++freq_arr[ind];
+              if (ind > indmax)
+              {
+                indmax = ind;
+              }
+              if (ind < indmin)
+              {
+                indmin = ind;
+              }
+            }
+          }	// i < nBlkCount
+        }
 
-				int count = freq_arr[indmin];
-				int index = indmin;
-				for (int i = indmin + 1; i <= indmax; i++)
-				{
-					if (freq_arr[i] > count)
-					{
-						count = freq_arr[i];
-						index = i;
-					}
-				}
+        int count = freq_arr[indmin];
+        int index = indmin;
+        for (int i = indmin + 1; i <= indmax; i++)
+        {
+          if (freq_arr[i] > count)
+          {
+            count = freq_arr[i];
+            index = i;
+          }
+        }
 
-				// most frequent value
-				int result = index - (freqSize >> 1);
-				if (y == 0) {
-					globalMVec[b].x = result;
+        // most frequent value
+        int result = index - (freqSize >> 1);
+        if (y == 0) {
+          globalMVec[b].x = result;
 #if 0
-					if (p.nBlkCount < 1888) {
-						printf("Most frequenct X: %d\n", result);
-					}
+          if (p.nBlkCount < 1888) {
+            printf("Most frequenct X: %d\n", result);
+          }
 #endif
-				}
-				else {
-					globalMVec[b].y = result;
+        }
+        else {
+          globalMVec[b].y = result;
 #if 0
-					if (p.nBlkCount < 1888) {
-						printf("Most frequenct Y: %d\n", result);
-					}
+          if (p.nBlkCount < 1888) {
+            printf("Most frequenct Y: %d\n", result);
+          }
 #endif
-				}
-			}
+        }
+      }
 
-			int medianx = globalMVec[b].x;
-			int mediany = globalMVec[b].y;
-			int meanvx = 0;
-			int meanvy = 0;
-			int num = 0;
-			for (int i = 0; i < p.nBlkCount; i++)
-			{
-				if (abs(src_vectors[i].x - medianx) < 6
-					&& abs(src_vectors[i].y - mediany) < 6)
-				{
-					meanvx += src_vectors[i].x;
-					meanvy += src_vectors[i].y;
-					num += 1;
-				}
-			}
+      int medianx = globalMVec[b].x;
+      int mediany = globalMVec[b].y;
+      int meanvx = 0;
+      int meanvy = 0;
+      int num = 0;
+      for (int i = 0; i < p.nBlkCount; i++)
+      {
+        if (abs(src_vectors[i].x - medianx) < 6
+          && abs(src_vectors[i].y - mediany) < 6)
+        {
+          meanvx += src_vectors[i].x;
+          meanvy += src_vectors[i].y;
+          num += 1;
+        }
+      }
 
-			// output vectors must be doubled for next (finer) scale level
-			if (num > 0)
-			{
-				globalMVec[b].x = 2 * meanvx / num;
-				globalMVec[b].y = 2 * meanvy / num;
-			}
-			else
-			{
-				globalMVec[b].x = 2 * medianx;
-				globalMVec[b].y = 2 * mediany;
-			}
+      // output vectors must be doubled for next (finer) scale level
+      if (num > 0)
+      {
+        globalMVec[b].x = 2 * meanvx / num;
+        globalMVec[b].y = 2 * meanvy / num;
+      }
+      else
+      {
+        globalMVec[b].x = 2 * medianx;
+        globalMVec[b].y = 2 * mediany;
+      }
 #if 0
-			if (p.nBlkCount < 1888) {
-				printf("mean: (%d, %d)\n", globalMVec[b].x, globalMVec[b].y);
-			}
+      if (p.nBlkCount < 1888) {
+        printf("mean: (%d, %d)\n", globalMVec[b].x, globalMVec[b].y);
+      }
 #endif
-		}
+    }
   }
 
   void InterpolatePrediction(int batch, const PlaneOfBlocksBase* _pob)
   {
     const PlaneOfBlocks<pixel_t>& pob = *static_cast<const PlaneOfBlocks<pixel_t>*>(_pob);
 
-		int normFactor = 3 - p.nLogPel + pob.p.nLogPel;
+    int normFactor = 3 - p.nLogPel + pob.p.nLogPel;
     int mulFactor = (normFactor < 0) ? -normFactor : 0;
     normFactor = (normFactor < 0) ? 0 : normFactor;
-		int normov = (p.nBlkSizeX - p.nOverlapX)*(p.nBlkSizeY - p.nOverlapY);
-		int aoddx = (p.nBlkSizeX * 3 - p.nOverlapX * 2);
-		int aevenx = (p.nBlkSizeX * 3 - p.nOverlapX * 4);
-		int aoddy = (p.nBlkSizeY * 3 - p.nOverlapY * 2);
-		int aeveny = (p.nBlkSizeY * 3 - p.nOverlapY * 4);
+    int normov = (p.nBlkSizeX - p.nOverlapX)*(p.nBlkSizeY - p.nOverlapY);
+    int aoddx = (p.nBlkSizeX * 3 - p.nOverlapX * 2);
+    int aevenx = (p.nBlkSizeX * 3 - p.nOverlapX * 4);
+    int aoddy = (p.nBlkSizeY * 3 - p.nOverlapY * 2);
+    int aeveny = (p.nBlkSizeY * 3 - p.nOverlapY * 4);
     // note: overlapping is still (v2.5.7) not processed properly
     // PF todo make faster
 
     // 2.7.19.22 max safe: BlkX*BlkY: sqrt(2147483647 / 3 / 255) = 1675 ,(2147483647 = 0x7FFFFFFF)
-		bool bNoOverlap = (p.nOverlapX == 0 && p.nOverlapY == 0);
-		bool isSafeBlkSizeFor8bits = (p.nBlkSizeX*p.nBlkSizeY) < 1675;
-		bool bSmallOverlap = p.nOverlapX <= (p.nBlkSizeX >> 1) && p.nOverlapY <= (p.nBlkSizeY >> 1);
+    bool bNoOverlap = (p.nOverlapX == 0 && p.nOverlapY == 0);
+    bool isSafeBlkSizeFor8bits = (p.nBlkSizeX*p.nBlkSizeY) < 1675;
+    bool bSmallOverlap = p.nOverlapX <= (p.nBlkSizeX >> 1) && p.nOverlapY <= (p.nBlkSizeY >> 1);
 
-		for (int b = 0; b < batch; ++b) {
-			const std::vector<VECTOR>& src_vectors = pob.batchVectors[b];
-			std::vector<VECTOR>& dst_vectors = batchVectors[b];
-			dst_vectors.resize(p.nBlkCount);
+    for (int b = 0; b < batch; ++b) {
+      const std::vector<VECTOR>& src_vectors = pob.batchVectors[b];
+      std::vector<VECTOR>& dst_vectors = batchVectors[b];
+      dst_vectors.resize(p.nBlkCount);
 
-			for (int l = 0, index = 0; l < p.nBlkY; l++)
-			{
-				for (int k = 0; k < p.nBlkX; k++, index++)
-				{
-					VECTOR v1, v2, v3, v4;
-					int i = k;
-					int j = l;
-					if (i >= 2 * pob.p.nBlkX)
-					{
-						i = 2 * pob.p.nBlkX - 1;
-					}
-					if (j >= 2 * pob.p.nBlkY)
-					{
-						j = 2 * pob.p.nBlkY - 1;
-					}
-					int offy = -1 + 2 * (j % 2);
-					int offx = -1 + 2 * (i % 2);
-					int iper2 = i / 2;
-					int jper2 = j / 2;
+      for (int l = 0, index = 0; l < p.nBlkY; l++)
+      {
+        for (int k = 0; k < p.nBlkX; k++, index++)
+        {
+          VECTOR v1, v2, v3, v4;
+          int i = k;
+          int j = l;
+          if (i >= 2 * pob.p.nBlkX)
+          {
+            i = 2 * pob.p.nBlkX - 1;
+          }
+          if (j >= 2 * pob.p.nBlkY)
+          {
+            j = 2 * pob.p.nBlkY - 1;
+          }
+          int offy = -1 + 2 * (j % 2);
+          int offx = -1 + 2 * (i % 2);
+          int iper2 = i / 2;
+          int jper2 = j / 2;
 
-					if ((i == 0) || (i >= 2 * pob.p.nBlkX - 1))
-					{
-						if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
-						{
-							v1 = v2 = v3 = v4 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
-						}
-						else
-						{
-							v1 = v2 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
-							v3 = v4 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
-						}
-					}
-					else if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
-					{
-						v1 = v2 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
-						v3 = v4 = src_vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
-					}
-					else
-					{
-						v1 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
-						v2 = src_vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
-						v3 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
-						v4 = src_vectors[iper2 + offx + (jper2 + offy) * pob.p.nBlkX];
-					}
-					typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
-					safe_sad_t tmp_sad; // 16 bit worst case: 16 * sad_max: 16 * 3x32x32x65536 = 4+5+5+16 > 2^31 over limit
-															// in case of BlockSize > 32, e.g. 128x128x65536 is even more: 7+7+16=30 bits
+          if ((i == 0) || (i >= 2 * pob.p.nBlkX - 1))
+          {
+            if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
+            {
+              v1 = v2 = v3 = v4 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+            }
+            else
+            {
+              v1 = v2 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+              v3 = v4 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
+            }
+          }
+          else if ((j == 0) || (j >= 2 * pob.p.nBlkY - 1))
+          {
+            v1 = v2 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+            v3 = v4 = src_vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
+          }
+          else
+          {
+            v1 = src_vectors[iper2 + (jper2)* pob.p.nBlkX];
+            v2 = src_vectors[iper2 + offx + (jper2)* pob.p.nBlkX];
+            v3 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
+            v4 = src_vectors[iper2 + offx + (jper2 + offy) * pob.p.nBlkX];
+          }
+          typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+          safe_sad_t tmp_sad; // 16 bit worst case: 16 * sad_max: 16 * 3x32x32x65536 = 4+5+5+16 > 2^31 over limit
+                              // in case of BlockSize > 32, e.g. 128x128x65536 is even more: 7+7+16=30 bits
 
-					if (bNoOverlap)
-					{
-						dst_vectors[index].x = 9 * v1.x + 3 * v2.x + 3 * v3.x + v4.x;
-						dst_vectors[index].y = 9 * v1.y + 3 * v2.y + 3 * v3.y + v4.y;
-						tmp_sad = 9 * (safe_sad_t)v1.sad + 3 * (safe_sad_t)v2.sad + 3 * (safe_sad_t)v3.sad + (safe_sad_t)v4.sad + 8;
+          if (bNoOverlap)
+          {
+            dst_vectors[index].x = 9 * v1.x + 3 * v2.x + 3 * v3.x + v4.x;
+            dst_vectors[index].y = 9 * v1.y + 3 * v2.y + 3 * v3.y + v4.y;
+            tmp_sad = 9 * (safe_sad_t)v1.sad + 3 * (safe_sad_t)v2.sad + 3 * (safe_sad_t)v3.sad + (safe_sad_t)v4.sad + 8;
 
-					}
-					else if (bSmallOverlap) // corrected in v1.4.11
-					{
-						int	ax1 = (offx > 0) ? aoddx : aevenx;
-						int ax2 = (p.nBlkSizeX - p.nOverlapX) * 4 - ax1;
-						int ay1 = (offy > 0) ? aoddy : aeveny;
-						int ay2 = (p.nBlkSizeY - p.nOverlapY) * 4 - ay1;
-						int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
-						dst_vectors[index].x = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
-						dst_vectors[index].y = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
-						if (isSafeBlkSizeFor8bits && sizeof(pixel_t) == 1) {
-							// old max blkSize==32 worst case: 
-							//   normov = (32-2)*(32-2) 
-							//   sad = 32x32x255 *3 (3 planes) // 705,024,000 < 2^31 OK
-							// blkSize == 48 worst case:
-							//   normov = (48-2)*(48-2) = 2116
-							//   sad = 48x48x255 * 3 // 3,729,576,960 not OK, already fails in 8 bits
-							// max safe: BlkX*BlkY: sqrt(0x7FFFFFF / 3 / 255) = 1675
-							tmp_sad = ((safe_sad_t)a11*v1.sad + (safe_sad_t)a21*v2.sad + (safe_sad_t)a12*v3.sad + (safe_sad_t)a22*v4.sad) / normov;
-						}
-						else {
-							// safe multiplication
-							tmp_sad = ((__int64)a11*v1.sad + (__int64)a21*v2.sad + (__int64)a12*v3.sad + (__int64)a22*v4.sad) / normov;
-						}
-					}
-					else // large overlap. Weights are not quite correct but let it be
-					{
-						dst_vectors[index].x = (v1.x + v2.x + v3.x + v4.x) << 2;
-						dst_vectors[index].y = (v1.y + v2.y + v3.y + v4.y) << 2;
-						tmp_sad = ((safe_sad_t)v1.sad + v2.sad + v3.sad + v4.sad + 2) << 2;
-					}
-					dst_vectors[index].x = (dst_vectors[index].x >> normFactor) << mulFactor;
-					dst_vectors[index].y = (dst_vectors[index].y >> normFactor) << mulFactor;
-					dst_vectors[index].sad = (int)(tmp_sad >> 4);
-				}	// for k < nBlkX
-			}	// for l < nBlkY
-		}
+          }
+          else if (bSmallOverlap) // corrected in v1.4.11
+          {
+            int	ax1 = (offx > 0) ? aoddx : aevenx;
+            int ax2 = (p.nBlkSizeX - p.nOverlapX) * 4 - ax1;
+            int ay1 = (offy > 0) ? aoddy : aeveny;
+            int ay2 = (p.nBlkSizeY - p.nOverlapY) * 4 - ay1;
+            int a11 = ax1*ay1, a12 = ax1*ay2, a21 = ax2*ay1, a22 = ax2*ay2;
+            dst_vectors[index].x = (a11*v1.x + a21*v2.x + a12*v3.x + a22*v4.x) / normov;
+            dst_vectors[index].y = (a11*v1.y + a21*v2.y + a12*v3.y + a22*v4.y) / normov;
+            if (isSafeBlkSizeFor8bits && sizeof(pixel_t) == 1) {
+              // old max blkSize==32 worst case: 
+              //   normov = (32-2)*(32-2) 
+              //   sad = 32x32x255 *3 (3 planes) // 705,024,000 < 2^31 OK
+              // blkSize == 48 worst case:
+              //   normov = (48-2)*(48-2) = 2116
+              //   sad = 48x48x255 * 3 // 3,729,576,960 not OK, already fails in 8 bits
+              // max safe: BlkX*BlkY: sqrt(0x7FFFFFF / 3 / 255) = 1675
+              tmp_sad = ((safe_sad_t)a11*v1.sad + (safe_sad_t)a21*v2.sad + (safe_sad_t)a12*v3.sad + (safe_sad_t)a22*v4.sad) / normov;
+            }
+            else {
+              // safe multiplication
+              tmp_sad = ((__int64)a11*v1.sad + (__int64)a21*v2.sad + (__int64)a12*v3.sad + (__int64)a22*v4.sad) / normov;
+            }
+          }
+          else // large overlap. Weights are not quite correct but let it be
+          {
+            dst_vectors[index].x = (v1.x + v2.x + v3.x + v4.x) << 2;
+            dst_vectors[index].y = (v1.y + v2.y + v3.y + v4.y) << 2;
+            tmp_sad = ((safe_sad_t)v1.sad + v2.sad + v3.sad + v4.sad + 2) << 2;
+          }
+          dst_vectors[index].x = (dst_vectors[index].x >> normFactor) << mulFactor;
+          dst_vectors[index].y = (dst_vectors[index].y >> normFactor) << mulFactor;
+          dst_vectors[index].sad = (int)(tmp_sad >> 4);
+        }	// for k < nBlkX
+      }	// for l < nBlkY
+    }
   }
 
-	void WriteDefault(VECTOR *out, int nCount)
+  void WriteDefault(VECTOR *out, int nCount)
   {
-		for (int i = 0; i < p.nBlkCount; ++i)
+    for (int i = 0; i < p.nBlkCount; ++i)
     {
-			out[i].x = 0;
-			out[i].y = 0;
-			out[i].sad = p.verybigSAD; // float or int!!
+      out[i].x = 0;
+      out[i].y = 0;
+      out[i].sad = p.verybigSAD; // float or int!!
     }
   }
 };
 
 class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
 {
-	typedef uint8_t pixel_t;
+  typedef uint8_t pixel_t;
 
-	const MVPlaneParam p;
-	IKDeintKernel<pixel_t>* kernel;
+  const MVPlaneParam p;
+  IKDeintKernel<pixel_t>* kernel;
 
-	short2* vectors;
-	int* sads;
-	int* prog;
-	int* next;
-	void* blocks;
-	void* batchdata;
+  short2* vectors;
+  int* sads;
+  int* prog;
+  int* next;
+  void* blocks;
+  void* batchdata;
 
-	enum { N_CONST_VEC = 4 };
+  enum { N_CONST_VEC = 4 };
 
-	int GetVectorsPitch() const {
-		return N_CONST_VEC + p.nBlkCount * 2;
-	}
+  int GetVectorsPitch() const {
+    return N_CONST_VEC + p.nBlkCount * 2;
+  }
 
-	int GetSadsPitch() const {
-		return N_CONST_VEC + p.nBlkCount;
-	}
+  int GetSadsPitch() const {
+    return N_CONST_VEC + p.nBlkCount;
+  }
 
 public:
-	PlaneOfBlocksCUDA(MVPlaneParam p, IMVCUDA* cuda, PNeoEnv env)
-		: p(p)
-		, kernel(cuda->get(pixel_t()))
-	{ }
+  PlaneOfBlocksCUDA(MVPlaneParam p, IMVCUDA* cuda, PNeoEnv env)
+    : p(p)
+    , kernel(cuda->get(pixel_t()))
+  { }
 
-	~PlaneOfBlocksCUDA() { }
+  ~PlaneOfBlocksCUDA() { }
 
-	int GetWorkSize()
-	{
-		return GetVectorsPitch() * p.batch * sizeof(short2) +
-			(GetSadsPitch() + 1 + p.nBlkX) * p.batch * sizeof(int) +
-			p.nBlkCount * p.batch * kernel->GetSearchBlockSize() +
-			p.batch * kernel->GetSearchBatchSize();
-	}
+  int GetWorkSize()
+  {
+    return GetVectorsPitch() * p.batch * sizeof(short2) +
+      (GetSadsPitch() + 1 + p.nBlkX) * p.batch * sizeof(int) +
+      p.nBlkCount * p.batch * kernel->GetSearchBlockSize() +
+      p.batch * kernel->GetSearchBatchSize();
+  }
 
-	void SetWorkMemory(uint8_t* work)
-	{
-		vectors = (short2*)work;
-		sads = (int*)&vectors[GetVectorsPitch() * p.batch];
-		prog = &sads[GetSadsPitch() * p.batch];
-		next = &prog[p.nBlkX * p.batch];
-		blocks = (void*)&next[1 * p.batch];
-		batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * kernel->GetSearchBlockSize() * p.batch];
+  void SetWorkMemory(uint8_t* work)
+  {
+    vectors = (short2*)work;
+    sads = (int*)&vectors[GetVectorsPitch() * p.batch];
+    prog = &sads[GetSadsPitch() * p.batch];
+    next = &prog[p.nBlkX * p.batch];
+    blocks = (void*)&next[1 * p.batch];
+    batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * kernel->GetSearchBlockSize() * p.batch];
 
-		// オフセットしておく
-		vectors += N_CONST_VEC;
-		sads += N_CONST_VEC;
-	}
+    // オフセットしておく
+    vectors += N_CONST_VEC;
+    sads += N_CONST_VEC;
+  }
 
-	void InitializeGlobalMV(int batch, VECTOR* globalMV)
-	{
-		// do nothing
-	}
+  void InitializeGlobalMV(int batch, VECTOR* globalMV)
+  {
+    // do nothing
+  }
 
-	void EstimateGlobalMVDoubled(int batch, VECTOR* globalMV)
-	{
-		assert(batch <= ANALYZE_MAX_BATCH);
+  void EstimateGlobalMVDoubled(int batch, VECTOR* globalMV)
+  {
+    assert(batch <= ANALYZE_MAX_BATCH);
 
-		kernel->EstimateGlobalMV(batch, vectors, GetVectorsPitch(), p.nBlkCount, (short2*)globalMV);
-	}
+    kernel->EstimateGlobalMV(batch, vectors, GetVectorsPitch(), p.nBlkCount, (short2*)globalMV);
+  }
 
-	void InterpolatePrediction(int batch, const PlaneOfBlocksBase* _pob)
-	{
-		assert(batch <= ANALYZE_MAX_BATCH);
+  void InterpolatePrediction(int batch, const PlaneOfBlocksBase* _pob)
+  {
+    assert(batch <= ANALYZE_MAX_BATCH);
 
-		const PlaneOfBlocksCUDA& pob = *static_cast<const PlaneOfBlocksCUDA*>(_pob);
+    const PlaneOfBlocksCUDA& pob = *static_cast<const PlaneOfBlocksCUDA*>(_pob);
 
-		// normFactor = 3 - nLogPel + pob.nLogPel
-		// normov = (nBlkSizeX - nOverlapX)*(nBlkSizeY - nOverlapY)
-		// aoddx = (nBlkSizeX * 3 - nOverlapX * 2)
-		// aevenx = (nBlkSizeX * 3 - nOverlapX * 4);
-		// aoddy = (nBlkSizeY * 3 - nOverlapY * 2);
-		// aeveny = (nBlkSizeY * 3 - nOverlapY * 4);
-		// atotalx = (nBlkSizeX - nOverlapX) * 4
-		// atotaly = (nBlkSizeY - nOverlapY) * 4
+    // normFactor = 3 - nLogPel + pob.nLogPel
+    // normov = (nBlkSizeX - nOverlapX)*(nBlkSizeY - nOverlapY)
+    // aoddx = (nBlkSizeX * 3 - nOverlapX * 2)
+    // aevenx = (nBlkSizeX * 3 - nOverlapX * 4);
+    // aoddy = (nBlkSizeY * 3 - nOverlapY * 2);
+    // aeveny = (nBlkSizeY * 3 - nOverlapY * 4);
+    // atotalx = (nBlkSizeX - nOverlapX) * 4
+    // atotaly = (nBlkSizeY - nOverlapY) * 4
 
-		int normFactor = 3 - p.nLogPel + pob.p.nLogPel;
-		int normov = (p.nBlkSizeX - p.nOverlapX)*(p.nBlkSizeY - p.nOverlapY);
-		int aoddx = (p.nBlkSizeX * 3 - p.nOverlapX * 2);
-		int aevenx = (p.nBlkSizeX * 3 - p.nOverlapX * 4);
-		//int aoddy = (p.nBlkSizeY * 3 - p.nOverlapY * 2);
-		//int aeveny = (p.nBlkSizeY * 3 - p.nOverlapY * 4);
-		int atotalx = (p.nBlkSizeX - p.nOverlapX) * 4;
-		//int atotaly = (p.nBlkSizeY - p.nOverlapY) * 4;
+    int normFactor = 3 - p.nLogPel + pob.p.nLogPel;
+    int normov = (p.nBlkSizeX - p.nOverlapX)*(p.nBlkSizeY - p.nOverlapY);
+    int aoddx = (p.nBlkSizeX * 3 - p.nOverlapX * 2);
+    int aevenx = (p.nBlkSizeX * 3 - p.nOverlapX * 4);
+    //int aoddy = (p.nBlkSizeY * 3 - p.nOverlapY * 2);
+    //int aeveny = (p.nBlkSizeY * 3 - p.nOverlapY * 4);
+    int atotalx = (p.nBlkSizeX - p.nOverlapX) * 4;
+    //int atotaly = (p.nBlkSizeY - p.nOverlapY) * 4;
 
-		kernel->InterpolatePrediction(
-			batch,
-			pob.vectors, pob.GetVectorsPitch(), pob.sads, pob.GetSadsPitch(),
-			vectors, GetVectorsPitch(), sads, GetSadsPitch(),
-			pob.p.nBlkX, pob.p.nBlkY, p.nBlkX, p.nBlkY,
-			normFactor, normov, atotalx, aoddx, aevenx);
-	}
+    kernel->InterpolatePrediction(
+      batch,
+      pob.vectors, pob.GetVectorsPitch(), pob.sads, pob.GetSadsPitch(),
+      vectors, GetVectorsPitch(), sads, GetSadsPitch(),
+      pob.p.nBlkX, pob.p.nBlkY, p.nBlkX, p.nBlkY,
+      normFactor, normov, atotalx, aoddx, aevenx);
+  }
 
-	void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount)
-	{
-		assert(batch <= ANALYZE_MAX_BATCH);
-		assert(nCount == p.nBlkCount);
+  void SetMVs(int batch, const VECTOR **src, VECTOR **out, int nCount)
+  {
+    assert(batch <= ANALYZE_MAX_BATCH);
+    assert(nCount == p.nBlkCount);
 
-		int vecPitch = GetVectorsPitch();
-		int sadPitch = GetSadsPitch();
+    int vecPitch = GetVectorsPitch();
+    int sadPitch = GetSadsPitch();
 
-		for (int i = 0; i < batch; ++i) {
-			kernel->MemCpy(out[i], src[i], nCount * sizeof(VECTOR));
-			kernel->LoadMV(src[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
-		}
-	}
+    for (int i = 0; i < batch; ++i) {
+      kernel->MemCpy(out[i], src[i], nCount * sizeof(VECTOR));
+      kernel->LoadMV(src[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
+    }
+  }
 
-	void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *globalMV, VECTOR **out, int nCount)
-	{
-		assert(batch <= ANALYZE_MAX_BATCH);
+  void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *globalMV, VECTOR **out, int nCount)
+  {
+    assert(batch <= ANALYZE_MAX_BATCH);
 
-		auto GetPointers = [](int batch, bool chroma, KMFrame** frame, const pixel_t** pY, const pixel_t** pU, const pixel_t** pV) {
-			for (int i = 0; i < batch; ++i) {
-				KMPlane<pixel_t> *pYPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetYPlane());
-				pY[i] = pYPlane->GetAbsolutePelPointer(0, 0);
-				if (chroma) {
-					KMPlane<pixel_t> *pUPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetUPlane());
-					KMPlane<pixel_t> *pVPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetVPlane());
-					pU[i] = pUPlane->GetAbsolutePelPointer(0, 0);
-					pV[i] = pVPlane->GetAbsolutePelPointer(0, 0);
-				}
-			}
-		};
+    auto GetPointers = [](int batch, bool chroma, KMFrame** frame, const pixel_t** pY, const pixel_t** pU, const pixel_t** pV) {
+      for (int i = 0; i < batch; ++i) {
+        KMPlane<pixel_t> *pYPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetYPlane());
+        pY[i] = pYPlane->GetAbsolutePelPointer(0, 0);
+        if (chroma) {
+          KMPlane<pixel_t> *pUPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetUPlane());
+          KMPlane<pixel_t> *pVPlane = static_cast<KMPlane<pixel_t>*>(frame[i]->GetVPlane());
+          pU[i] = pUPlane->GetAbsolutePelPointer(0, 0);
+          pV[i] = pVPlane->GetAbsolutePelPointer(0, 0);
+        }
+      }
+    };
 
-		const pixel_t* pSrcY[ANALYZE_MAX_BATCH] = { 0 };
-		const pixel_t* pSrcU[ANALYZE_MAX_BATCH] = { 0 };
-		const pixel_t* pSrcV[ANALYZE_MAX_BATCH] = { 0 };
-		const pixel_t* pRefY[ANALYZE_MAX_BATCH] = { 0 };
-		const pixel_t* pRefU[ANALYZE_MAX_BATCH] = { 0 };
-		const pixel_t* pRefV[ANALYZE_MAX_BATCH] = { 0 };
+    const pixel_t* pSrcY[ANALYZE_MAX_BATCH] = { 0 };
+    const pixel_t* pSrcU[ANALYZE_MAX_BATCH] = { 0 };
+    const pixel_t* pSrcV[ANALYZE_MAX_BATCH] = { 0 };
+    const pixel_t* pRefY[ANALYZE_MAX_BATCH] = { 0 };
+    const pixel_t* pRefU[ANALYZE_MAX_BATCH] = { 0 };
+    const pixel_t* pRefV[ANALYZE_MAX_BATCH] = { 0 };
 
-		GetPointers(batch, p.chroma, pSrcFrame, pSrcY, pSrcU, pSrcV);
-		GetPointers(batch, p.chroma, pRefFrame, pRefY, pRefU, pRefV);
+    GetPointers(batch, p.chroma, pSrcFrame, pSrcY, pSrcU, pSrcV);
+    GetPointers(batch, p.chroma, pRefFrame, pRefY, pRefU, pRefV);
 
-		KMPlane<pixel_t> *pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame[0]->GetYPlane());
-		KMPlane<pixel_t> *pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame[0]->GetUPlane());
+    KMPlane<pixel_t> *pSrcYPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame[0]->GetYPlane());
+    KMPlane<pixel_t> *pSrcUPlane = static_cast<KMPlane<pixel_t>*>(pSrcFrame[0]->GetUPlane());
 
-		int nBlkSizeX = (p.nBlkSizeX - p.nOverlapX);
-		int nExtendedWidth = pSrcYPlane->GetExtendedWidth();
-		int nExtendedHeight = pSrcYPlane->GetExtendedHeight();
+    int nBlkSizeX = (p.nBlkSizeX - p.nOverlapX);
+    int nExtendedWidth = pSrcYPlane->GetExtendedWidth();
+    int nExtendedHeight = pSrcYPlane->GetExtendedHeight();
 
-		int vecPitch = GetVectorsPitch();
-		int sadPitch = GetSadsPitch();
+    int vecPitch = GetVectorsPitch();
+    int sadPitch = GetSadsPitch();
 
-		int nSrcPitchY = pSrcYPlane->GetPitch();
-		int nSrcPitchUV = (p.chroma ? pSrcUPlane->GetPitch() : 0);
-		int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
-		int nImgPitchUV = (p.chroma ? (nSrcPitchUV * pSrcUPlane->GetExtendedHeight()) : 0);
+    int nSrcPitchY = pSrcYPlane->GetPitch();
+    int nSrcPitchUV = (p.chroma ? pSrcUPlane->GetPitch() : 0);
+    int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
+    int nImgPitchUV = (p.chroma ? (nSrcPitchUV * pSrcUPlane->GetExtendedHeight()) : 0);
 
-		kernel->Search(batch, batchdata, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
-			p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
-			p.pglobal, p.penaltyNew, p.nPel, p.chroma, 
-			pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
-			pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV, 
-			nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV, 
-			(const short2*)globalMV, vectors, GetVectorsPitch(), sads, GetSadsPitch(), blocks, prog, next);
+    kernel->Search(batch, batchdata, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
+      p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
+      p.pglobal, p.penaltyNew, p.nPel, p.chroma,
+      pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
+      pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
+      nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV,
+      (const short2*)globalMV, vectors, GetVectorsPitch(), sads, GetSadsPitch(), blocks, prog, next);
 
-		for (int i = 0; i < batch; ++i) {
-			kernel->StoreMV(out[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
-		}
-	}
+    for (int i = 0; i < batch; ++i) {
+      kernel->StoreMV(out[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
+    }
+  }
 
-	void WriteDefault(VECTOR *out, int nCount)
-	{
-		assert(nCount == p.nBlkCount);
+  void WriteDefault(VECTOR *out, int nCount)
+  {
+    assert(nCount == p.nBlkCount);
 
-		kernel->WriteDefaultMV(out, nCount, p.verybigSAD);
-	}
+    kernel->WriteDefaultMV(out, nCount, p.verybigSAD);
+  }
 };
 
 class GroupOfPlanes
 {
-	IMVCUDA* cuda;
+  IMVCUDA* cuda;
 
-	const LevelInfo* linfo;
+  const LevelInfo* linfo;
   const int nLevelCount;
   const int nPreAnalyzedCount;
   const bool global;
-	const int maxBatch;
+  const int maxBatch;
 
-	std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cpuplanes;
-	std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cudaplanes;
+  std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cpuplanes;
+  std::unique_ptr<std::unique_ptr<PlaneOfBlocksBase>[]> cudaplanes;
 
 public:
-	GroupOfPlanes(
-		int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nDropLevels, int nPreAnalyzedCount,
-		int nPel, bool chroma,
-		int nOverlapX, int nOverlapY, const LevelInfo* linfo, int xRatioUV, int yRatioUV,
+  GroupOfPlanes(
+    int nBlkSizeX, int nBlkSizeY, int nLevelCount, int nDropLevels, int nPreAnalyzedCount,
+    int nPel, bool chroma,
+    int nOverlapX, int nOverlapY, const LevelInfo* linfo, int xRatioUV, int yRatioUV,
     int divideExtra, int nPixelSize, int nBitsPerPixel,
     bool mt_flag, int chromaSADScale, int batch,
-    
+
     SearchType searchType, int nSearchParam, int nPelSearch, int nLambda,
     int lsad, int pnew, int plevel, bool global,
     int penaltyZero, int pglobal, int badSAD,
@@ -2297,14 +2297,14 @@ public:
 
     IMVCUDA* cuda,
     PNeoEnv env)
-		: cuda(cuda)
-		, linfo(linfo)
-		, nLevelCount(nLevelCount)
+    : cuda(cuda)
+    , linfo(linfo)
+    , nLevelCount(nLevelCount)
     , nPreAnalyzedCount(nPreAnalyzedCount)
     , global(global)
-		, maxBatch(batch)
-		, cpuplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
-		, cudaplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
+    , maxBatch(batch)
+    , cpuplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
+    , cudaplanes(new std::unique_ptr<PlaneOfBlocksBase>[nLevelCount])
   {
     assert(nDropLevels == 0 || nPel == 1);
 
@@ -2323,158 +2323,158 @@ public:
       // special case for finest level
       int nSearchParamLevel = (i == 0) ? nPelSearch : nSearchParam;
 
-			MVPlaneParam p(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
-				i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
-				nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale, batch,
+      MVPlaneParam p(nBlkX, nBlkY, nBlkSizeX, nBlkSizeY, nPelLevel, nActualLevel,
+        i == nLevelCount - 1, chroma, nOverlapX, nOverlapY, xRatioUV, yRatioUV,
+        nPixelSize, nBitsPerPixel, mt_flag, chromaSADScale, batch,
 
-				searchTypeLevel, nSearchParam, nSearchParamLevel, nLambda, lsad, pnew,
-				plevel, global, penaltyZero, pglobal, badSAD, badrange, meander,
-				tryMany);
+        searchTypeLevel, nSearchParam, nSearchParamLevel, nLambda, lsad, pnew,
+        plevel, global, penaltyZero, pglobal, badSAD, badrange, meander,
+        tryMany);
 
       if (nPixelSize == 1) {
-				cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-					new PlaneOfBlocks<uint8_t>(p, env));
-				cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-					new PlaneOfBlocksCUDA(p, cuda, env));
+        cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+          new PlaneOfBlocks<uint8_t>(p, env));
+        cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+          new PlaneOfBlocksCUDA(p, cuda, env));
       }
       else {
-				cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-					new PlaneOfBlocks<uint16_t>(p, env));
-				cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
-					new PlaneOfBlocksCUDA(p, cuda, env));
+        cpuplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+          new PlaneOfBlocks<uint16_t>(p, env));
+        cudaplanes[i] = std::unique_ptr<PlaneOfBlocksBase>(
+          new PlaneOfBlocksCUDA(p, cuda, env));
       }
     }
   }
 
-	int GetWorkSize() const {
-		int size = sizeof(VECTOR) * maxBatch; // globalMV
-		int nLevelFrom = nLevelCount - 1;
-		auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
-		for (int i = nLevelFrom; i >= 0; i--) {
-			size += planes[i]->GetWorkSize();
-		}
-		return size;
-	}
+  int GetWorkSize() const {
+    int size = sizeof(VECTOR) * maxBatch; // globalMV
+    int nLevelFrom = nLevelCount - 1;
+    auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
+    for (int i = nLevelFrom; i >= 0; i--) {
+      size += planes[i]->GetWorkSize();
+    }
+    return size;
+  }
 
-	void SearchMVs(int batch, KMSuperFrame **pSrcGOF, KMSuperFrame **pRefGOF, const VECTOR **pre, VECTOR **out, uint8_t* work)
+  void SearchMVs(int batch, KMSuperFrame **pSrcGOF, KMSuperFrame **pRefGOF, const VECTOR **pre, VECTOR **out, uint8_t* work)
   {
     //out->isValid = true;
 
-		auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
+    auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
 
-		VECTOR* outptr[ANALYZE_MAX_BATCH];
-		std::copy(out, out + batch, outptr);
+    VECTOR* outptr[ANALYZE_MAX_BATCH];
+    std::copy(out, out + batch, outptr);
 
-		VECTOR* globalMV = (VECTOR*)work;
-		uint8_t* planework = (uint8_t*)&globalMV[maxBatch];
+    VECTOR* globalMV = (VECTOR*)work;
+    uint8_t* planework = (uint8_t*)&globalMV[maxBatch];
 
     int nLevelFrom = nLevelCount - 1;
 
-		for (int i = nLevelFrom; i >= 0; i--) {
-			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
-			planes[i]->SetWorkMemory(planework);
-			planework += planes[i]->GetWorkSize();
-		}
+    for (int i = nLevelFrom; i >= 0; i--) {
+      int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+      planes[i]->SetWorkMemory(planework);
+      planework += planes[i]->GetWorkSize();
+    }
 
-		planes[0]->InitializeGlobalMV(batch, globalMV);
+    planes[0]->InitializeGlobalMV(batch, globalMV);
 
     // preがあればoutにコピーしてレベルを進めておく
     if (pre) {
-			const VECTOR* preptr[ANALYZE_MAX_BATCH];
-			std::copy(pre, pre + batch, preptr);
+      const VECTOR* preptr[ANALYZE_MAX_BATCH];
+      std::copy(pre, pre + batch, preptr);
       nLevelFrom -= nPreAnalyzedCount;
       for (int i = nLevelCount - 1; i > nLevelFrom; i--)
       {
-				int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
-				planes[i]->SetMVs(batch, preptr, outptr, nBlks);
+        int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+        planes[i]->SetMVs(batch, preptr, outptr, nBlks);
 
-				for (int b = 0; b < batch; ++b) {
-					preptr[b] += nBlks;
-					outptr[b] += nBlks;
-				}
+        for (int b = 0; b < batch; ++b) {
+          preptr[b] += nBlks;
+          outptr[b] += nBlks;
+        }
       }
     }
 
     // Refining the search until we reach the highest detail interpolation.
     for (int i = nLevelFrom; i >= 0; i--)
-		{
-			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+    {
+      int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
       if (i != nLevelCount - 1) {
         if (global)
         {
           // get updated global MV (doubled)
-					planes[i + 1]->EstimateGlobalMVDoubled(batch, globalMV);
+          planes[i + 1]->EstimateGlobalMVDoubled(batch, globalMV);
         }
 
-				planes[i]->InterpolatePrediction(batch, planes[i + 1].get());
+        planes[i]->InterpolatePrediction(batch, planes[i + 1].get());
       }
 
       //		DebugPrintf("SearchMV level %i", i);
-			KMFrame* pSrcFrame[ANALYZE_MAX_BATCH];
-			KMFrame* pRefFrame[ANALYZE_MAX_BATCH];
-			for (int b = 0; b < batch; ++b) {
-				pSrcFrame[b] = pSrcGOF[b]->GetFrame(i);
-				pRefFrame[b] = pRefGOF[b]->GetFrame(i);
-			}
+      KMFrame* pSrcFrame[ANALYZE_MAX_BATCH];
+      KMFrame* pRefFrame[ANALYZE_MAX_BATCH];
+      for (int b = 0; b < batch; ++b) {
+        pSrcFrame[b] = pSrcGOF[b]->GetFrame(i);
+        pRefFrame[b] = pRefGOF[b]->GetFrame(i);
+      }
 
-			planes[i]->SearchMVs(batch,  pSrcFrame, pRefFrame, globalMV, outptr, nBlks);
+      planes[i]->SearchMVs(batch, pSrcFrame, pRefFrame, globalMV, outptr, nBlks);
 
-			// デバッグ用
-			//if (i == 1 && cuda->IsEnabled() == false) {
-			//	FILE *fp = fopen("vector-1.txt", "w");
-			//	for (int i = 0; i < nBlks; ++i) fprintf(fp, "%d,%d,%d,%d\n", i, outptr[i].x, outptr[i].y, outptr[i].sad);
-			//	fclose(fp);
-			//}
+      // デバッグ用
+      //if (i == 1 && cuda->IsEnabled() == false) {
+      //	FILE *fp = fopen("vector-1.txt", "w");
+      //	for (int i = 0; i < nBlks; ++i) fprintf(fp, "%d,%d,%d,%d\n", i, outptr[i].x, outptr[i].y, outptr[i].sad);
+      //	fclose(fp);
+      //}
 
-			for (int b = 0; b < batch; ++b) {
-				outptr[b] += nBlks;
-			}
+      for (int b = 0; b < batch; ++b) {
+        outptr[b] += nBlks;
+      }
     }
   }
 
-	void WriteDefault(VECTOR *out)
+  void WriteDefault(VECTOR *out)
   {
     //out->isValid = false;
 
-		VECTOR* ptr = out;
+    VECTOR* ptr = out;
 
     // write planes
-		auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
+    auto& planes = cuda->IsEnabled() ? cudaplanes : cpuplanes;
     for (int i = nLevelCount - 1; i >= 0; i--)
-		{
-			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
-			planes[i]->WriteDefault(ptr, nBlks);
-			ptr += nBlks;
+    {
+      int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+      planes[i]->WriteDefault(ptr, nBlks);
+      ptr += nBlks;
     }
   }
 
   int GetArraySize()
   {
-		int count = 0;
+    int count = 0;
     for (int i = nLevelCount - 1; i >= 0; i--)
-		{
-			count += linfo[i].nBlkX * linfo[i].nBlkY;
+    {
+      count += linfo[i].nBlkX * linfo[i].nBlkY;
     }
-		return count * sizeof(VECTOR);
+    return count * sizeof(VECTOR);
   }
 };
 
 const char* GetAnalyzeValidPropName() {
-	return "KMVIsValid";
+  return "KMVIsValid";
 }
 
 class KMAnalyse : public GenericVideoFilter
 {
 private:
   KMVParam params;
-	std::unique_ptr<IMVCUDA> cuda;
+  std::unique_ptr<IMVCUDA> cuda;
   std::unique_ptr<GroupOfPlanes> pAnalyzer;
-	std::unique_ptr<KMSuperFrame> pSrcSF[ANALYZE_MAX_BATCH];
-	std::unique_ptr<KMSuperFrame> pRefSF[ANALYZE_MAX_BATCH];
+  std::unique_ptr<KMSuperFrame> pSrcSF[ANALYZE_MAX_BATCH];
+  std::unique_ptr<KMSuperFrame> pRefSF[ANALYZE_MAX_BATCH];
 
-	int maxBatch;
-	int curBatch;
-	PVideoFrame batchFrames[ANALYZE_MAX_BATCH];
+  int maxBatch;
+  int curBatch;
+  PVideoFrame batchFrames[ANALYZE_MAX_BATCH];
 
   PClip partial;
   const KMVParam* partialParams;
@@ -2512,9 +2512,9 @@ public:
     : GenericVideoFilter(child)
     , params(KMVParam::MV_FRAME)
     , cuda(CreateKDeintCUDA())
-		, pAnalyzer()
-		, maxBatch(batch)
-		, curBatch(-1)
+    , pAnalyzer()
+    , maxBatch(batch)
+    , curBatch(-1)
     , partial(partial)
     , partialParams(partial ? KMVParam::GetParam(partial->GetVideoInfo(), env) : nullptr)
   {
@@ -2529,15 +2529,15 @@ public:
     {
       env->ThrowError("KMAnalyse: Clip must be YUV");
     }
-		if (blksizex != blksizey) {
-			env->ThrowError("KMAnalyse: blksizex != blksizey");
-		}
-		if (overlapx != overlapy) {
-			env->ThrowError("KMAnalyse: overlapx != overlapy");
-		}
-		if (blksizex != overlapx * 2) {
-			env->ThrowError("KMAnalyse: blksizex != overlapx * 2");
-		}
+    if (blksizex != blksizey) {
+      env->ThrowError("KMAnalyse: blksizex != blksizey");
+    }
+    if (overlapx != overlapy) {
+      env->ThrowError("KMAnalyse: overlapx != overlapy");
+    }
+    if (blksizex != overlapx * 2) {
+      env->ThrowError("KMAnalyse: blksizex != overlapx * 2");
+    }
     if (blksizex != 8 && blksizex != 16 && blksizex != 32) {
       env->ThrowError("KMAnalyse: blksizex must be 8 or 16 or 32");
     }
@@ -2550,8 +2550,8 @@ public:
     params.nBlkSizeY = blksizey;
     params.nOverlapX = overlapx;
     params.nOverlapY = overlapy;
-		params.nDeltaFrame = df;
-		params.chroma = chroma;
+    params.nDeltaFrame = df;
+    params.chroma = chroma;
 
     const std::vector< std::pair< int, int > > allowed_blksizes = { { 32,32 },{ 16,16 },{ 8,8 } };
     bool found = false;
@@ -2581,7 +2581,7 @@ public:
     }
     if (vi.IsY())
     {
-			params.chroma = false;
+      params.chroma = false;
     }
 
     // Partial Super の場合 nActual~ と異なる場合がある
@@ -2677,12 +2677,12 @@ public:
       nSearchParam = (stp < 1) ? 1 : stp;
     }
 
-		for (int i = 0; i < ANALYZE_MAX_BATCH; ++i) {
-			pSrcSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
-			pRefSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
-		}
+    for (int i = 0; i < ANALYZE_MAX_BATCH; ++i) {
+      pSrcSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
+      pRefSF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(&params, cuda.get()));
+    }
 
-		pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
+    pAnalyzer = std::unique_ptr<GroupOfPlanes>(new GroupOfPlanes(
       params.nBlkSizeX,
       params.nBlkSizeY,
       params.nAnalyzeLevels,
@@ -2700,7 +2700,7 @@ public:
       params.nBitsPerPixel,
       false,
       params.chromaSADScale,
-			batch,
+      batch,
 
       searchType,
       nSearchParam,
@@ -2717,11 +2717,11 @@ public:
       tryMany,
 
       cuda.get(),
-			env
+      env
     ));
 
     // Defines the format of the output vector clip
-		const int		out_frame_bytes = pAnalyzer->GetArraySize();
+    const int		out_frame_bytes = pAnalyzer->GetArraySize();
     vi.pixel_type = VideoInfo::CS_BGR32;
     vi.width = 2048;
     vi.height = nblocks(out_frame_bytes, vi.width * 4);
@@ -2730,43 +2730,43 @@ public:
   PVideoFrame __stdcall	GetFrame(int n, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
-		const int nbr_src_frames = child->GetVideoInfo().num_frames;
-		const int offset = (params.isBackward) ? params.nDeltaFrame : -params.nDeltaFrame;
-		const int minframe = std::max(-offset, 0);
-		const int maxframe = nbr_src_frames + std::min(-offset, 0);
+    const int nbr_src_frames = child->GetVideoInfo().num_frames;
+    const int offset = (params.isBackward) ? params.nDeltaFrame : -params.nDeltaFrame;
+    const int minframe = std::max(-offset, 0);
+    const int maxframe = nbr_src_frames + std::min(-offset, 0);
 
-		if (n < minframe || n >= maxframe)
-		{
-			PVideoFrame dst = env->NewVideoFrame(vi);
-			cuda->SetEnv(env);
+    if (n < minframe || n >= maxframe)
+    {
+      PVideoFrame dst = env->NewVideoFrame(vi);
+      cuda->SetEnv(env);
 
-			VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
+      VECTOR* pDst = reinterpret_cast<VECTOR*>(dst->GetWritePtr());
 
-			// fill all vectors with invalid data
-			pAnalyzer->WriteDefault(pDst);
+      // fill all vectors with invalid data
+      pAnalyzer->WriteDefault(pDst);
 
-			dst->SetProperty(GetAnalyzeValidPropName(), false);
+      dst->SetProperty(GetAnalyzeValidPropName(), false);
 
-			return dst;
-		}
+      return dst;
+    }
 
-		int requested = n - minframe;
-		int requestedBatch = requested / maxBatch;
-		if (requestedBatch == curBatch) {
-			// 既に計算済み
-			return batchFrames[requested % maxBatch];
-		}
+    int requested = n - minframe;
+    int requestedBatch = requested / maxBatch;
+    if (requestedBatch == curBatch) {
+      // 既に計算済み
+      return batchFrames[requested % maxBatch];
+    }
 
-		// 異なるバッチなので再計算
-		int numBatch = std::min(maxframe - minframe - requestedBatch * maxBatch, maxBatch);
+    // 異なるバッチなので再計算
+    int numBatch = std::min(maxframe - minframe - requestedBatch * maxBatch, maxBatch);
 
     PVideoFrame srcFrames[ANALYZE_MAX_BATCH];
     PVideoFrame refFrames[ANALYZE_MAX_BATCH];
-		KMSuperFrame *ppSrcSF[ANALYZE_MAX_BATCH];
-		KMSuperFrame *ppRefSF[ANALYZE_MAX_BATCH];
-		VECTOR *ppOut[ANALYZE_MAX_BATCH];
-		const VECTOR *ppPre[ANALYZE_MAX_BATCH];
-		PVideoFrame preFrames[ANALYZE_MAX_BATCH];
+    KMSuperFrame *ppSrcSF[ANALYZE_MAX_BATCH];
+    KMSuperFrame *ppRefSF[ANALYZE_MAX_BATCH];
+    VECTOR *ppOut[ANALYZE_MAX_BATCH];
+    const VECTOR *ppPre[ANALYZE_MAX_BATCH];
+    PVideoFrame preFrames[ANALYZE_MAX_BATCH];
 
 #if LOG_PRINT
     if (IS_CUDA) {
@@ -2776,68 +2776,68 @@ public:
     }
 #endif
 
-		for (int b = 0; b < numBatch; ++b) {
-			// フレーム確保
-			batchFrames[b] = env->NewVideoFrame(vi);
-			batchFrames[b]->SetProperty(GetAnalyzeValidPropName(), true);
-			ppOut[b] = reinterpret_cast<VECTOR*>(batchFrames[b]->GetWritePtr());
+    for (int b = 0; b < numBatch; ++b) {
+      // フレーム確保
+      batchFrames[b] = env->NewVideoFrame(vi);
+      batchFrames[b]->SetProperty(GetAnalyzeValidPropName(), true);
+      ppOut[b] = reinterpret_cast<VECTOR*>(batchFrames[b]->GetWritePtr());
 
-			const int nsrc = requestedBatch * maxBatch + minframe + b;
-			const int nref = nsrc + offset;
+      const int nsrc = requestedBatch * maxBatch + minframe + b;
+      const int nref = nsrc + offset;
 
-			//		DebugPrintf ("MVAnalyse: Get src frame %d",nsrc);
+      //		DebugPrintf ("MVAnalyse: Get src frame %d",nsrc);
       srcFrames[b] = child->GetFrame(nsrc, env); // v2.0
-			LoadSourceFrame(pSrcSF[b].get(), srcFrames[b]);
-			ppSrcSF[b] = pSrcSF[b].get();
+      LoadSourceFrame(pSrcSF[b].get(), srcFrames[b]);
+      ppSrcSF[b] = pSrcSF[b].get();
 
-			//		DebugPrintf ("MVAnalyse: Get ref frame %d", nref);
-			//		DebugPrintf ("MVAnalyse frame %i backward=%i", nsrc, srd._analysis_data.isBackward);
+      //		DebugPrintf ("MVAnalyse: Get ref frame %d", nref);
+      //		DebugPrintf ("MVAnalyse frame %i backward=%i", nsrc, srd._analysis_data.isBackward);
       refFrames[b] = child->GetFrame(nref, env); // v2.0
-			LoadSourceFrame(pRefSF[b].get(), refFrames[b]);
-			ppRefSF[b] = pRefSF[b].get();
+      LoadSourceFrame(pRefSF[b].get(), refFrames[b]);
+      ppRefSF[b] = pRefSF[b].get();
 
-			if (partialParams) {
-				preFrames[b] = partial->GetFrame(nsrc, env);
-				ppPre[b] = reinterpret_cast<const VECTOR*>(preFrames[b]->GetReadPtr());
-			}
+      if (partialParams) {
+        preFrames[b] = partial->GetFrame(nsrc, env);
+        ppPre[b] = reinterpret_cast<const VECTOR*>(preFrames[b]->GetReadPtr());
+      }
 
 #if 0
       auto supervi = child->GetVideoInfo();
       DebugWriteBitmap("analyze-src-%d.bmp", src->GetReadPtr(), supervi.width, supervi.height, src->GetPitch(), 1);
 #endif
-		}
+    }
 
     cuda->SetEnv(env);
 
-		PVideoFrame work;
-		int work_bytes = pAnalyzer->GetWorkSize();
-		VideoInfo workvi = VideoInfo();
-		workvi.pixel_type = VideoInfo::CS_BGR32;
-		workvi.width = 2048;
-		workvi.height = nblocks(work_bytes, workvi.width * 4);
-		work = env->NewVideoFrame(workvi);
+    PVideoFrame work;
+    int work_bytes = pAnalyzer->GetWorkSize();
+    VideoInfo workvi = VideoInfo();
+    workvi.pixel_type = VideoInfo::CS_BGR32;
+    workvi.width = 2048;
+    workvi.height = nblocks(work_bytes, workvi.width * 4);
+    work = env->NewVideoFrame(workvi);
 
 #if LOG_PRINT
-		if (IS_CUDA) {
+    if (IS_CUDA) {
       printf("KMAnalyze[CUDA] Start: %s %d N=%d-%d (%d)\n",
-        params.isBackward ? "B" : "F", params.nDeltaFrame, 
+        params.isBackward ? "B" : "F", params.nDeltaFrame,
         requestedBatch * maxBatch, requestedBatch * maxBatch + maxBatch, n);
-		}
+    }
 #endif
 
-		pAnalyzer->SearchMVs(numBatch, ppSrcSF, ppRefSF, partialParams ? ppPre : nullptr, ppOut, work->GetWritePtr());
+    pAnalyzer->SearchMVs(numBatch, ppSrcSF, ppRefSF, partialParams ? ppPre : nullptr, ppOut, work->GetWritePtr());
 
-		curBatch = requestedBatch;
-		return batchFrames[requested % maxBatch];
+    curBatch = requestedBatch;
+    return batchFrames[requested % maxBatch];
   }
 
   int __stdcall SetCacheHints(int cachehints, int frame_range) override {
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_MULTI_INSTANCE;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_MULTI_INSTANCE;
+    }
     return 0;
   }
 
@@ -2863,7 +2863,7 @@ public:
 
     return new KMAnalyse(
       args[0].AsClip(),       // super
-			args[13].Defined() ? args[13].AsClip() : nullptr,      // partial
+      args[13].Defined() ? args[13].AsClip() : nullptr,      // partial
       blksize,
       blksizeV,                // v.1.7
       0,       // levels skip
@@ -2895,7 +2895,7 @@ public:
       false,  // multi
       false,  // mt
       0,   // scaleCSAD
-			args[14].AsInt(1), // batch
+      args[14].AsInt(1), // batch
       env
     );
   }
@@ -3001,9 +3001,9 @@ public:
     if (cachehints == CACHE_GET_DEV_TYPE) {
       return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_MULTI_INSTANCE;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_MULTI_INSTANCE;
+    }
     return 0;
   };
 
@@ -3011,9 +3011,9 @@ public:
   {
     PNeoEnv env = env_;
     return new KMPartialSuper(
-			args[0].AsClip(),
-			args[1].AsInt(3), // drop
-			env);
+      args[0].AsClip(),
+      args[1].AsInt(3), // drop
+      env);
   }
 };
 
@@ -3070,7 +3070,7 @@ class KMSuperCheck : public GenericVideoFilter
             pixel_t kv = kptr[x + y * nPitch];
             pixel_t mv = mptr[x + y * nPitch];
             if (std::abs(kv - mv) > 2) {
-            //if (kv != mv) {
+              //if (kv != mv) {
               env->ThrowError("ERROR !!!");
             }
           }
@@ -3098,7 +3098,7 @@ public:
     , cuda(CreateKDeintCUDA())
     , params(KMVParam::GetParam(kmsuper->GetVideoInfo(), env))
     , pKSF(new KMSuperFrame(params, cuda.get()))
-		, pMSF(new KMSuperFrame(params, cuda.get()))
+    , pMSF(new KMSuperFrame(params, cuda.get()))
   {
   }
 
@@ -3371,16 +3371,16 @@ public:
     PVideoFrame ret = child->GetFrame(n, env);
     PVideoFrame kmvframe = kmv->GetFrame(n, env);
 
-		const LevelInfo* linfo = params->levelInfo;
-		const VECTOR* kdata = reinterpret_cast<const VECTOR*>(kmvframe->GetReadPtr());
+    const LevelInfo* linfo = params->levelInfo;
+    const VECTOR* kdata = reinterpret_cast<const VECTOR*>(kmvframe->GetReadPtr());
 
     const int* pMv;
     int data_size;
     GetMVData(n, pMv, data_size, env);
 
     // validity
-		bool isValid = (kmvframe->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0);
-		if (isValid != (pMv[1] != 0)) {
+    bool isValid = (kmvframe->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0);
+    if (isValid != (pMv[1] != 0)) {
       env->ThrowError("Validity missmatch");
     }
     pMv += 2;
@@ -3388,9 +3388,9 @@ public:
     for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
-      
+
       for (int v = 0; v < nBlkCount; ++v) {
-				VECTOR kmv = kdata[v];
+        VECTOR kmv = kdata[v];
         VECTOR mmv = { pMv[v * 3 + 1], pMv[v * 3 + 2], pMv[v * 3 + 3] };
         if (kmv.x != mmv.x || kmv.y != mmv.y || kmv.sad != mmv.sad) {
           env->ThrowError("Motion vector missmatch");
@@ -3398,7 +3398,7 @@ public:
       }
 
       pMv += length;
-			kdata += linfo[i].nBlkX * linfo[i].nBlkY;
+      kdata += linfo[i].nBlkX * linfo[i].nBlkY;
     }
 
     return ret;
@@ -3434,13 +3434,13 @@ public:
     PVideoFrame kmvframe1 = kmv1->GetFrame(n, env);
     PVideoFrame kmvframe2 = kmv2->GetFrame(n, env);
 
-		const LevelInfo* linfo = params->levelInfo;
-		const VECTOR* kdata1 = reinterpret_cast<const VECTOR*>(kmvframe1->GetReadPtr());
-		const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
+    const LevelInfo* linfo = params->levelInfo;
+    const VECTOR* kdata1 = reinterpret_cast<const VECTOR*>(kmvframe1->GetReadPtr());
+    const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
 
-		// validity
-		bool data1valid = kmvframe1->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
-		bool data2valid = kmvframe2->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+    // validity
+    bool data1valid = kmvframe1->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+    bool data2valid = kmvframe2->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
     if (data1valid != data2valid) {
       env->ThrowError("Validity missmatch");
     }
@@ -3448,28 +3448,28 @@ public:
       return ret;
     }
 
-		int misCount = 0;
+    int misCount = 0;
 
     for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
-			int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
+      int nBlks = linfo[i].nBlkX * linfo[i].nBlkY;
 
-			for (int v = 0; v < nBlks; ++v) {
-				VECTOR kmv1 = kdata1[v];
-				VECTOR kmv2 = kdata2[v];
+      for (int v = 0; v < nBlks; ++v) {
+        VECTOR kmv1 = kdata1[v];
+        VECTOR kmv2 = kdata2[v];
         if (kmv1.x != kmv2.x || kmv1.y != kmv2.y || kmv1.sad != kmv2.sad) {
           //printf("i=%d,v=%d,nBlks=%d(%dx%d)\n", i, v, nBlks, linfo[i].nBlkX, linfo[i].nBlkY);
-					++misCount;
+          ++misCount;
           //env->ThrowError("Motion vector missmatch");
         }
       }
 
-			kdata1 += nBlks;
-			kdata2 += nBlks;
+      kdata1 += nBlks;
+      kdata2 += nBlks;
     }
 
-		if (misCount > 100) {
-			env->ThrowError("Motion vector too many miss!! (%d)", misCount);
-		}
+    if (misCount > 100) {
+      env->ThrowError("Motion vector too many miss!! (%d)", misCount);
+    }
 
     return ret;
   }
@@ -3514,20 +3514,20 @@ public:
     fWin1UVx = new float[nx];
     fWin1UVxfirst = new float[nx];
     fWin1UVxlast = new float[nx];
-    for (int i = 0; i<ox; i++)
+    for (int i = 0; i < ox; i++)
     {
       fWin1UVx[i] = float(cos(PI*(i - ox + 0.5f) / (ox * 2)));
       fWin1UVx[i] = fWin1UVx[i] * fWin1UVx[i];// left window (rised cosine)
       fWin1UVxfirst[i] = 1; // very first window
       fWin1UVxlast[i] = fWin1UVx[i]; // very last
     }
-    for (int i = ox; i<nx - ox; i++)
+    for (int i = ox; i < nx - ox; i++)
     {
       fWin1UVx[i] = 1;
       fWin1UVxfirst[i] = 1; // very first window
       fWin1UVxlast[i] = 1; // very last
     }
-    for (int i = nx - ox; i<nx; i++)
+    for (int i = nx - ox; i < nx; i++)
     {
       fWin1UVx[i] = float(cos(PI*(i - nx + ox + 0.5f) / (ox * 2)));
       fWin1UVx[i] = fWin1UVx[i] * fWin1UVx[i];// right window (falled cosine)
@@ -3538,20 +3538,20 @@ public:
     fWin1UVy = new float[ny];
     fWin1UVyfirst = new float[ny];
     fWin1UVylast = new float[ny];
-    for (int i = 0; i<oy; i++)
+    for (int i = 0; i < oy; i++)
     {
       fWin1UVy[i] = float(cos(PI*(i - oy + 0.5f) / (oy * 2)));
       fWin1UVy[i] = fWin1UVy[i] * fWin1UVy[i];// left window (rised cosine)
       fWin1UVyfirst[i] = 1; // very first window
       fWin1UVylast[i] = fWin1UVy[i]; // very last
     }
-    for (int i = oy; i<ny - oy; i++)
+    for (int i = oy; i < ny - oy; i++)
     {
       fWin1UVy[i] = 1;
       fWin1UVyfirst[i] = 1; // very first window
       fWin1UVylast[i] = 1; // very last
     }
-    for (int i = ny - oy; i<ny; i++)
+    for (int i = ny - oy; i < ny; i++)
     {
       fWin1UVy[i] = float(cos(PI*(i - ny + oy + 0.5f) / (oy * 2)));
       fWin1UVy[i] = fWin1UVy[i] * fWin1UVy[i];// right window (falled cosine)
@@ -3572,9 +3572,9 @@ public:
     short *winOverUVBM = wins.get() + size * 7;
     short *winOverUVBR = wins.get() + size * 8;
 
-    for (int j = 0; j<ny; j++)
+    for (int j = 0; j < ny; j++)
     {
-      for (int i = 0; i<nx; i++)
+      for (int i = 0; i < nx; i++)
       {
         winOverUVTL[i] = (int)(fWin1UVyfirst[j] * fWin1UVxfirst[i] * 2048 + 0.5f);
         winOverUVTM[i] = (int)(fWin1UVyfirst[j] * fWin1UVx[i] * 2048 + 0.5f);
@@ -3680,9 +3680,9 @@ void Overlaps_C(typename std::conditional <sizeof(pixel_t) == 1, short, int>::ty
 {
   // pWin from 0 to 2048
   // when pixel_t == uint16_t, dst should be int*
-  for (int j = 0; j<blockHeight; j++)
+  for (int j = 0; j < blockHeight; j++)
   {
-    for (int i = 0; i<blockWidth; i++)
+    for (int i = 0; i < blockWidth; i++)
     {
       if (sizeof(pixel_t) == 1)
         pDst[i] += (pSrc[i] * pWin[i] + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
@@ -3696,12 +3696,12 @@ void Overlaps_C(typename std::conditional <sizeof(pixel_t) == 1, short, int>::ty
 }
 
 template <typename pixel_t>
-void (*GetOverlapFunction(int blockWidth, int blockHeight))(typename std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
+void(*GetOverlapFunction(int blockWidth, int blockHeight))(typename std::conditional <sizeof(pixel_t) == 1, short, int>::type *pDst,
   int nDstPitch, const pixel_t *pSrc, int nSrcPitch, const short *pWin, int nWinPitch)
 {
-	if (blockWidth == 4 && blockHeight == 4) {
-		return Overlaps_C<pixel_t, 4, 4>;
-	}
+  if (blockWidth == 4 && blockHeight == 4) {
+    return Overlaps_C<pixel_t, 4, 4>;
+  }
   if (blockWidth == 8 && blockHeight == 8) {
     return Overlaps_C<pixel_t, 8, 8>;
   }
@@ -3808,9 +3808,9 @@ void Short2Bytes(pixel_t *pDst, int nDstPitch, tmp_t *pSrc, int nSrcPitch, int n
 {
   const int max_pixel_value = (1 << bits_per_pixel) - 1;
   const int shift = sizeof(pixel_t) == 1 ? 5 : (5 + 6);
-  for (int h = 0; h<nHeight; h++)
+  for (int h = 0; h < nHeight; h++)
   {
-    for (int i = 0; i<nWidth; i++)
+    for (int i = 0; i < nWidth; i++)
     {
       int a = (pSrc[i]) >> shift;
       pDst[i] = min(max_pixel_value, a); // PF everyone can understand it
@@ -3823,9 +3823,9 @@ void Short2Bytes(pixel_t *pDst, int nDstPitch, tmp_t *pSrc, int nSrcPitch, int n
 template<typename pixel_t>
 void LimitChanges(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch, int nWidth, int nHeight, int nLimit)
 {
-  for (int h = 0; h<nHeight; h++)
+  for (int h = 0; h < nHeight; h++)
   {
-    for (int i = 0; i<nWidth; i++)
+    for (int i = 0; i < nWidth; i++)
       pDst[i] = (pixel_t)clamp((int)pDst[i], pSrc[i] - nLimit, pSrc[i] + nLimit);
     pDst += nDstPitch;
     pSrc += nSrcPitch;
@@ -3864,7 +3864,7 @@ class KMVClip
 
     void SetData(const VECTOR* _pdata, int nCount)
     {
-			assert(nCount == nBlkX * nBlkY);
+      assert(nCount == nBlkX * nBlkY);
       pdata = _pdata;
     }
 
@@ -3876,7 +3876,7 @@ class KMVClip
     BlockData GetBlock(int ix, int iy) const
     {
       int i = ix + iy * nBlkX;
-			BlockData ret = { ix * (nBlkSizeX - nOverlapX), iy * (nBlkSizeY - nOverlapY), pdata[i] };
+      BlockData ret = { ix * (nBlkSizeX - nOverlapX), iy * (nBlkSizeY - nOverlapY), pdata[i] };
       return ret;
     }
 
@@ -3886,7 +3886,7 @@ class KMVClip
       for (int iy = 0; iy < nBlkY; ++iy) {
         for (int ix = 0; ix < nBlkX; ++ix) {
           int i = ix + iy * nBlkX;
-					sum += (pdata[i].sad > nTh1) ? 1 : 0;
+          sum += (pdata[i].sad > nTh1) ? 1 : 0;
         }
       }
 
@@ -3934,12 +3934,12 @@ public:
 
   void SetData(const VECTOR* pgroup, bool isValid_)
   {
-		isValid = isValid_;
-		const VECTOR* pdata = pgroup;
+    isValid = isValid_;
+    const VECTOR* pdata = pgroup;
     for (int i = params->nAnalyzeLevels - 1; i >= 0; --i) {
-			int nBlks = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
-			pFrames[i]->SetData(pdata, nBlks);
-			pdata += nBlks;
+      int nBlks = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
+      pFrames[i]->SetData(pdata, nBlks);
+      pdata += nBlks;
     }
   }
 
@@ -4071,10 +4071,10 @@ class KMDegrainCore : public KMDegrainCoreBase
     switch (delta) {
     case 1: return norm_weights<1>;
     case 2: return norm_weights<2>;
-    //case 3: return norm_weights<3>;
-    //case 4: return norm_weights<4>;
-    //case 5: return norm_weights<5>;
-    //case 6: return norm_weights<6>;
+      //case 3: return norm_weights<3>;
+      //case 4: return norm_weights<4>;
+      //case 5: return norm_weights<5>;
+      //case 6: return norm_weights<6>;
     }
     return nullptr;
   }
@@ -4082,9 +4082,9 @@ class KMDegrainCore : public KMDegrainCoreBase
   template <int delta>
   static DegrainFunction GetDegrainFunction(int blockWidth, int blockHeight)
   {
-		if (blockWidth == 4 && blockHeight == 4) {
-			return Degrain1to6_C<pixel_t, delta, 4, 4>;
-		}
+    if (blockWidth == 4 && blockHeight == 4) {
+      return Degrain1to6_C<pixel_t, delta, 4, 4>;
+    }
     if (blockWidth == 8 && blockHeight == 8) {
       return Degrain1to6_C<pixel_t, delta, 8, 8>;
     }
@@ -4101,10 +4101,10 @@ class KMDegrainCore : public KMDegrainCoreBase
     switch (delta) {
     case 1: return GetDegrainFunction<1>(blockWidth, blockHeight);
     case 2: return GetDegrainFunction<2>(blockWidth, blockHeight);
-    //case 3: return GetDegrainFunction<3>(blockWidth, blockHeight);
-    //case 4: return GetDegrainFunction<4>(blockWidth, blockHeight);
-    //case 5: return GetDegrainFunction<5>(blockWidth, blockHeight);
-    //case 6: return GetDegrainFunction<6>(blockWidth, blockHeight);
+      //case 3: return GetDegrainFunction<3>(blockWidth, blockHeight);
+      //case 4: return GetDegrainFunction<4>(blockWidth, blockHeight);
+      //case 5: return GetDegrainFunction<5>(blockWidth, blockHeight);
+      //case 6: return GetDegrainFunction<6>(blockWidth, blockHeight);
     }
     return nullptr;
   }
@@ -4131,7 +4131,7 @@ class KMDegrainCore : public KMDegrainCoreBase
 
   void use_block(
     const pixel_t * &p, int &WRef,
-    bool isUsable, const KMVClip &mvclip, int ix, int iy, 
+    bool isUsable, const KMVClip &mvclip, int ix, int iy,
     const KMPlane<pixel_t> *pPlane, const pixel_t *pDummyPlane,
     int thSAD, int nLogxRatio, int nLogyRatio,
     int nPel)
@@ -4623,7 +4623,7 @@ class KMDegrainX : public GenericVideoFilter
       ovrwins, ovrwinsUV,
       mvB, mvF,
       psrc, pdst, ptmp, prefB, prefF,
-      nSrcPitchY, nSrcPitchUV, 
+      nSrcPitchY, nSrcPitchUV,
       nSuperPitchY, nSuperPitchUV, nImgPitchY, nImgPitchUV,
       degrainblock, degrainarg, sceneChange);
 
@@ -4664,7 +4664,7 @@ public:
         new KMVClip(KMVParam::GetParam(rawClipF[i]->GetVideoInfo(), env), _nSCD1, _nSCD2));
 
       superB[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam, cuda.get()));
-			superF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam, cuda.get()));
+      superF[i] = std::unique_ptr<KMSuperFrame>(new KMSuperFrame(superParam, cuda.get()));
     }
 
     // e.g. 10000*999999 is too much
@@ -4759,9 +4759,9 @@ public:
       }
       return devtypes;
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_MULTI_INSTANCE;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_MULTI_INSTANCE;
+    }
     return 0;
   };
 
@@ -4852,11 +4852,11 @@ void Copy_C(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
 }
 
 template <typename pixel_t>
-void (*GetCopyFunction(int blockWidth, int blockHeight))(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
+void(*GetCopyFunction(int blockWidth, int blockHeight))(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch)
 {
-	if (blockWidth == 4 && blockHeight == 4) {
-		return Copy_C<pixel_t, 4, 4>;
-	}
+  if (blockWidth == 4 && blockHeight == 4) {
+    return Copy_C<pixel_t, 4, 4>;
+  }
   if (blockWidth == 8 && blockHeight == 8) {
     return Copy_C<pixel_t, 8, 8>;
   }
@@ -4880,7 +4880,7 @@ class KMCompensateCore : public KMCompensateCoreBase
 {
   typedef typename std::conditional <sizeof(pixel_t) == 1, short, int>::type tmp_t;
 
-  typedef void (*CopyFuntion)(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch);
+  typedef void(*CopyFuntion)(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch);
   typedef void(*OverlapFunction)(tmp_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPitch, const short *pWin, int nWinPitch);
 
   const KMVParam* params;
@@ -4898,7 +4898,7 @@ class KMCompensateCore : public KMCompensateCoreBase
 
   const pixel_t* use_block(
     int ix, int iy,
-    const KMPlane<pixel_t> *ref0, 
+    const KMPlane<pixel_t> *ref0,
     const KMPlane<pixel_t> *ref,
     int nLogxRatio, int nLogyRatio,
     int nPel)
@@ -5292,9 +5292,9 @@ public:
         GetDeviceTypes(vectors) &
         (DEV_TYPE_CPU | DEV_TYPE_CUDA);
     }
-		else if (cachehints == CACHE_GET_MTMODE) {
-			return MT_MULTI_INSTANCE;
-		}
+    else if (cachehints == CACHE_GET_MTMODE) {
+      return MT_MULTI_INSTANCE;
+    }
     return 0;
   };
 
@@ -5306,9 +5306,9 @@ public:
     PVideoFrame	ref0 = super->GetFrame(n, env);
     SetSuperFrameTarget(superFrame[0].get(), ref0, params->nPixelShift);
 
-		PVideoFrame mv = vectors->GetFrame(n, env);
-		bool isValid = mv->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
-		mvClip->SetData(reinterpret_cast<const VECTOR*>(mv->GetReadPtr()), isValid);
+    PVideoFrame mv = vectors->GetFrame(n, env);
+    bool isValid = mv->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+    mvClip->SetData(reinterpret_cast<const VECTOR*>(mv->GetReadPtr()), isValid);
     PVideoFrame	ref = mvClip->GetRefFrame(usable_flag, super, n, env);
     SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);
 
