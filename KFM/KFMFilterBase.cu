@@ -31,6 +31,19 @@ int Get16BitType(VideoInfo& vi) {
   return VideoInfo::CS_BGR48;
 }
 
+int GetYType(VideoInfo& vi) {
+	switch (vi.BitsPerComponent()) {
+	case 8: return VideoInfo::CS_Y8;
+	case 10: return VideoInfo::CS_Y10;
+	case 12: return VideoInfo::CS_Y12;
+	case 14: return VideoInfo::CS_Y14;
+	case 16: return VideoInfo::CS_Y16;
+	case 32: return VideoInfo::CS_Y32;
+	}
+	// ‚±‚êˆÈŠO‚Í’m‚ç‚ñ
+	return VideoInfo::CS_Y8;
+}
+
 Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
 {
   typedef typename VectorType<uint8_t>::type vpixel_t;

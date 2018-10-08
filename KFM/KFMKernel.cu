@@ -443,8 +443,9 @@ class KFMSwitch : public KFMFilterBase
           break;
         case FRAME_24:
           Frame24Info frameInfo = patterns.GetFrame60(fm.pattern, n60);
-          start = frameInfo.fieldStartIndex / 2;
-          end = (frameInfo.fieldStartIndex + frameInfo.numFields + 1) / 2;
+					int cycleStart = (n60 / 10) * 5;
+          start = cycleStart + frameInfo.fieldStartIndex / 2;
+          end = cycleStart + (frameInfo.fieldStartIndex + frameInfo.numFields + 1) / 2;
           break;
         }
         env->MakePropertyWritable(&dst.frame);

@@ -527,10 +527,10 @@ __global__ void kl_deblock_show(
   const uint16_t* qp_table, int qp_pitch,
   float thresh_a, float thresh_b)
 {
-  uint16_t qp = qp_table[blockDim.x + blockDim.y * qp_pitch];
+  uint16_t qp = qp_table[blockIdx.x + blockIdx.y * qp_pitch];
   bool is_enabled = (qp_apply_thresh(qp, thresh_a, thresh_b) >= (qp >> 1));
-  int off_x = blockDim.x * 8 + 4;
-  int off_y = blockDim.y * 8 + 4;
+  int off_x = blockIdx.x * 8 - 4;
+  int off_y = blockIdx.y * 8 - 4;
   int x = off_x + threadIdx.x;
   int y = off_y + threadIdx.y;
   if (x >= 0 && x < width && y >= 0 && y < height) {
@@ -582,8 +582,8 @@ __device__ __host__ inline int norm_qscale(int qscale, int type)
 
 __global__ void kl_make_qp_table(
   int in_width, int in_height,
-  const uint8_t* in_table0, const uint8_t* in_table1,
-  const uint8_t* nonb_table0, const uint8_t* nonb_table1,
+  const uint8_t* in_table0, const uint8_t* nonb_table0,
+	const uint8_t* in_table1, const uint8_t* nonb_table1,
   int in_pitch, int qp_scale, float b_ratio,
   int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
@@ -616,8 +616,8 @@ __global__ void kl_make_qp_table(
 
 void cpu_make_qp_table(
   int in_width, int in_height,
-  const uint8_t* in_table0, const uint8_t* in_table1,
-  const uint8_t* nonb_table0, const uint8_t* nonb_table1,
+	const uint8_t* in_table0, const uint8_t* nonb_table0,
+	const uint8_t* in_table1, const uint8_t* nonb_table1,
   int in_pitch, int qp_scale, float b_ratio,
   int qp_shift_x, int qp_shift_y,
   int out_width, int out_height,
@@ -787,6 +787,7 @@ class KDeblock : public KFMFilterBase
     VideoInfo padvi = vi;
     padvi.width = width + 8 * 2;
     padvi.height = height + 8 * 2;
+		padvi.pixel_type = GetYType(vi);
     Frame pad = env->NewVideoFrame(padvi);
 
     Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(),
@@ -1017,12 +1018,19 @@ class KDeblock : public KFMFilterBase
         env->ThrowError("Invalid KFM_SourceStart");
       }
 
+			PVideoFrame dst;
       if (num <= 1) {
-        return DeblockEntry<pixel_t>(src, GetQPFrame(start, env), PVideoFrame(), env);
+				dst = DeblockEntry<pixel_t>(src, GetQPFrame(start, env), PVideoFrame(), env);
       }
       else {
-        return DeblockEntry<pixel_t>(src, GetQPFrame(start, env), GetQPFrame(start + 1, env), env);
+				dst = DeblockEntry<pixel_t>(src, GetQPFrame(start, env), GetQPFrame(start + 1, env), env);
       }
+			if (show == 1) {
+				char buf[100];
+				sprintf_s(buf, "SourceRange: %d-%d", start, start + num - 1);
+				DrawText<pixel_t>(dst, vi.BitsPerComponent(), 0, 20, buf, env);
+			}
+			return dst;
     }
 
     if (qpclip) {

@@ -1753,7 +1753,7 @@ public:
         if (cleanField[0]) {
           // 1枚目のフィールドは綺麗 -> 後ろのフィールドは汚いので前のフィールドを使って補間
           PVideoFrame frame = beforeclip->GetFrame(n60start, env);
-          int sourceStart = n60start;
+          int sourceStart = n60start / 2;
           env->MakePropertyWritable(&frame);
           frame->SetProperty("KFM_SourceStart", sourceStart);
           frame->SetProperty("KFM_NumSourceFrames", 1);
@@ -1762,7 +1762,7 @@ public:
         else if (cleanField[1]) {
           // 2枚目のフィールドは綺麗 -> 前のフィールドは汚いので後ろのフィールドを使って補間
           PVideoFrame frame = afterclip->GetFrame(n60start + 1, env);
-          int sourceStart = n60start + 1 / 2;
+          int sourceStart = (n60start + 1) / 2;
           env->MakePropertyWritable(&frame);
           frame->SetProperty("KFM_SourceStart", sourceStart);
           frame->SetProperty("KFM_NumSourceFrames", 1);

@@ -71,6 +71,7 @@ int scaleParam(float thresh, int pixelBits);
 
 int Get8BitType(VideoInfo& vi);
 int Get16BitType(VideoInfo& vi);
+int GetYType(VideoInfo& vi);
 
 Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env);
 
