@@ -118,7 +118,9 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
         }
         else {
             # CPU版は対応していないのでTDeintを使う
-            before60 = src.TDeint(chroma=true,mode=1,edeint=src.nnedi3(field=-2),emask=src.TMM2(mode=1, order=-1, field=-1))
+            #before60 = src.TDeint(chroma=true,mode=1,edeint=src.nnedi3(field=-2),emask=src.TMM2(mode=1, order=-1, field=-1))
+            # と思ったけど用意するのが面倒なのでYadifmod2で代用
+            before60 = src.Yadifmod2( mode=1, order=-1, field=-1, edeint=src.nnedi3(field=-2) )
             after60 = before60
         }
         
