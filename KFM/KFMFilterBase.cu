@@ -493,18 +493,17 @@ __global__ void kl_calc_combe(vpixel_t* dst, const vpixel_t* __restrict__ src, i
 template <typename pixel_t>
 void KFMFilterBase::CopyFrame(Frame& src, Frame& dst, PNeoEnv env)
 {
-  typedef typename VectorType<pixel_t>::type vpixel_t;
-  const vpixel_t* srcY = src.GetReadPtr<vpixel_t>(PLANAR_Y);
-  const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
-  const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
-  vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
-  vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
-  vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
+  const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+  const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+  const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+  pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-  int srcPitchY = src.GetPitch<vpixel_t>(PLANAR_Y);
-  int srcPitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
-  int dstPitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
-  int dstPitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
+  int srcPitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+  int srcPitchUV = src.GetPitch<pixel_t>(PLANAR_U);
+  int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+  int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
 
   int widthUV = srcvi.width >> logUVx;
   int heightUV = srcvi.height >> logUVy;
