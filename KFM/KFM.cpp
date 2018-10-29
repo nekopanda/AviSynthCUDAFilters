@@ -21,6 +21,25 @@ void OnCudaError(cudaError_t err) {
 #endif
 }
 
+bool IsAligned(Frame& frame, const VideoInfo& vi, PNeoEnv env) {
+	int frame_align = (int)env->GetProperty(AEP_FRAME_ALIGN);
+	int plane_align = (int)env->GetProperty(AEP_PLANE_ALIGN);
+
+	const int planesYUV[] = { 0/*PLANAR_Y*/, PLANAR_U, PLANAR_V, PLANAR_A };
+	const int planesRGB[] = { 0/*PLANAR_G*/, PLANAR_B, PLANAR_R, PLANAR_A };
+	const int* planes = vi.IsRGB() ? planesRGB : planesYUV;
+	int numPlanes = vi.IsPlanar() ? vi.NumComponents() : 1;
+	for (int p = 0; p < numPlanes; p++) {
+		const int plane = planes[p];
+		const BYTE* ptr = frame.GetReadPtr<BYTE>(plane);
+		int pitch = frame.GetPitch<BYTE>(plane);
+		if ((uintptr_t)ptr & (plane_align - 1)) return false;
+		if (pitch & (frame_align - 1)) return false;
+	}
+
+	return true;
+}
+
 class File
 {
 public:

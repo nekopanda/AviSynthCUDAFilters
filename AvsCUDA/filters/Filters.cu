@@ -13,7 +13,8 @@
 
 class Align : public GenericVideoFilter
 {
-  int systemFrameAlign;
+	int systemFrameAlign;
+	int systemPlaneAlign;
   int isRGB;
 
   const int* GetPlanes() {
@@ -22,9 +23,13 @@ class Align : public GenericVideoFilter
     return isRGB ? planesRGB : planesYUV;
   }
 
-  template <typename T> T align_size(T v) {
+  template <typename T> T align_pitch(T v) {
     return (v + systemFrameAlign - 1) & ~(systemFrameAlign - 1);
   }
+
+	template <typename T> T align_plane(T v) {
+		return (v + systemPlaneAlign - 1) & ~(systemPlaneAlign - 1);
+	}
 
   template <typename pixel_t>
   void Proc(PVideoFrame& dst, PVideoFrame& src, PNeoEnv env)
@@ -57,8 +62,8 @@ class Align : public GenericVideoFilter
       int pitch = frame->GetPitch(plane);
       int rowSize = frame->GetRowSize(plane);
 
-      const BYTE* alignedPtr = (const BYTE*)align_size((uintptr_t)ptr);
-      int alignedRowSize = align_size(rowSize);
+      const BYTE* alignedPtr = (const BYTE*)align_plane((uintptr_t)ptr);
+      int alignedRowSize = align_pitch(rowSize);
 
       if (alignedPtr != ptr) return false;
       if (alignedRowSize != pitch) return false;
@@ -73,6 +78,7 @@ public:
   {
     PNeoEnv env = env_;
     systemFrameAlign = (int)env->GetProperty(AEP_FRAME_ALIGN);
+		systemPlaneAlign = (int)env->GetProperty(AEP_PLANE_ALIGN);
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)

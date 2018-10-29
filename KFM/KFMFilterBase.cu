@@ -15,7 +15,7 @@ int scaleParam(float thresh, int pixelBits)
   return (int)(thresh * (1 << (pixelBits - 8)) + 0.5f);
 }
 
-int Get8BitType(VideoInfo& vi) {
+int Get8BitType(const VideoInfo& vi) {
   if (vi.Is420()) return VideoInfo::CS_YV12;
   else if (vi.Is422()) return VideoInfo::CS_YV16;
   else if (vi.Is444()) return VideoInfo::CS_YV24;
@@ -23,7 +23,7 @@ int Get8BitType(VideoInfo& vi) {
   return VideoInfo::CS_BGR24;
 }
 
-int Get16BitType(VideoInfo& vi) {
+int Get16BitType(const VideoInfo& vi) {
   if (vi.Is420()) return VideoInfo::CS_YUV420P16;
   else if (vi.Is422()) return VideoInfo::CS_YUV422P16;
   else if (vi.Is444()) return VideoInfo::CS_YUV444P16;
@@ -31,7 +31,7 @@ int Get16BitType(VideoInfo& vi) {
   return VideoInfo::CS_BGR48;
 }
 
-int GetYType(VideoInfo& vi) {
+int GetYType(const VideoInfo& vi) {
 	switch (vi.BitsPerComponent()) {
 	case 8: return VideoInfo::CS_Y8;
 	case 10: return VideoInfo::CS_Y10;

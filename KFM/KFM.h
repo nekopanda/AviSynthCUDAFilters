@@ -212,3 +212,4 @@ struct DecombUCFInfo {
 };
 
 int GetDeviceTypes(const PClip& clip);
+bool IsAligned(Frame& frame, const VideoInfo& vi, PNeoEnv env);

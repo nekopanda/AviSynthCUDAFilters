@@ -873,7 +873,7 @@ class VideoFrameBuffer {
   Device* device;
 
 protected:
-  VideoFrameBuffer(int size, Device* device);
+  VideoFrameBuffer(int size, int margin, Device* device);
   VideoFrameBuffer();
   ~VideoFrameBuffer();
 
@@ -1503,7 +1503,8 @@ enum AvsEnvProperty
 
   // Neo additionals
   AEP_NUM_DEVICES = 901,
-  AEP_FRAME_ALIGN = 902
+	AEP_FRAME_ALIGN = 902,
+	AEP_PLANE_ALIGN = 903,
 };
 
 enum AvsAllocType

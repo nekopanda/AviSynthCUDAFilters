@@ -269,7 +269,7 @@ inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, 
   add_to_block_avx(&dst[dst_pitch * 7], row7, half, shift, maxv);
 }
 
-__forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv,
+__forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv,
   __m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
 {
   if (thresh <= 0) {
@@ -287,12 +287,8 @@ __forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float th
     // “]’u‚³‚ê‚½ó‘Ô‚¾‚¯‚Ç[0]‚ÌˆÊ’u‚Í“¯‚¶‚È‚Ì‚Å–â‘è‚È‚¢
 
     // requantize
-    if (is_soft) {
-      softthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
-    }
-    else {
-      hardthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
-    }
+    // softthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
+    hardthresh_avx(thresh, row0, row1, row2, row3, row4, row5, row6, row7);
 
     // idct
     idct_ps(row0, row1, row2, row3, row4, row5, row6, row7);
@@ -319,7 +315,7 @@ inline __m256 load_to_float_avx(const uint16_t* src) {
 
 template <typename pixel_t>
 void cpu_deblock_kernel_avx(const pixel_t* src, int src_pitch,
-  uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv)
+  uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv)
 {
   __m256 row0 = load_to_float_avx(&src[src_pitch * 0]);
   __m256 row1 = load_to_float_avx(&src[src_pitch * 1]);
@@ -331,14 +327,14 @@ void cpu_deblock_kernel_avx(const pixel_t* src, int src_pitch,
   __m256 row7 = load_to_float_avx(&src[src_pitch * 7]);
 
   cpu_deblock_kernel_avx(
-    dst, dst_pitch, thresh, is_soft, half, shift, maxv,
+    dst, dst_pitch, thresh, half, shift, maxv,
     row0, row1, row2, row3, row4, row5, row6, row7);
 }
 
 template void cpu_deblock_kernel_avx<uint8_t>(const uint8_t* src, int src_pitch,
-  uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv);
+  uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv);
 template void cpu_deblock_kernel_avx<uint16_t>(const uint16_t* src, int src_pitch,
-  uint16_t* dst, int dst_pitch, float thresh, bool is_soft, float half, int shift, int maxv);
+  uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv);
 
 
 const __m256i g_lditherv[8] = {

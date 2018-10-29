@@ -53,6 +53,7 @@ struct Frame {
   bool operator!() const { return !frame; }
 
   template <typename T> int GetPitch(int plane = 0) const {
+		if (!frame) return 0;
     return frame->GetPitch(plane) / sizeof(T);
   }
   int GetRowSize(int plane = 0) const {
@@ -65,6 +66,7 @@ struct Frame {
     return GetRowSize(plane) / sizeof(T);
   }
   template <typename T> const T* GetReadPtr(int plane = 0) const {
+		if (!frame) return nullptr;
     const BYTE* ptr = frame->GetReadPtr(plane);
     if (ptr) {
       if (plane & (PLANAR_U | PLANAR_V)) {
@@ -81,6 +83,7 @@ struct Frame {
     return reinterpret_cast<const T*>(ptr);
   }
   template <typename T> T* GetWritePtr(int plane = 0) {
+		if (!frame) return nullptr;
     BYTE* ptr = frame->GetWritePtr(plane);
     if (ptr) {
       if (plane & (PLANAR_U | PLANAR_V)) {
