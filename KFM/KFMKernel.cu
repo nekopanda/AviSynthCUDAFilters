@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <vector>
 
 #include "CommonFunctions.h"
 #include "KFM.h"
@@ -155,7 +156,7 @@ class KFMSwitch : public KFMFilterBase
   PClip containscombeclip;
   PClip ucfclip;
   float thswitch;
-  int mode; // 0:通常 1:通常(FrameDurationあり) 2:FrameDurationのみ
+  int mode; // 0:通常 1:通常+timecode生成 2:timecode生成のみ
   bool show;
   bool showflag;
 
@@ -169,6 +170,12 @@ class KFMSwitch : public KFMFilterBase
   bool is24_60;
 
   PulldownPatterns patterns;
+
+	// timecode生成用テンポラリ
+	std::string filepath;
+	std::vector<int> durations;
+	int current;
+	bool complete;
 
   template <typename pixel_t>
   void VisualizeFlag(Frame& dst, Frame& flag, PNeoEnv env)
@@ -419,6 +426,34 @@ class KFMSwitch : public KFMFilterBase
     return duration;
   }
 
+	int GetFrameDuration(int n60, PNeoEnv env)
+	{
+		PDevice cpudev = env->GetDevice(DEV_TYPE_CPU, 0);
+		int cycleIndex = n60 / 10;
+		KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
+		FrameInfo info = GetFrameInfo(n60, fm, env);
+		return GetFrameDuration(n60, info, env);
+	}
+
+	void WriteToFile(PNeoEnv env)
+	{
+		auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".duration.txt", env));
+		for (int i = 0; i < (int)durations.size(); ++i) {
+			fprintf(file->fp, "%d\n", durations[i]);
+		}
+		file = nullptr;
+
+		file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".timecode.txt", env));
+		double elapsed = 0;
+		double tick = (double)vi.fps_denominator / vi.fps_numerator;
+		fprintf(file->fp, "# timecode format v2\n");
+		for (int i = 0; i < (int)durations.size(); ++i) {
+			fprintf(file->fp, "%d\n", (int)std::round(elapsed * 1000));
+			elapsed += durations[i] * tick;
+		}
+		file = nullptr;
+	}
+
   template <typename pixel_t>
   PVideoFrame GetFrameTop(int n60, PNeoEnv env)
   {
@@ -459,9 +494,20 @@ class KFMSwitch : public KFMFilterBase
 
     int duration = 0;
     if (mode != NORMAL) {
+			for (; current < n60; ) {
+				durations.push_back(GetFrameDuration(current, env));
+				current += durations.back();
+			}
       duration = GetFrameDuration(n60, info, env);
-      env->MakePropertyWritable(&dst.frame);
-      dst.SetProperty("FrameDuration", duration);
+			if (current == n60) {
+				durations.push_back(duration);
+				current += durations.back();
+			}
+			if (current >= vi.num_frames && complete == false) {
+				// ファイルに書き込む
+				WriteToFile(env);
+				complete = true;
+			}
     }
 
     if (show) {
@@ -479,7 +525,8 @@ public:
     PClip clip24, PClip mask24, PClip cc24,
     PClip clip30, PClip mask30, PClip cc30,
     PClip ucfclip,
-    float thswitch, int mode, bool show, bool showflag, IScriptEnvironment* env)
+    float thswitch, int mode, const std::string& filepath,
+		bool show, bool showflag, IScriptEnvironment* env)
     : KFMFilterBase(clip60)
     , srcvi(vi)
     , fmclip(fmclip)
@@ -496,6 +543,9 @@ public:
     , showflag(showflag)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
+		, filepath(GetFullPath(filepath)) // GetFrame時とカレントディレクトリが違うのでフルパスにしておく
+		, current(0)
+		, complete(false)
   {
     if (vi.width & 7) env->ThrowError("[KFMSwitch]: width must be multiple of 8");
     if (vi.height & 7) env->ThrowError("[KFMSwitch]: height must be multiple of 8");
@@ -650,9 +700,10 @@ public:
       args[7].AsClip(),           // cc30
       args[8].Defined() ? args[8].AsClip() : nullptr,           // ucfclip
       (float)args[9].AsFloat(3.0f),// thswitch
-      args[10].AsInt(0),           // mode
-      args[11].AsBool(false),      // show
-      args[12].AsBool(false),      // showflag
+			args[10].AsInt(0),           // mode
+			args[11].AsString("kfmswitch"),        // filepath
+      args[12].AsBool(false),      // show
+      args[13].AsBool(false),      // showflag
       env
     );
   }
@@ -747,7 +798,7 @@ public:
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
-  env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[filepath]s[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
   env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

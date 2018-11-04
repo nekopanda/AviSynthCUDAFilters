@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Frame.h"
+#include <string>
 
 enum {
   OVERLAP = 8,
@@ -211,5 +212,22 @@ struct DecombUCFInfo {
   }
 };
 
+class DumpTextFile
+{
+public:
+	FILE* fp;
+	DumpTextFile(const std::string& fname, IScriptEnvironment* env)
+		: fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
+	{
+		if (fp == nullptr) {
+			env->ThrowError("Failed to open file ... %s", fname.c_str());
+		}
+	}
+	~DumpTextFile() {
+		fclose(fp);
+	}
+};
+
 int GetDeviceTypes(const PClip& clip);
 bool IsAligned(Frame& frame, const VideoInfo& vi, PNeoEnv env);
+std::string GetFullPath(const std::string& path);

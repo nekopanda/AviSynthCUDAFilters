@@ -222,31 +222,29 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
                 clip60 = ucf ? ucfc : clip60
             }
             else {
-            # SVPを適用
-            if(svp) {
-                # SVPをマルチスレッドで呼び出すとバグるので注意
-                clip24 = clip24.OnDEV().SmoothFps(5, 2).OnCPU(1)
-                clip30 = clip30.OnDEV().SmoothFps(2, 1).OnCPU(1)
-            }
-            else if(!cuda) {
-                clip24 = clip24.Prefetch(threads)
-                clip30 = clip30.Prefetch(threads)
-            }
+				# SVPを適用
+				if(svp) {
+					# SVPをマルチスレッドで呼び出すとバグるので注意
+					clip24 = clip24.OnDEV().SmoothFps(5, 2).OnCPU(1)
+					clip30 = clip30.OnDEV().SmoothFps(2, 1).OnCPU(1)
+				}
+				else if(!cuda) {
+					clip24 = clip24.Prefetch(threads)
+					clip30 = clip30.Prefetch(threads)
+				}
             
-            if(!cuda) {
-                # KFMSwitch後にPrefetchすると効率が落ちるのでここでやる
-                clip60 = clip60.Prefetch(threads)
-                mask24 = mask24.Prefetch(threads / 2)
-                cc24 = cc24.Prefetch(mode == 2 ? threads : (threads / 2))
-                mask30 = mask30.Prefetch(threads / 2)
-                cc30 = cc30.Prefetch(mode == 2 ? threads : (threads / 2))
-                ucfc = ucf ? ucfc.Prefetch(threads / 2) : Undefined()
-            }
+				if(!cuda) {
+					# KFMSwitch後にPrefetchすると効率が落ちるのでここでやる
+					clip60 = clip60.Prefetch(threads)
+					mask24 = mask24.Prefetch(threads / 2)
+					cc24 = cc24.Prefetch(mode == 2 ? threads : (threads / 2))
+					mask30 = mask30.Prefetch(threads / 2)
+					cc30 = cc30.Prefetch(mode == 2 ? threads : (threads / 2))
+					ucfc = ucf ? ucfc.Prefetch(threads / 2) : Undefined()
+				}
             
-            mode = (pass == 3) ? 1 : pass
-            result = clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, show=show)
-
-            result
+				mode = (pass == 2) ? 2 : 0
+				clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, filepath=filepath, show=show)
             }
         }
     }

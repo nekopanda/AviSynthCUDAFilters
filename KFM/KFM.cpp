@@ -439,24 +439,6 @@ FMMatch PulldownPatterns::Matching(const FMData& data, int width, int height, fl
 
 #pragma endregion
 
-std::string GetFullPath(const std::string& path);
-
-class DumpTextFile
-{
-public:
-  FILE* fp;
-  DumpTextFile(const std::string& fname, IScriptEnvironment* env)
-    : fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
-  {
-    if (fp == nullptr) {
-      env->ThrowError("Failed to open file ... %s", fname);
-    }
-  }
-  ~DumpTextFile() {
-    fclose(fp);
-  }
-};
-
 class KFMCycleAnalyze : public GenericVideoFilter
 {
 
@@ -908,12 +890,14 @@ void AddFuncDebandKernel(IScriptEnvironment* env);
 void AddFuncUCF(IScriptEnvironment* env);
 void AddFuncDeblock(IScriptEnvironment* env);
 
+#if 0
 static void init_console()
 {
   AllocConsole();
   freopen("CONOUT$", "w", stdout);
   freopen("CONIN$", "r", stdin);
 }
+#endif
 
 const AVS_Linkage *AVS_linkage = 0;
 
