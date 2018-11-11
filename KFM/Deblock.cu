@@ -1744,6 +1744,10 @@ public:
 		);
 
 		if (args[8].AsBool(false)) { // sharpen
+			// GaussResizeとSharpenFilterの2つが使うのでキャッシュを入れる
+			// （これを入れないと2回実行されてしまう）
+			clip = env->Invoke("Cache", AVSValue(clip)).AsClip();
+
 			VideoInfo vi = clip->GetVideoInfo();
 			AVSValue args[] = { clip, vi.width, vi.height, 0, 0, vi.width + 0.0001, vi.height + 0.0001, 2 };
 			PClip unsharp = env->Invoke("GaussResize", AVSValue(args, 8)).AsClip();
