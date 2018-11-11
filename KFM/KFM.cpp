@@ -632,13 +632,13 @@ class KFMCycleAnalyze : public GenericVideoFilter
       // 60pîªíË
       Make60p();
       // ç≈å„ÇÕÉtÉ@ÉCÉãÇ…èëÇ´çûÇﬁ
-      File file(filepath, "wb", env);
+      File file(filepath + ".result.dat", "wb", env);
       for (int i = 0; i < numCycles; ++i) {
         file.writeValue(results[i], env);
       }
       if (debug) {
         debugFile = nullptr;
-        auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".pattern", env));
+        auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".pattern.txt", env));
         int cur = -1;
         for (int i = 0; i < numCycles; ++i) {
           int next = results[i].is60p ? NUM_PATTERNS : results[i].pattern;
@@ -692,11 +692,11 @@ public:
 
     if (mode == GEN_PATTERN) {
       if (debug) {
-        debugFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".debug", env));
+        debugFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".debug.txt", env));
       }
     }
     else if (mode == READ_PATTERN) {
-      File file(filepath, "rb", env);
+      File file(filepath + ".result.dat", "rb", env);
       for (int i = 0; i < numCycles; ++i) {
         results.push_back(file.readValue<KFMResult>(env));
       }
@@ -747,7 +747,7 @@ public:
       (float)args[10].AsFloat(3.0f),           // th60
       (float)args[11].AsFloat(0.1f),           // th30
       (float)args[12].AsFloat(0.2f),           // rell24
-      args[13].AsString("kfm_cycle.dat"),           // filepath
+      args[13].AsString("kfm"),                // filepath
       args[14].AsInt(0),           // debug
       env
     );
