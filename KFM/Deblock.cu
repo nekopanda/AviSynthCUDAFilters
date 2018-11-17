@@ -706,9 +706,12 @@ void cpu_deblock_kernel_avx(const pixel_t* src, int src_pitch,
   uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv);
 
 template <typename pixel_t>
-void cpu_store_slice_avx(
-  int width, int height, pixel_t* dst, int dst_pitch,
-  const uint16_t* tmp, int tmp_pitch, int shift, int maxv);
+using STORE_SLICE_FUNC = void(*)(
+	int width, int height, pixel_t* dst, int dst_pitch,
+	const uint16_t* tmp, int tmp_pitch, int maxv);
+
+template <typename pixel_t>
+STORE_SLICE_FUNC<pixel_t> get_store_slice_avx_func(int shift);
 
 template <typename pixel_t>
 void cpu_deblock_avx(
@@ -722,6 +725,7 @@ void cpu_deblock_avx(
   int width, int height,
   pixel_t* dst, int dst_pitch, int mergeShift, int mergeMaxV)
 {
+	auto store_slice = get_store_slice_avx_func<pixel_t>(mergeShift);
   for (int by = 0; by < bh; ++by) {
     memset(&tmp[(by + 1) * 8 * tmp_pitch], 0, tmp_pitch * 8 * sizeof(uint16_t)); // dst‰Šú‰»
     for (int bx = 0; bx < bw; ++bx) {
@@ -748,9 +752,9 @@ void cpu_deblock_avx(
     }
     if (by) {
       int y_start = (by - 1) * 8;
-      cpu_store_slice_avx(
+			store_slice(
         width, min(8, height - y_start), &dst[y_start * dst_pitch], dst_pitch,
-        &tmp[by * 8 * tmp_pitch + 8], tmp_pitch, mergeShift, mergeMaxV);
+        &tmp[by * 8 * tmp_pitch + 8], tmp_pitch, mergeMaxV);
     }
   }
 }

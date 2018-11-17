@@ -121,3 +121,20 @@ TEST_F(MiscTest, GenericScriptTest)
     GTEST_FAIL();
   }
 }
+
+#include "../KFM/SIMDSupport.hpp"
+
+TEST_F(MiscTest, SIMDSupportTest)
+{
+	__m256i t = const_mm256_setr_epi16(
+		(int16_t)0x1234, (int16_t)0x2345, (int16_t)0x3456, (int16_t)0x4567,
+		(int16_t)0x5678, (int16_t)0x6789, (int16_t)0x789A, (int16_t)0x89AB,
+		(int16_t)0x9ABC, (int16_t)0xABCD, (int16_t)0xBCDE, (int16_t)0xCDEF,
+		(int16_t)0xDEF0, (int16_t)0xEF01, (int16_t)0xF012, (int16_t)0x0123);
+	__m256i r = _mm256_setr_epi16(
+		(int16_t)0x1234, (int16_t)0x2345, (int16_t)0x3456, (int16_t)0x4567,
+		(int16_t)0x5678, (int16_t)0x6789, (int16_t)0x789A, (int16_t)0x89AB,
+		(int16_t)0x9ABC, (int16_t)0xABCD, (int16_t)0xBCDE, (int16_t)0xCDEF,
+		(int16_t)0xDEF0, (int16_t)0xEF01, (int16_t)0xF012, (int16_t)0x0123);
+	EXPECT_EQ(memcmp(&t, &r, sizeof(t)), 0);
+}

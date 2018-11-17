@@ -190,6 +190,7 @@
     <ClInclude Include="..\common\Copy.h" />
     <ClInclude Include="KFM.h" />
     <ClInclude Include="KFMFilterBase.cuh" />
+    <ClInclude Include="SIMDSupport.hpp" />
     <ClInclude Include="TextOut.h" />
   </ItemGroup>
   <ItemGroup>

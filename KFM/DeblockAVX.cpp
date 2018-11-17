@@ -6,6 +6,8 @@
 
 #include <immintrin.h>
 
+#include "SIMDSupport.hpp"
+
 // https://stackoverflow.com/questions/25622745/transpose-an-8x8-float-using-avx-avx2
 inline void transpose8_ps(__m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7) {
   __m256 __t0, __t1, __t2, __t3, __t4, __t5, __t6, __t7;
@@ -336,16 +338,16 @@ template void cpu_deblock_kernel_avx<uint8_t>(const uint8_t* src, int src_pitch,
 template void cpu_deblock_kernel_avx<uint16_t>(const uint16_t* src, int src_pitch,
   uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv);
 
-
-const __m256i g_lditherv[8] = {
-  _mm256_set_epi16(0,  48,  12,  60,   3,  51,  15,  63,  0,  48,  12,  60,   3,  51,  15,  63),
-  _mm256_set_epi16(32,  16,  44,  28,  35,  19,  47,  31, 32,  16,  44,  28,  35,  19,  47,  31),
-  _mm256_set_epi16(8,  56,   4,  52,  11,  59,   7,  55,  8,  56,   4,  52,  11,  59,   7,  55),
-  _mm256_set_epi16(40,  24,  36,  20,  43,  27,  39,  23, 40,  24,  36,  20,  43,  27,  39,  23),
-  _mm256_set_epi16(2,  50,  14,  62,   1,  49,  13,  61,  2,  50,  14,  62,   1,  49,  13,  61),
-  _mm256_set_epi16(34,  18,  46,  30,  33,  17,  45,  29, 34,  18,  46,  30,  33,  17,  45,  29),
-  _mm256_set_epi16(10,  58,   6,  54,   9,  57,   5,  53, 10,  58,   6,  54,   9,  57,   5,  53),
-  _mm256_set_epi16(42,  26,  38,  22,  41,  25,  37,  21, 42,  26,  38,  22,  41,  25,  37,  21)
+// グローバル変数はconstexprにできないとAVX非対応環境でDLLがロードできなくなることに注意
+constexpr __m256i g_lditherv[8] = {
+	const_mm256_setr_epi16(0,  48,  12,  60,   3,  51,  15,  63,  0,  48,  12,  60,   3,  51,  15,  63),
+	const_mm256_setr_epi16(32,  16,  44,  28,  35,  19,  47,  31, 32,  16,  44,  28,  35,  19,  47,  31),
+	const_mm256_setr_epi16(8,  56,   4,  52,  11,  59,   7,  55,  8,  56,   4,  52,  11,  59,   7,  55),
+	const_mm256_setr_epi16(40,  24,  36,  20,  43,  27,  39,  23, 40,  24,  36,  20,  43,  27,  39,  23),
+	const_mm256_setr_epi16(2,  50,  14,  62,   1,  49,  13,  61,  2,  50,  14,  62,   1,  49,  13,  61),
+	const_mm256_setr_epi16(34,  18,  46,  30,  33,  17,  45,  29, 34,  18,  46,  30,  33,  17,  45,  29),
+	const_mm256_setr_epi16(10,  58,   6,  54,   9,  57,   5,  53, 10,  58,   6,  54,   9,  57,   5,  53),
+	const_mm256_setr_epi16(42,  26,  38,  22,  41,  25,  37,  21, 42,  26,  38,  22,  41,  25,  37,  21)
 };
 
 template <int shift>
@@ -399,11 +401,14 @@ void cpu_store_slice_avx_tmpl(
 }
 
 template <typename pixel_t>
-void cpu_store_slice_avx(
-  int width, int height, pixel_t* dst, int dst_pitch,
-  const uint16_t* tmp, int tmp_pitch, int shift, int maxv)
+using STORE_SLICE_FUNC = void(*)(
+	int width, int height, pixel_t* dst, int dst_pitch,
+	const uint16_t* tmp, int tmp_pitch, int maxv);
+
+template <typename pixel_t>
+STORE_SLICE_FUNC<pixel_t> get_store_slice_avx_func(int shift)
 {
-  static void(*table[])(
+  constexpr void(*table[])(
     int width, int height, pixel_t* dst, int dst_pitch,
     const uint16_t* tmp, int tmp_pitch, int maxv) = {
     cpu_store_slice_avx_tmpl<pixel_t, 0>,
@@ -416,12 +421,8 @@ void cpu_store_slice_avx(
     cpu_store_slice_avx_tmpl<pixel_t, 7>,
     cpu_store_slice_avx_tmpl<pixel_t, 8>
   };
-  table[shift](width, height, dst, dst_pitch, tmp, tmp_pitch, maxv);
+	return table[shift];
 }
 
-template void cpu_store_slice_avx<uint8_t>(
-  int width, int height, uint8_t* dst, int dst_pitch,
-  const uint16_t* tmp, int tmp_pitch, int shift, int maxv);
-template void cpu_store_slice_avx<uint16_t>(
-  int width, int height, uint16_t* dst, int dst_pitch,
-  const uint16_t* tmp, int tmp_pitch, int shift, int maxv);
+template STORE_SLICE_FUNC<uint8_t> get_store_slice_avx_func<uint8_t>(int shift);
+template STORE_SLICE_FUNC<uint16_t> get_store_slice_avx_func<uint16_t>(int shift);
