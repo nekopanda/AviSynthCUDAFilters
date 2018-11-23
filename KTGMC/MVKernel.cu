@@ -1834,42 +1834,51 @@ static __global__ void kl_degrain_2x3(
 
   for (int bby = 0; bby < SPAN_Y; ++bby) {
     int by = basey + bby;
-    if (by >= nBlkY) continue;
+    // byはCUDAブロック内の全スレッドが同じ値なのでこれでOK
+    if (by >= nBlkY) break;
 
     for (int bbx = 0; bbx < SPAN_X; ++bbx) {
       int bx = basex + bbx;
-      if (bx >= nBlkX) continue;
+
+      if (M == 1) {
+        // M==1の場合はbxはCUDAブロック内の全スレッドが同じ値なのでこれでOK
+        if (bx >= nBlkX) break;
+      }
 
       int blkidx = bx + by * nBlkX;
 
-      // ブロック情報を読み込む
-      for (int i = 0; i < N_READ_LOOP; ++i) {
-        info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
-      }
-      if (THREADS * N_READ_LOOP + tid < DegrainBlock<pixel_t, N>::LEN) {
-        info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
+      // M == 1のときは条件分岐を省略
+      if (M == 1 || bx < nBlkX) {
+        // ブロック情報を読み込む
+        for (int i = 0; i < N_READ_LOOP; ++i) {
+          info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
+        }
+        if (THREADS * N_READ_LOOP + tid < DegrainBlock<pixel_t, N>::LEN) {
+          info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
+        }
       }
       __syncthreads();
 
-      vint_t val = { 0 };
-      if (N == 1)
-        val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
-        VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
-      else if (N == 2)
-        val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
-        VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
-        VLoad<VLEN>::to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + VLoad<VLEN>::to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
+      if (M == 1 || bx < nBlkX) {
+        vint_t val = { 0 };
+        if (N == 1)
+          val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
+          VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0];
+        else if (N == 2)
+          val = to_int(__ldg((const vpixel_t*)&info.d.pSrc[offset])) * info.d.WSrc +
+          VLoad<VLEN>::to_int(&info.d.pF[0][offsetSuper]) * info.d.WRefF[0] + VLoad<VLEN>::to_int(&info.d.pB[0][offsetSuper]) * info.d.WRefB[0] +
+          VLoad<VLEN>::to_int(&info.d.pF[1][offsetSuper]) * info.d.WRefF[1] + VLoad<VLEN>::to_int(&info.d.pB[1][offsetSuper]) * info.d.WRefB[1];
 
-      int dstx = bbx * BLK_STEP4 + tx;
-      int dsty = bby * BLK_STEP + ty;
+        int dstx = bbx * BLK_STEP4 + tx;
+        int dsty = bby * BLK_STEP + ty;
 
-      val = (val + (no_need_round ? 0 : 128)) >> 8;
+        val = (val + (no_need_round ? 0 : 128)) >> 8;
 
-      if (sizeof(pixel_t) == 1)
-        tmp[tz][dsty][dstx] += (val * __ldg(&((const vshort_t*)info.d.winOver)[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
-      else
-        tmp[tz][dsty][dstx] += val * __ldg(&((const vshort_t*)info.d.winOver)[tid]); // shift (5+6); in Short2Bytes16
-
+        if (sizeof(pixel_t) == 1)
+          tmp[tz][dsty][dstx] += (val * __ldg(&((const vshort_t*)info.d.winOver)[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+        else
+          tmp[tz][dsty][dstx] += val * __ldg(&((const vshort_t*)info.d.winOver)[tid]); // shift (5+6); in Short2Bytes16
+      }
       __syncthreads();
 #if 0
       if (basex == 12 && basey == 0 && dsty == 0 && dstx == 2) {
@@ -1880,10 +1889,10 @@ static __global__ void kl_degrain_2x3(
           info.d.WRefF[0], info.d.pB[0][offsetSuper].y,
           info.d.WRefB[0], val.y, ((const vshort_t*)info.d.winOver)[tid].y,
           t.y);
-      }
-#endif
     }
+#endif
   }
+}
 
   // dstに書き込む
   vtmp_t *p = &pDst[basex * BLK_STEP4 + tx + (basey * BLK_STEP + ty) * pitch4];
@@ -2052,43 +2061,52 @@ static __global__ void kl_compensate_2x3(
 
   for (int bby = 0; bby < SPAN_Y; ++bby) {
     int by = basey + bby;
-    if (by >= nBlkY) continue;
+    // byはCUDAブロック内の全スレッドが同じ値なのでこれでOK
+    if (by >= nBlkY) break;
 
     for (int bbx = 0; bbx < SPAN_X; ++bbx) {
       int bx = basex + bbx;
-      if (bx >= nBlkX) continue;
+
+      if (M == 1) {
+        // M==1の場合はbxはCUDAブロック内の全スレッドが同じ値なのでこれでOK
+        if (bx >= nBlkX) break;
+      }
 
       int blkidx = bx + by * nBlkX;
 
-      // ブロック情報を読み込む
-      for (int i = 0; i < N_READ_LOOP; ++i) {
-        info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
-      }
-      if (THREADS * N_READ_LOOP + tid < CompensateBlock<pixel_t>::LEN) {
-        info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
+      // M == 1のときは条件分岐を省略
+      if (M == 1 || bx < nBlkX) {
+        // ブロック情報を読み込む
+        for (int i = 0; i < N_READ_LOOP; ++i) {
+          info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
+        }
+        if (THREADS * N_READ_LOOP + tid < CompensateBlock<pixel_t>::LEN) {
+          info.m[THREADS * N_READ_LOOP + tid] = data[blkidx].m[THREADS * N_READ_LOOP + tid];
+        }
       }
       __syncthreads();
 
-      vint_t val = VLoad<VLEN>::to_int(&info.d.pRef[offsetSuper]);
+      if (M == 1 || bx < nBlkX) {
+        vint_t val = VLoad<VLEN>::to_int(&info.d.pRef[offsetSuper]);
 
-      int dstx = bbx * BLK_STEP4 + tx;
-      int dsty = bby * BLK_STEP + ty;
+        int dstx = bbx * BLK_STEP4 + tx;
+        int dsty = bby * BLK_STEP + ty;
 
-      if (sizeof(pixel_t) == 1)
-        tmp[tz][dsty][dstx] += (val * __ldg(&((const vshort_t*)info.d.winOver)[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
-      else
-        tmp[tz][dsty][dstx] += val * __ldg(&((const vshort_t*)info.d.winOver)[tid]); // shift (5+6); in Short2Bytes16
-
+        if (sizeof(pixel_t) == 1)
+          tmp[tz][dsty][dstx] += (val * __ldg(&((const vshort_t*)info.d.winOver)[tid]) + 256) >> 6; // shift 5 in Short2Bytes<uint8_t> in overlap.cpp
+        else
+          tmp[tz][dsty][dstx] += val * __ldg(&((const vshort_t*)info.d.winOver)[tid]); // shift (5+6); in Short2Bytes16
+      }
       __syncthreads();
 #if 0
       if (basex == 0 && basey == 0 && dsty == 1 && dstx == 0) {
         auto t = (val * ((const vshort_t*)info.d.winOver)[tid] + 256) >> 6;
         printf("%d,%d*%d=>%d\n",
           tmp[0][1][0].x, val.x, ((const vshort_t*)info.d.winOver)[tid].x, t.x);
-      }
-#endif
     }
+#endif
   }
+}
 
   // dstに書き込む
   vtmp_t *p = &pDst[basex * BLK_STEP4 + tx + (basey * BLK_STEP + ty) * pitch4];
