@@ -3,6 +3,7 @@
 #include <avisynth.h>
 
 #include <algorithm>
+#include <numeric>
 #include <memory>
 #include <vector>
 
@@ -437,13 +438,13 @@ class KFMSwitch : public KFMFilterBase
 
 	void WriteToFile(PNeoEnv env)
 	{
-		auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".duration.txt", env));
+		auto file = std::unique_ptr<TextFile>(new TextFile(filepath + ".duration.txt", "w", env));
 		for (int i = 0; i < (int)durations.size(); ++i) {
 			fprintf(file->fp, "%d\n", durations[i]);
 		}
 		file = nullptr;
 
-		file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".timecode.txt", env));
+		file = std::unique_ptr<TextFile>(new TextFile(filepath + ".timecode.txt", "w", env));
 		double elapsed = 0;
 		double tick = (double)vi.fps_denominator / vi.fps_numerator;
 		fprintf(file->fp, "# timecode format v2\n");
@@ -769,6 +770,54 @@ public:
   }
 };
 
+class KFMDecimate : public GenericVideoFilter
+{
+  std::vector<int> durations;
+  std::vector<int> framesMap;
+public:
+  KFMDecimate(PClip source, const std::string& filepath, IScriptEnvironment* env)
+    : GenericVideoFilter(source)
+  {
+    auto file = std::unique_ptr<TextFile>(new TextFile(filepath + ".duration.txt", "r", env));
+    char buf[100];
+    while (fgets(buf, sizeof(buf), file->fp) && *buf) {
+      durations.push_back(std::atoi(buf));
+    }
+    int numSourceFrames = std::accumulate(durations.begin(), durations.end(), 0);
+    if (vi.num_frames != numSourceFrames) {
+      env->ThrowError("[KFMDecimate] # of frames does not match. %d(%s) vs %d(source clip)",
+        (int)numSourceFrames, filepath.c_str(), vi.num_frames);
+    }
+    vi.num_frames = (int)durations.size();
+    framesMap.resize(durations.size());
+    framesMap[0] = 0;
+    for (int i = 0; i < (int)durations.size() - 1; ++i) {
+      framesMap[i + 1] = framesMap[i] + durations[i];
+    }
+  }
+
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
+  {
+    return child->GetFrame(framesMap[std::max(0, std::min(n, vi.num_frames - 1))], env);
+  }
+
+  int __stdcall SetCacheHints(int cachehints, int frame_range) {
+    if (cachehints == CACHE_GET_DEV_TYPE) {
+      return GetDeviceTypes(child) & (DEV_TYPE_CPU | DEV_TYPE_CUDA);
+    }
+    return 0;
+  };
+
+  static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env)
+  {
+    return new KFMDecimate(
+      args[0].AsClip(),       // source
+      args[1].AsString("kfmswitch"),     // filepath
+      env
+    );
+  }
+};
+
 
 class AssumeDevice : public GenericVideoFilter
 {
@@ -800,5 +849,6 @@ void AddFuncFMKernel(IScriptEnvironment* env)
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
   env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[filepath]s[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
+  env->AddFunction("KFMDecimate", "c[filepath]s", KFMDecimate::Create, 0);
   env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
 }

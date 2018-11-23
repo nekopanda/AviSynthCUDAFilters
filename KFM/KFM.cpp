@@ -476,7 +476,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
   int debug;
 
   std::vector<KFMResult> results;
-  std::unique_ptr<DumpTextFile> debugFile;
+  std::unique_ptr<TextFile> debugFile;
 
   // ƒeƒ“ƒ|ƒ‰ƒŠ
   std::deque<KFMResult> recentBest;
@@ -638,7 +638,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
       }
       if (debug) {
         debugFile = nullptr;
-        auto file = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".pattern.txt", env));
+        auto file = std::unique_ptr<TextFile>(new TextFile(filepath + ".pattern.txt", "w", env));
         int cur = -1;
         for (int i = 0; i < numCycles; ++i) {
           int next = results[i].is60p ? NUM_PATTERNS : results[i].pattern;
@@ -692,7 +692,7 @@ public:
 
     if (mode == GEN_PATTERN) {
       if (debug) {
-        debugFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath + ".debug.txt", env));
+        debugFile = std::unique_ptr<TextFile>(new TextFile(filepath + ".debug.txt", "w", env));
       }
     }
     else if (mode == READ_PATTERN) {
@@ -815,13 +815,13 @@ public:
 class KFMDumpFM : public GenericVideoFilter
 {
   int nOut;
-  std::unique_ptr<DumpTextFile> outFile;
+  std::unique_ptr<TextFile> outFile;
 public:
   KFMDumpFM(PClip fmframe, const std::string& filepath, IScriptEnvironment* env)
     : GenericVideoFilter(fmframe)
     , nOut(0)
   {
-    outFile = std::unique_ptr<DumpTextFile>(new DumpTextFile(filepath, env));
+    outFile = std::unique_ptr<TextFile>(new TextFile(filepath, "w", env));
     fprintf(outFile->fp, "#shima,large shima,move\n");
   }
 

@@ -9,28 +9,30 @@ SetFilterMTMode("SVSmoothFps",1)
 function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thswitch", bool "ucf", bool "nr", bool "svp",\
                             string "filepath", bool "cuda", int "dev", int "threads", bool "show") {
 
-    mode = default(mode, 0) # 0:VFR(60fps) 1:60fps 2:24fps, 3:3clips(24p,30p,60p)
-    pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2) 2:only timing(mode:0) 3:generate images
+    mode = default(mode, 0) # 0:VFR 1:60fps 2:24fps, 3:3clips(24p,30p,60p), 4:VFR(60fps)
+    pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2or4) 2:only timing(mode:0or4) 3:generate images
     preset = default(preset, (Height(src) >= 720) ? "Faster" : "Slower") # QTGMC preset
     thswitch = default(thswitch, 0.5)
     ucf = default(ucf, false) # Enable DecombUCF
     nr = default(nr, false) # Enable Noise Reduction with (K)SMDegrain
     svp = default(svp, false) # Enable SVP
-    filepath = default(filepath, "cycle.dat")
+    filepath = default(filepath, "kfmdeint")
     cuda = default(cuda, false) # Enable CUDA
     dev = default(dev, 0) # CUDA device index
     threads = default(threads, 6) # Number of CPU threads
     show = default(show, false) # Show information
     
-    ivtc = Select(mode, true, false, true, true) # Enable Inverse Telecine
+    ivtc = Select(mode, true, false, true, true, true) # Enable Inverse Telecine
     out24 = (mode == 2) # output 24fps
     out3clips = (mode == 3) # output 3 clips
+    decimate = (mode == 0) # output decimated frames
     
     flagcrop = 6 # 上下のノイズ部分は除外する
     nrblk = (Height(src) >= 720) ? 32 : 16 # SMDegrain block size
     
     Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
     Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
+    Assert(!(mode == 3 && pass == 2), "3clips mode does not support timing output pass")
     Assert(!(mode == 3 && svp), "SVP cannot be used when output 3 clips")
 
     # CUDAデバイスチェック
@@ -245,6 +247,10 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
             
 				mode = (pass == 2) ? 2 : 0
 				clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, filepath=filepath, show=show)
+				
+				if(decimate && pass == 3) {
+					KFMDecimate(filepath=filepath)
+				}
             }
         }
     }

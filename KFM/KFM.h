@@ -212,18 +212,18 @@ struct DecombUCFInfo {
   }
 };
 
-class DumpTextFile
+class TextFile
 {
 public:
 	FILE* fp;
-	DumpTextFile(const std::string& fname, IScriptEnvironment* env)
-		: fp(_fsopen(fname.c_str(), "w", _SH_DENYNO))
+	TextFile(const std::string& fname, const char* mode, IScriptEnvironment* env)
+		: fp(_fsopen(fname.c_str(), mode, _SH_DENYNO))
 	{
 		if (fp == nullptr) {
 			env->ThrowError("Failed to open file ... %s", fname.c_str());
 		}
 	}
-	~DumpTextFile() {
+	~TextFile() {
 		fclose(fp);
 	}
 };
