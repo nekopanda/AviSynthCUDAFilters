@@ -8,6 +8,8 @@
 #include "DeviceLocalData.h"
 #include "CommonFunctions.h"
 #include "VectorFunctions.cuh"
+#include "KFMFilterBase.cuh"
+#include "Copy.h"
 
 #include "Frame.h"
 
@@ -136,6 +138,8 @@ class KTemporalNR : public KDebandBase
   PVideoFrame MakeFrames(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     int nframes = dist * 2 + 1;
     auto frames = std::unique_ptr<Frame[]>(new Frame[nframes]);
     for (int i = 0; i < nframes; ++i) {
@@ -179,13 +183,13 @@ class KTemporalNR : public KDebandBase
       dim3 threads(64);
       dim3 blocks(nblocks(width4, threads.x), vi.height);
       dim3 blocksUV(nblocks(width4UV, threads.x), heightUV);
-      kl_temporal_nr << <blocks, threads >> > (
+      kl_temporal_nr << <blocks, threads, 0, stream >> > (
         &dptrs[0], nframes, mid, width4, vi.height, pitchY, thresh);
       DEBUG_SYNC;
-      kl_temporal_nr << <blocksUV, threads >> > (
+      kl_temporal_nr << <blocksUV, threads, 0, stream >> > (
         &dptrs[1], nframes, mid, width4UV, heightUV, pitchUV, thresh);
       DEBUG_SYNC;
-      kl_temporal_nr << <blocksUV, threads >> > (
+      kl_temporal_nr << <blocksUV, threads, 0, stream >> > (
         &dptrs[2], nframes, mid, width4UV, heightUV, pitchUV, thresh);
       DEBUG_SYNC;
 
@@ -260,7 +264,7 @@ static __device__ __host__ int random_range(uint8_t random, char range) {
 template <typename pixel_t, int sample_mode, bool blur_first>
 void cpu_reduce_banding(
   pixel_t* dst, const pixel_t* src, const uint8_t* rand,
-  int width, int height, int pitch, int range, int thresh)
+  int width, int height, int pitch, int range, int thresh, PNeoEnv env)
 {
   int rand_step = width * height;
 
@@ -379,11 +383,12 @@ __global__ void kl_reduce_banding(
 template <typename pixel_t, int sample_mode, bool blur_first>
 void launch_reduce_banding(
   pixel_t* dst, const pixel_t* src, const uint8_t* rand,
-  int width, int height, int pitch, int range, int thresh)
+  int width, int height, int pitch, int range, int thresh, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_reduce_banding<pixel_t, sample_mode, blur_first> << <blocks, threads >> > (
+  kl_reduce_banding<pixel_t, sample_mode, blur_first> << <blocks, threads, 0, stream >> > (
     dst, src, rand, width, height, pitch, range, thresh);
 }
 
@@ -455,7 +460,7 @@ class KDeband : public KDebandBase
 
     void(*table[2][6])(
       pixel_t* dst, const pixel_t* src, const uint8_t* rand,
-      int width, int height, int pitch, int range, int thresh) =
+      int width, int height, int pitch, int range, int thresh, PNeoEnv env) =
     {
       {
         cpu_reduce_banding<pixel_t, 0, false>,
@@ -478,17 +483,17 @@ class KDeband : public KDebandBase
     int table_idx = sample_mode * 2 + (blur_first ? 1 : 0);
 
     if (IS_CUDA) {
-      table[1][table_idx](dstY, srcY, prand, vi.width, vi.height, pitchY, range, thresh);
+      table[1][table_idx](dstY, srcY, prand, vi.width, vi.height, pitchY, range, thresh, env);
       DEBUG_SYNC;
-      table[1][table_idx](dstU, srcU, prand, widthUV, heightUV, pitchUV, range, thresh);
+      table[1][table_idx](dstU, srcU, prand, widthUV, heightUV, pitchUV, range, thresh, env);
       DEBUG_SYNC;
-      table[1][table_idx](dstV, srcV, prand, widthUV, heightUV, pitchUV, range, thresh);
+      table[1][table_idx](dstV, srcV, prand, widthUV, heightUV, pitchUV, range, thresh, env);
       DEBUG_SYNC;
     }
     else {
-      table[0][table_idx](dstY, srcY, prand, vi.width, vi.height, pitchY, range, thresh);
-      table[0][table_idx](dstU, srcU, prand, widthUV, heightUV, pitchUV, range, thresh);
-      table[0][table_idx](dstV, srcV, prand, widthUV, heightUV, pitchUV, range, thresh);
+      table[0][table_idx](dstY, srcY, prand, vi.width, vi.height, pitchY, range, thresh, env);
+      table[0][table_idx](dstU, srcU, prand, widthUV, heightUV, pitchUV, range, thresh, env);
+      table[0][table_idx](dstV, srcV, prand, widthUV, heightUV, pitchUV, range, thresh, env);
     }
 
     return dst.frame;
@@ -595,192 +600,300 @@ enum {
 };
 #define SCALE(c) (int)(((float)c / 255.0f) * maxv)
 
-template <typename pixel_t, bool check, bool selective>
+template <typename pixel_t, bool selective>
+__device__ __host__ void dev_el_min_max(int& hmin, int& hmax, const pixel_t* __restrict__ src, int pitch)
+{
+	enum { S = (int)selective };
+	int vmax, vmin;
+	hmax = hmin = src[-(2 + S)];
+	vmax = vmin = src[-(2 + S) * pitch];
+	for (int i = -(1 + S); i < (3 + S); ++i) {
+		int hcur = src[i];
+		int vcur = src[i*pitch];
+		hmax = max(hmax, hcur);
+		hmin = min(hmin, hcur);
+		vmax = max(vmax, vcur);
+		vmin = min(vmin, vcur);
+	}
+	if (hmax - hmin < vmax - vmin) {
+		hmax = vmax, hmin = vmin;
+	}
+}
+
+template <typename pixel_t, bool check, bool selective, bool uv>
 void cpu_edgelevel(
-  pixel_t* dsttop, const pixel_t* srctop,
-  int width, int height, int pitch, int maxv, int str, int thrs)
+	pixel_t* dstY_, pixel_t* dstU_, pixel_t* dstV_,
+	const pixel_t* srcY_, const pixel_t* srcU_, const pixel_t* srcV_,
+  int width, int height, int pitch, int maxv, int str, int strUV, int thrs, PNeoEnv env)
 {
   enum { S = (int)selective };
   for (int y = 0; y < height; ++y) {
-    for (int x = 0; x < width; ++x) {
-      const pixel_t* src = srctop + y * pitch + x;
-      pixel_t* dst = dsttop + y * pitch + x;
+		for (int x = 0; x < width; ++x) {
+			int offset = y * pitch + x;
+			const pixel_t* srcY = srcY_ + offset;
+			const pixel_t* srcU = srcU_ + offset;
+			const pixel_t* srcV = srcV_ + offset;
+			pixel_t* dstY = dstY_ + offset;
+			pixel_t* dstU = dstU_ + offset;
+			pixel_t* dstV = dstV_ + offset;
 
-      if (y <= (1 + S) || y >= height - (2 + S) || x <= (1 + S) || x >= width - (2 + S)) {
-        if (x < width && y < height) {
-          *dst = check ? SCALE(EDGE_CHECK_NONE) : *src;
-        }
-      }
-      else {
-        int srcv = *src;
-        int dstv;
+			if (y <= (1 + S) || y >= height - (2 + S) || x <= (1 + S) || x >= width - (2 + S)) {
+				if (x < width && y < height) {
+					*dstY = check ? SCALE(EDGE_CHECK_NONE) : *srcY;
+					if (uv) {
+						*dstU = *srcU;
+						*dstV = *srcV;
+					}
+				}
+			}
+			else {
+				int hmax, hmin, vmax, vmin;
+				int hdiffmax = 0, vdiffmax = 0;
+				int hprev = hmax = hmin = srcY[-(2 + S)];
+				int vprev = vmax = vmin = srcY[-(2 + S) * pitch];
 
-        int hmax, hmin, vmax, vmin, avg;
-        int hdiffmax = 0, vdiffmax = 0;
-        int hprev = hmax = hmin = src[-(2 + S)];
-        int vprev = vmax = vmin = src[-(2 + S) * pitch];
+				for (int i = -(1 + S); i < (3 + S); ++i) {
+					int hcur = srcY[i];
+					int vcur = srcY[i*pitch];
 
-        for (int i = -(1 + S); i < (3 + S); ++i) {
-          int hcur = src[i];
-          int vcur = src[i*pitch];
+					hmax = max(hmax, hcur);
+					hmin = min(hmin, hcur);
+					vmax = max(vmax, vcur);
+					vmin = min(vmin, vcur);
 
-          hmax = max(hmax, hcur);
-          hmin = min(hmin, hcur);
-          vmax = max(vmax, vcur);
-          vmin = min(vmin, vcur);
+					if (selective) {
+						hdiffmax = max(hdiffmax, abs(hcur - hprev));
+						vdiffmax = max(vdiffmax, abs(vcur - vprev));
+					}
 
-          if (selective) {
-            hdiffmax = max(hdiffmax, abs(hcur - hprev));
-            vdiffmax = max(vdiffmax, abs(vcur - vprev));
-          }
+					hprev = hcur;
+					vprev = vcur;
+				}
 
-          hprev = hcur;
-          vprev = vcur;
-        }
+				if (hmax - hmin < vmax - vmin) {
+					hmax = vmax, hmin = vmin;
+				}
+				hdiffmax = max(hdiffmax, vdiffmax);
 
-        if (hmax - hmin < vmax - vmin) {
-          hmax = vmax, hmin = vmin;
-        }
-        hdiffmax = max(hdiffmax, vdiffmax);
+				float rdiff = hdiffmax / (float)(hmax - hmin);
 
-        float rdiff = hdiffmax / (float)(hmax - hmin);
+				// ～0.25: エッジでない可能性が高いのでなし
+				// 0.25～0.35: ボーダー
+				// 0.35～0.45: 甘いエッジなので強化
+				// 0.45～0.55: ボーダー
+				// 0.55～: 十分エッジなのでなし
+				float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
-        // ～0.25: エッジでない可能性が高いのでなし
-        // 0.25～0.35: ボーダー
-        // 0.35～0.45: 甘いエッジなので強化
-        // 0.45～0.55: ボーダー
-        // 0.55～: 十分エッジなのでなし
-        float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
+				int minU, maxU;
+				int minV, maxV;
+				if (uv) {
+					dev_el_min_max<pixel_t, selective>(minU, maxU, srcU, pitch);
+					dev_el_min_max<pixel_t, selective>(minV, maxV, srcV, pitch);
+				}
 
-        if (check) {
-          if (hmax - hmin > thrs && factor > 0.0f) {
-            avg = (hmax + hmin) >> 1;
-            if (srcv > avg) {
-              dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_WHITE) : SCALE(EDGE_CHECK_BRIGHT);
-            }
-            else {
-              dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_BLACK) : SCALE(EDGE_CHECK_DARK);
-            }
-          }
-          else {
-            dstv = SCALE(EDGE_CHECK_NONE);
-          }
-        }
-        else {
-          if (hmax - hmin > thrs) {
-            avg = (hmin + hmax) >> 1;
+				int srcvY, srcvU, srcvV;
+				srcvY = *srcY;
+				if (uv) {
+					srcvU = *srcU;
+					srcvV = *srcV;
+				}
 
-            dstv = min(max(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin), hmax);
-            dstv = clamp(dstv, 0, maxv);
-          }
-          else {
-            dstv = srcv;
-          }
-        }
+				int dstvY, dstvU, dstvV;
+				if (check) {
+					if (hmax - hmin > thrs && factor > 0.0f) {
+						int avgY = (hmax + hmin) >> 1;
+						if (srcvY > avgY) {
+							dstvY = (factor == 1.0f) ? SCALE(EDGE_CHECK_WHITE) : SCALE(EDGE_CHECK_BRIGHT);
+						}
+						else {
+							dstvY = (factor == 1.0f) ? SCALE(EDGE_CHECK_BLACK) : SCALE(EDGE_CHECK_DARK);
+						}
+					}
+					else {
+						dstvY = SCALE(EDGE_CHECK_NONE);
+					}
+					if (uv) {
+						dstvU = srcvU;
+						dstvV = srcvV;
+					}
+				}
+				else {
+					if (hmax - hmin > thrs && factor > 0.0f) {
+						float factorY = (str * factor) * 0.0625f;
+						int avgY = (hmin + hmax) >> 1;
+						dstvY = clamp(srcvY + (int)((srcvY - avgY) * factorY), hmin, hmax);
+						dstvY = clamp(dstvY, 0, maxv);
 
-        *dst = dstv;
-      }
-    }
+						if (uv) {
+							float factorUV = strUV * 0.0625f;
+							int avgU = (minU + maxU) >> 1;
+							dstvU = clamp(srcvU + (int)((srcvU - avgU) * factorUV), minU, maxU);
+							dstvU = clamp(dstvU, 0, maxv);
+							int avgV = (minV + maxV) >> 1;
+							dstvV = clamp(srcvV + (int)((srcvV - avgV) * factorUV), minV, maxV);
+							dstvV = clamp(dstvV, 0, maxv);
+						}
+					}
+					else {
+						dstvY = srcvY;
+						if (uv) {
+							dstvU = srcvU;
+							dstvV = srcvV;
+						}
+					}
+				}
+
+				*dstY = dstvY;
+				if (uv) {
+					*dstU = dstvU;
+					*dstV = dstvV;
+				}
+			}
+		}
   }
 }
 
-template <typename pixel_t, bool check, bool selective>
+template <typename pixel_t, bool check, bool selective, bool uv>
 __global__ void kl_edgelevel(
-  pixel_t* __restrict__ dst, const pixel_t* __restrict__ src,
-  int width, int height, int pitch, int maxv, int str, int thrs)
+	pixel_t* __restrict__ dstY,
+	pixel_t* __restrict__ dstU,
+	pixel_t* __restrict__ dstV,
+	const pixel_t* __restrict__ srcY,
+	const pixel_t* __restrict__ srcU,
+	const pixel_t* __restrict__ srcV,
+  int width, int height, int pitch, int maxv, int str, int strUV, int thrs)
 {
   enum { S = (int)selective };
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-  src += y * pitch + x;
-  dst += y * pitch + x;
+	int offset = y * pitch + x;
+  srcY += offset;
+	if (uv) {
+		srcU += offset;
+		srcV += offset;
+	}
 
-  if (y <= (1 + S) || y >= height - (2 + S) || x <= (1 + S) || x >= width - (2 + S)) {
-    if (x < width && y < height) {
-      *dst = check ? SCALE(EDGE_CHECK_NONE) : *src;
-    }
-  }
-  else {
-    int srcv = *src;
-    int dstv;
+	if (y <= (1 + S) || y >= height - (2 + S) || x <= (1 + S) || x >= width - (2 + S)) {
+		if (x < width && y < height) {
+			dstY[offset] = check ? SCALE(EDGE_CHECK_NONE) : *srcY;
+			if (uv) {
+				dstU[offset] = *srcU;
+				dstV[offset] = *srcV;
+			}
+		}
+	}
+	else {
+		int hmax, hmin, vmax, vmin;
+		int hdiffmax = 0, vdiffmax = 0;
+		int hprev = hmax = hmin = srcY[-(2 + S)];
+		int vprev = vmax = vmin = srcY[-(2 + S) * pitch];
 
-    int hmax, hmin, vmax, vmin, avg;
-    int hdiffmax = 0, vdiffmax = 0;
-    int hprev = hmax = hmin = src[-(2 + S)];
-    int vprev = vmax = vmin = src[-(2 + S) * pitch];
+		for (int i = -(1 + S); i < (3 + S); ++i) {
+			int hcur = srcY[i];
+			int vcur = srcY[i*pitch];
 
-    for (int i = -(1 + S); i < (3 + S); ++i) {
-      int hcur = src[i];
-      int vcur = src[i*pitch];
+			hmax = max(hmax, hcur);
+			hmin = min(hmin, hcur);
+			vmax = max(vmax, vcur);
+			vmin = min(vmin, vcur);
 
-      hmax = max(hmax, hcur);
-      hmin = min(hmin, hcur);
-      vmax = max(vmax, vcur);
-      vmin = min(vmin, vcur);
+			if (selective) {
+				hdiffmax = max(hdiffmax, abs(hcur - hprev));
+				vdiffmax = max(vdiffmax, abs(vcur - vprev));
+			}
 
-      if (selective) {
-        hdiffmax = max(hdiffmax, abs(hcur - hprev));
-        vdiffmax = max(vdiffmax, abs(vcur - vprev));
-      }
+			hprev = hcur;
+			vprev = vcur;
+		}
 
-      hprev = hcur;
-      vprev = vcur;
-    }
+		if (hmax - hmin < vmax - vmin) {
+			hmax = vmax, hmin = vmin;
+		}
+		hdiffmax = max(hdiffmax, vdiffmax);
 
-    if (hmax - hmin < vmax - vmin) {
-      hmax = vmax, hmin = vmin;
-    }
-    hdiffmax = max(hdiffmax, vdiffmax);
+		float rdiff = hdiffmax / (float)(hmax - hmin);
 
-    float rdiff = hdiffmax / (float)(hmax - hmin);
+		// ～0.25: エッジでない可能性が高いのでなし
+		// 0.25～0.35: ボーダー
+		// 0.35～0.45: 甘いエッジなので強化
+		// 0.45～0.55: ボーダー
+		// 0.55～: 十分エッジなのでなし
+		float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
 
-    // ～0.25: エッジでない可能性が高いのでなし
-    // 0.25～0.35: ボーダー
-    // 0.35～0.45: 甘いエッジなので強化
-    // 0.45～0.55: ボーダー
-    // 0.55～: 十分エッジなのでなし
-    float factor = selective ? (clamp((0.55f - rdiff) * 10.0f, 0.0f, 1.0f) - clamp((0.35f - rdiff) * 10.0f, 0.0f, 1.0f)) : 1.0f;
+		int srcvY = *srcY;
+		int dstvY, dstvU, dstvV;
+		if (check) {
+			if (hmax - hmin > thrs && factor > 0.0f) {
+				int avgY = (hmax + hmin) >> 1;
+				if (srcvY > avgY) {
+					dstvY = (factor == 1.0f) ? SCALE(EDGE_CHECK_WHITE) : SCALE(EDGE_CHECK_BRIGHT);
+				}
+				else {
+					dstvY = (factor == 1.0f) ? SCALE(EDGE_CHECK_BLACK) : SCALE(EDGE_CHECK_DARK);
+				}
+			}
+			else {
+				dstvY = SCALE(EDGE_CHECK_NONE);
+			}
+			if (uv) {
+				dstvU = *srcU;
+				dstvV = *srcV;
+			}
+		}
+		else {
+			if (hmax - hmin > thrs && factor > 0.0f) {
+				float factorY = (str * factor) * 0.0625f;
+				int avgY = (hmin + hmax) >> 1;
+				dstvY = clamp(srcvY + (int)((srcvY - avgY) * factorY), hmin, hmax);
+				dstvY = clamp(dstvY, 0, maxv);
 
-    if (check) {
-      if (hmax - hmin > thrs && factor > 0.0f) {
-        avg = (hmax + hmin) >> 1;
-        if (srcv > avg) {
-          dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_WHITE) : SCALE(EDGE_CHECK_BRIGHT);
-        }
-        else {
-          dstv = (factor == 1.0f) ? SCALE(EDGE_CHECK_BLACK) : SCALE(EDGE_CHECK_DARK);
-        }
-      }
-      else {
-        dstv = SCALE(EDGE_CHECK_NONE);
-      }
-    }
-    else {
-      if (hmax - hmin > thrs) {
-        avg = (hmin + hmax) >> 1;
+				if (uv) {
+					float factorUV = strUV * 0.0625f;
 
-        dstv = clamp(srcv + (int)((srcv - avg) * (str * factor) * 0.0625f), hmin, hmax);
-        dstv = clamp(dstv, 0, maxv);
-      }
-      else {
-        dstv = srcv;
-      }
-    }
+					int minU, maxU;
+					dev_el_min_max<pixel_t, selective>(minU, maxU, srcU, pitch);
+					int avgU = (minU + maxU) >> 1;
+					int srcvU = *srcU;
+					dstvU = clamp(srcvU + (int)((srcvU - avgU) * factorUV), minU, maxU);
+					dstvU = clamp(dstvU, 0, maxv);
 
-    *dst = dstv;
-  }
+					int minV, maxV;
+					dev_el_min_max<pixel_t, selective>(minV, maxV, srcV, pitch);
+					int avgV = (minV + maxV) >> 1;
+					int srcvV = *srcV;
+					dstvV = clamp(srcvV + (int)((srcvV - avgV) * factorUV), minV, maxV);
+					dstvV = clamp(dstvV, 0, maxv);
+				}
+			}
+			else {
+				dstvY = srcvY;
+				if (uv) {
+					dstvU = *srcU;
+					dstvV = *srcV;
+				}
+			}
+		}
+
+		dstY[offset] = dstvY;
+		if (uv) {
+			dstU[offset] = dstvU;
+			dstV[offset] = dstvV;
+		}
+	}
 }
 
-template <typename pixel_t, bool check, bool selective>
+template <typename pixel_t, bool check, bool selective, bool uv>
 void launch_edgelevel(
-  pixel_t* dsttop, const pixel_t* srctop,
-  int width, int height, int pitch, int maxv, int str, int thrs)
+	pixel_t* dstY, pixel_t* dstU, pixel_t* dstV,
+	const pixel_t* srcY, const pixel_t* srcU, const pixel_t* srcV,
+  int width, int height, int pitch, int maxv, int str, int strUV, int thrs, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_edgelevel<pixel_t, check, selective> << <blocks, threads >> > (
-    dsttop, srctop, width, height, pitch, maxv, str, thrs);
+  kl_edgelevel<pixel_t, check, selective, uv> << <blocks, threads, 0, stream >> > (
+		dstY, dstU, dstV, srcY, srcU, srcV, width, height, pitch, maxv, str, strUV, thrs);
 }
 
 template<typename T, typename CompareAndSwap>
@@ -827,7 +940,7 @@ struct IntCompareAndSwap {
 template <typename pixel_t, int N>
 void cpu_edgelevel_repair(
   pixel_t* dst, const pixel_t* el, const pixel_t* src,
-  int width, int height, int pitch)
+  int width, int height, int pitch, PNeoEnv env)
 {
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
@@ -924,17 +1037,184 @@ __global__ void kl_edgelevel_repair(
 template <typename pixel_t, int N>
 void launch_edgelevel_repair(
   pixel_t* dsttop, const pixel_t* __restrict__ eltop, const pixel_t* srctop,
-  int width, int height, int pitch)
+  int width, int height, int pitch, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_edgelevel_repair<pixel_t, N> << <blocks, threads >> > (
+  kl_edgelevel_repair<pixel_t, N> << <blocks, threads, 0, stream >> > (
     dsttop, eltop, srctop, width, height, pitch);
+}
+
+// スレッド数=(width,height)=srcのサイズ
+template <typename pixel_t, int logUVx, int logUVy>
+void cpu_el_to444(
+	pixel_t* dst, const pixel_t* src,
+	int width, int height, int dstPitch, int srcPitch, PNeoEnv env)
+{
+	enum {
+		BW = (1 << logUVx),
+		BH = (1 << logUVy),
+	};
+
+	for (int y = 0; y < height - 1; ++y) {
+		for (int x = 0; x < width - 1; ++x) {
+			int v00 = src[(x + 0) + (y + 0) * srcPitch];
+			dst[BW * x + BH * y * dstPitch] = v00;
+			if (logUVx) {
+				int v10 = src[(x + 1) + (y + 0) * srcPitch];
+				dst[BW * x + 1 + BH * y * dstPitch] = (v00 + v10 + 1) >> 1;
+				if (logUVy) {
+					int v01 = src[(x + 0) + (y + 1) * srcPitch];
+					int v11 = src[(x + 1) + (y + 1) * srcPitch];
+					dst[BW * x + 0 + (BH * y + 1) * dstPitch] = (v00 + v01 + 1) >> 1;
+					dst[BW * x + 1 + (BH * y + 1) * dstPitch] = (v00 + v10 + v01 + v11 + 2) >> 2;
+				}
+			}
+		}
+	}
+
+	for (int y = 0; y < height - 1; ++y) {
+		int x = width - 1;
+		int v00 = src[(x + 0) + (y + 0) * srcPitch];
+		dst[BW * x + BH * y * dstPitch] = v00;
+		if (logUVx) {
+			dst[BW * x + 1 + BH * y * dstPitch] = v00;
+			if (logUVy) {
+				int v01 = src[(x + 0) + (y + 1) * srcPitch];
+				dst[BW * x + 0 + (BH * y + 1) * dstPitch] = (v00 + v01 + 1) >> 1;
+				dst[BW * x + 1 + (BH * y + 1) * dstPitch] = (v00 + v01 + 1) >> 1;
+			}
+		}
+	}
+
+	for (int x = 0; x < width - 1; ++x) {
+		int y = height - 1;
+		int v00 = src[(x + 0) + (y + 0) * srcPitch];
+		dst[BW * x + BH * y * dstPitch] = v00;
+		if (logUVx) {
+			int v10 = src[(x + 1) + (y + 0) * srcPitch];
+			dst[BW * x + 1 + BH * y * dstPitch] = (v00 + v10 + 1) >> 1;
+			if (logUVy) {
+				dst[BW * x + 0 + (BH * y + 1) * dstPitch] = v00;
+				dst[BW * x + 1 + (BH * y + 1) * dstPitch] = (v00 + v10 + 1) >> 1;
+			}
+		}
+	}
+
+	int x = width - 1;
+	int y = height - 1;
+	int v00 = src[(x + 0) + (y + 0) * srcPitch];
+	dst[BW * x + BH * y * dstPitch] = v00;
+	if (logUVx) {
+		dst[BW * x + 1 + BH * y * dstPitch] = v00;
+		if (logUVy) {
+			dst[BW * x + 0 + (BH * y + 1) * dstPitch] = v00;
+			dst[BW * x + 1 + (BH * y + 1) * dstPitch] = v00;
+		}
+	}
+}
+
+template <typename pixel_t, int logUVx, int logUVy>
+__global__ void kl_el_to444(
+	pixel_t* dst, const pixel_t* __restrict__ src,
+	int width, int height, int dstPitch, int srcPitch)
+{
+	enum {
+		BW = (1 << logUVx),
+		BH = (1 << logUVy),
+	};
+
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x < width && y < height) {
+		int v00 = src[(x + 0) + (y + 0) * srcPitch];
+		dst[BW * x + BH * y * dstPitch] = v00;
+		if (logUVx) {
+			int v10 = (x + 1 < width) ? src[(x + 1) + (y + 0) * srcPitch] : v00;
+			dst[BW * x + 1 + BH * y * dstPitch] = (v00 + v10 + 1) >> 1;
+			if (logUVy) {
+				int v01, v11;
+				if (y + 1 < height) {
+					v01 = src[(x + 0) + (y + 1) * srcPitch];
+					v11 = (x + 1 < width) ? src[(x + 1) + (y + 1) * srcPitch] : v01;
+				}
+				else {
+					v01 = v00;
+					v11 = (x + 1 < width) ? v10 : v00;
+				}
+				dst[BW * x + 0 + (BH * y + 1) * dstPitch] = (v00 + v01 + 1) >> 1;
+				dst[BW * x + 1 + (BH * y + 1) * dstPitch] = (v00 + v10 + v01 + v11 + 2) >> 2;
+			}
+		}
+	}
+}
+
+template <typename pixel_t, int logUVx, int logUVy>
+void launch_el_to444(
+	pixel_t* dst, const pixel_t* src,
+	int width, int height, int dstPitch, int srcPitch, PNeoEnv env)
+{
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+	dim3 threads(32, 16);
+	dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+	kl_el_to444<pixel_t, logUVx, logUVy> << <blocks, threads, 0, stream >> > (
+		dst, src, width, height, dstPitch, srcPitch);
+}
+
+// スレッド数=(width,height)=dstのサイズ
+template <typename pixel_t, int logUVx, int logUVy>
+void cpu_el_from444(
+	pixel_t* dst, const pixel_t* src,
+	int width, int height, int dstPitch, int srcPitch, PNeoEnv env)
+{
+	enum {
+		BW = (1 << logUVx),
+		BH = (1 << logUVy),
+	};
+
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			dst[x + y * dstPitch] = src[BW * x + BH * y * srcPitch];
+		}
+	}
+}
+
+template <typename pixel_t, int logUVx, int logUVy>
+__global__ void kl_el_from444(
+	pixel_t* dst, const pixel_t* __restrict__ src,
+	int width, int height, int dstPitch, int srcPitch)
+{
+	enum {
+		BW = (1 << logUVx),
+		BH = (1 << logUVy),
+	};
+
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x < width && y < height) {
+		dst[x + y * dstPitch] = src[BW * x + BH * y * srcPitch];
+	}
+}
+
+template <typename pixel_t, int logUVx, int logUVy>
+void launch_el_from444(
+	pixel_t* dst, const pixel_t* src,
+	int width, int height, int dstPitch, int srcPitch, PNeoEnv env)
+{
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+	dim3 threads(32, 16);
+	dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+	kl_el_from444<pixel_t, logUVx, logUVy> << <blocks, threads, 0, stream >> > (
+		dst, src, width, height, dstPitch, srcPitch);
 }
 
 class KEdgeLevel : public KDebandBase
 {
-  int str;
+	int str;
+	int strUV;
   int thrs;
   int repair;
   bool uv;
@@ -947,6 +1227,8 @@ class KEdgeLevel : public KDebandBase
   void CopyUV(Frame& dst, Frame& src, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
     const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
     vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
@@ -960,9 +1242,9 @@ class KEdgeLevel : public KDebandBase
     if (IS_CUDA) {
       dim3 threads(32, 16);
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_copy << <blocksUV, threads >> > (dstU, srcU, width4UV, heightUV, pitchUV);
+      kl_copy << <blocksUV, threads, 0, stream >> > (dstU, srcU, width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_copy << <blocksUV, threads >> > (dstV, srcV, width4UV, heightUV, pitchUV);
+      kl_copy << <blocksUV, threads, 0, stream >> > (dstV, srcV, width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -975,6 +1257,8 @@ class KEdgeLevel : public KDebandBase
   void ClearUV(Frame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
     vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
 
@@ -988,9 +1272,9 @@ class KEdgeLevel : public KDebandBase
     if (IS_CUDA) {
       dim3 threads(32, 16);
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_fill << <blocksUV, threads >> > (dstU, zerov, width4UV, heightUV, pitchUV);
+      kl_fill << <blocksUV, threads, 0, stream >> > (dstU, zerov, width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_fill << <blocksUV, threads >> > (dstV, zerov, width4UV, heightUV, pitchUV);
+      kl_fill << <blocksUV, threads, 0, stream >> > (dstV, zerov, width4UV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -999,17 +1283,107 @@ class KEdgeLevel : public KDebandBase
     }
   }
 
+	template <typename pixel_t>
+	PVideoFrame GetUVFrame(Frame& src, PNeoEnv env) {
+		if (logUVx == 0) {
+			return src.frame;
+		}
+		VideoInfo vi444 = vi;
+		vi444.pixel_type = Get444Type(vi);
+		Frame dst = env->NewVideoFrame(vi444);
+		const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+		const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+		pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+		pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+		int srcPitch = src.GetPitch<pixel_t>(PLANAR_U);
+		int dstPitch = dst.GetPitch<pixel_t>(PLANAR_U);
+		void(*table[2][8])(
+			pixel_t* dst, const pixel_t* src,
+			int width, int height, int dstPitch, int srcPitch, PNeoEnv env) =
+		{
+			{ // CPU
+				cpu_el_to444<pixel_t, 1, 0>,
+				cpu_el_to444<pixel_t, 1, 1>,
+			},
+			{ // CUDA
+				launch_el_to444<pixel_t, 1, 0>,
+				launch_el_to444<pixel_t, 1, 1>,
+			}
+		};
+		if (IS_CUDA) {
+			table[1][logUVy](dstU, srcU, vi.width, vi.height, dstPitch, srcPitch, env);
+			DEBUG_SYNC;
+			table[1][logUVy](dstV, srcV, vi.width, vi.height, dstPitch, srcPitch, env);
+			DEBUG_SYNC;
+		}
+		else {
+			table[0][logUVy](dstU, srcU, vi.width, vi.height, dstPitch, srcPitch, env);
+			table[0][logUVy](dstV, srcV, vi.width, vi.height, dstPitch, srcPitch, env);
+		}
+		return dst.frame;
+	}
+
+	template <typename pixel_t>
+	PVideoFrame GetOutFrame(Frame& src, PNeoEnv env) {
+		if (logUVx == 0) {
+			return src.frame;
+		}
+		Frame dst = env->NewVideoFrame(vi);
+		const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+		const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+		const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+		pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+		pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+		pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+		int pitch = src.GetPitch<pixel_t>(PLANAR_Y);
+		int srcPitch = src.GetPitch<pixel_t>(PLANAR_U);
+		int dstPitch = dst.GetPitch<pixel_t>(PLANAR_U);
+		int widthUV = vi.width >> logUVx;
+		int heightUV = vi.height >> logUVy;
+		void(*table[2][8])(
+			pixel_t* dst, const pixel_t* src,
+			int width, int height, int dstPitch, int srcPitch, PNeoEnv env) =
+		{
+			{ // CPU
+				cpu_el_from444<pixel_t, 1, 0>,
+				cpu_el_from444<pixel_t, 1, 1>,
+			},
+			{ // CUDA
+				launch_el_from444<pixel_t, 1, 0>,
+				launch_el_from444<pixel_t, 1, 1>,
+			}
+		};
+		if (IS_CUDA) {
+			table[1][logUVy](dstU, srcU, widthUV, heightUV, dstPitch, srcPitch, env);
+			DEBUG_SYNC;
+			table[1][logUVy](dstV, srcV, widthUV, heightUV, dstPitch, srcPitch, env);
+			DEBUG_SYNC;
+		}
+		else {
+			table[0][logUVy](dstU, srcU, widthUV, heightUV, dstPitch, srcPitch, env);
+			table[0][logUVy](dstV, srcV, widthUV, heightUV, dstPitch, srcPitch, env);
+		}
+		Copy(dstY, pitch, srcY, pitch, vi.width, vi.height, env);
+		return dst.frame;
+	}
+
   template <typename pixel_t>
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
-    Frame src = child->GetFrame(n, env);
-    Frame dst = env->NewVideoFrame(vi);
-    Frame el = (repair > 0) ? env->NewVideoFrame(vi) : Frame();
-    Frame tmp = (repair > 0) ? env->NewVideoFrame(vi) : Frame();
+		VideoInfo workvi = vi;
+		if (uv) {
+			workvi.pixel_type = Get444Type(vi);
+		}
+
+		Frame src = child->GetFrame(n, env);
+    Frame dst = env->NewVideoFrame(workvi);
+    Frame el = (repair > 0) ? env->NewVideoFrame(workvi) : Frame();
+    Frame tmp = (repair > 0) ? env->NewVideoFrame(workvi) : Frame();
+		Frame srcUV = uv ? GetUVFrame<pixel_t>(src, env) : nullptr;
 
     const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
-    const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
-    const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+    const pixel_t* srcU = (!srcUV ? src : srcUV).GetReadPtr<pixel_t>(PLANAR_U);
+    const pixel_t* srcV = (!srcUV ? src : srcUV).GetReadPtr<pixel_t>(PLANAR_V);
     pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
     pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
     pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
@@ -1020,37 +1394,31 @@ class KEdgeLevel : public KDebandBase
     pixel_t* tmpU = (repair > 0) ? tmp.GetWritePtr<pixel_t>(PLANAR_U) : nullptr;
     pixel_t* tmpV = (repair > 0) ? tmp.GetWritePtr<pixel_t>(PLANAR_V) : nullptr;
     int pitchY = src.GetPitch<pixel_t>(PLANAR_Y);
-    int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
-    int widthUV = vi.width >> logUVx;
-    int heightUV = vi.height >> logUVy;
 
-    void(*table[4][4])(
-      pixel_t* dsttop, const pixel_t* srctop,
-      int width, int height, int pitch, int maxv, int str, int thrs) =
+    void(*table[2][8])(
+			pixel_t* dstY, pixel_t* dstU, pixel_t* dstV,
+			const pixel_t* srcY, const pixel_t* srcU, const pixel_t* srcV,
+      int width, int height, int pitch, int maxv, int str, int strUV, int thrs, PNeoEnv env) =
     {
-      { // CPU Y
-        cpu_edgelevel<pixel_t, false, false>,
-        cpu_edgelevel<pixel_t, false, true>,
-        cpu_edgelevel<pixel_t, true, false>,
-        cpu_edgelevel<pixel_t, true, true>,
+      { // CPU
+				cpu_edgelevel<pixel_t, false, false, false>,
+				cpu_edgelevel<pixel_t, false, false, true>,
+				cpu_edgelevel<pixel_t, false, true, false>,
+				cpu_edgelevel<pixel_t, false, true, true>,
+				cpu_edgelevel<pixel_t, true, false, false>,
+				cpu_edgelevel<pixel_t, true, false, true>,
+				cpu_edgelevel<pixel_t, true, true, false>,
+				cpu_edgelevel<pixel_t, true, true, true>,
       },
-      { // CUDA Y
-        launch_edgelevel<pixel_t, false, false>,
-        launch_edgelevel<pixel_t, false, true>,
-        launch_edgelevel<pixel_t, true, false>,
-        launch_edgelevel<pixel_t, true, true>,
-      },
-      { // CPU UV
-        cpu_edgelevel<pixel_t, false, false>,
-        cpu_edgelevel<pixel_t, false, false>,
-        cpu_edgelevel<pixel_t, true, false>,
-        cpu_edgelevel<pixel_t, true, false>,
-      },
-      { // CUDA UV
-        launch_edgelevel<pixel_t, false, false>,
-        launch_edgelevel<pixel_t, false, false>,
-        launch_edgelevel<pixel_t, true, false>,
-        launch_edgelevel<pixel_t, true, false>,
+      { // CUDA
+        launch_edgelevel<pixel_t, false, false, false>,
+				launch_edgelevel<pixel_t, false, false, true>,
+        launch_edgelevel<pixel_t, false, true, false>,
+				launch_edgelevel<pixel_t, false, true, true>,
+        launch_edgelevel<pixel_t, true, false, false>,
+				launch_edgelevel<pixel_t, true, false, true>,
+        launch_edgelevel<pixel_t, true, true, false>,
+				launch_edgelevel<pixel_t, true, true, true>,
       }
     };
 
@@ -1058,7 +1426,7 @@ class KEdgeLevel : public KDebandBase
     int numel = max((repair + 1) / 2, 1);
 
     for (int i = 0; i < numel; ++i) {
-      int table_idx = ((show && (i + 1 == numel)) ? 2 : 0) + (repair ? 1 : 0);
+      int table_idx = ((show && (i + 1 == numel)) ? 4 : 0) + (repair ? 2 : 0) + (uv ? 1 : 0);
       const pixel_t* elsrcY = srcY;
       const pixel_t* elsrcU = srcU;
       const pixel_t* elsrcV = srcV;
@@ -1072,32 +1440,25 @@ class KEdgeLevel : public KDebandBase
         elsrcV = tmpV;
       }
       if (IS_CUDA) {
-        table[1][table_idx](dstY, elsrcY, vi.width, vi.height, pitchY, maxv, str, thrs);
+        table[1][table_idx](dstY, dstU, dstV, elsrcY, elsrcU, elsrcV,
+					vi.width, vi.height, pitchY, maxv, str, strUV, thrs, env);
         DEBUG_SYNC;
-        if (uv) {
-          table[3][table_idx](dstU, elsrcU, widthUV, heightUV, pitchUV, maxv, str, thrs);
-          DEBUG_SYNC;
-          table[3][table_idx](dstV, elsrcV, widthUV, heightUV, pitchUV, maxv, str, thrs);
-          DEBUG_SYNC;
-        }
       }
       else {
-        table[0][table_idx](dstY, elsrcY, vi.width, vi.height, pitchY, maxv, str, thrs);
-        if (uv) {
-          table[2][table_idx](dstU, elsrcU, widthUV, heightUV, pitchUV, maxv, str, thrs);
-          table[2][table_idx](dstV, elsrcV, widthUV, heightUV, pitchUV, maxv, str, thrs);
-        }
+        table[0][table_idx](dstY, dstU, dstV, elsrcY, elsrcU, elsrcV,
+					vi.width, vi.height, pitchY, maxv, str, strUV, thrs, env);
       }
     }
 
     if (show) {
-      if (!uv) {
-        ClearUV<pixel_t>(dst, env);
-      }
+			ClearUV<pixel_t>(dst, env);
     }
     else {
       if (repair > 0) {
         // リペアする
+        // dstをelに入れて、elをリペアで適用する
+        // dstとtmpをswapしながらelを参照して適用していく
+        // elは参照のみで変更しない
         std::swap(dst, el);
         std::swap(dstY, elY);
         std::swap(dstU, elU);
@@ -1116,45 +1477,47 @@ class KEdgeLevel : public KDebandBase
             repsrcV = tmpV;
           }
           if (IS_CUDA) {
-            launch_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY);
+            launch_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY, env);
             DEBUG_SYNC;
             if (uv) {
-              launch_edgelevel_repair<pixel_t, 3>(dstU, elU, repsrcU, widthUV, heightUV, pitchUV);
+              launch_edgelevel_repair<pixel_t, 3>(dstU, elU, repsrcU, vi.width, vi.height, pitchY, env);
               DEBUG_SYNC;
-              launch_edgelevel_repair<pixel_t, 3>(dstV, elV, repsrcV, widthUV, heightUV, pitchUV);
+              launch_edgelevel_repair<pixel_t, 3>(dstV, elV, repsrcV, vi.width, vi.height, pitchY, env);
               DEBUG_SYNC;
             }
           }
           else {
-            cpu_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY);
+            cpu_edgelevel_repair<pixel_t, 3>(dstY, elY, repsrcY, vi.width, vi.height, pitchY, env);
             if (uv) {
-              cpu_edgelevel_repair<pixel_t, 3>(dstU, elU, repsrcU, widthUV, heightUV, pitchUV);
-              cpu_edgelevel_repair<pixel_t, 3>(dstV, elV, repsrcV, widthUV, heightUV, pitchUV);
+              cpu_edgelevel_repair<pixel_t, 3>(dstU, elU, repsrcU, vi.width, vi.height, pitchY, env);
+              cpu_edgelevel_repair<pixel_t, 3>(dstV, elV, repsrcV, vi.width, vi.height, pitchY, env);
             }
           }
         }
       }
 
-      if (!uv) {
-        CopyUV<pixel_t>(dst, src, env);
+      if (uv) {
+				return GetOutFrame<pixel_t>(dst, env);
       }
+
+			CopyUV<pixel_t>(dst, src, env);
     }
 
-    return dst.frame;
+		return dst.frame;
   }
 
 public:
-  KEdgeLevel(PClip clip, int str, float thrs, int repair, bool uv, bool show, PNeoEnv env)
+  KEdgeLevel(PClip clip, int str, int strUV, float thrs, int repair, bool show, PNeoEnv env)
     : KDebandBase(clip)
-    , str(str)
+		, str(str)
+		, strUV(strUV)
     , thrs(scaleParam(thrs, vi.BitsPerComponent()))
     , repair(repair)
-    , uv(uv)
+    , uv(strUV > 0)
     , show(show)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-  {
-  }
+  { }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
@@ -1181,13 +1544,35 @@ public:
 
   static AVSValue __cdecl Create(AVSValue args, void* user_data, IScriptEnvironment* env_)
   {
-    PNeoEnv env = env_;
+		/* uvが有効なときは以下のようなスクリプトを実行
+		  ポイントはBilinearResize->PointResizeが無劣化、つまり、
+			途中で変更されなければ入力と同一の結果が出力されること
+			これを実現するためにサンプルポイントはMPEG2のポジションではなく、少しズレている
+			具体的には、MPEG2では左側の中間だが、このスクリプトでは左上をサンプルポイントとしている
+			KEdgeLevelに入力されるUVは0.5ピクセルだけ上にズレることになるが、
+			KEdgeLevelの処理に影響するだけで、すぐに元に戻る、かつ、KEdgeLevelでの0.5ピクセルのズレは
+			さほど影響ないと思うので、大丈夫なはず
+		  # -----------------------
+			u = src.UToY()
+			v = src.VToY()
+			w = u.Width()
+			h = u.Height()
+			u = u.BilinearResize(w*2,h*2,0.25,0.25,w,h)
+			v = v.BilinearResize(w*2,h*2,0.25,0.25,w,h)
+			t = YtoUV(u, v, src).KEdgeLevel(16, 10, 2, struv=32)
+			u = t.UToY().PointResize(w,h)
+			v = t.VToY().PointResize(w,h)
+			el1 = YtoUV(u, v, t)
+		  # -----------------------
+		*/
+
+		PNeoEnv env = env_;
     return new KEdgeLevel(
-      args[0].AsClip(),           // clip
-      args[1].AsInt(10),          // str
+			args[0].AsClip(),           // clip
+			args[1].AsInt(10),          // str
+			args[4].AsInt(0),           // strUV
       (float)args[2].AsFloat(25), // thrs
       args[3].AsInt(0),           // repair
-      args[4].AsBool(false),      // uv
       args[5].AsBool(false),      // show
       env);
   }
@@ -1198,6 +1583,6 @@ void AddFuncDebandKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KTemporalNR", "c[dist]i[thresh]f", KTemporalNR::Create, 0);
   env->AddFunction("KDeband", "c[range]i[thresh]f[sample]i[blur_first]b", KDeband::Create, 0);
-  env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[repair]i[uv]b[show]b", KEdgeLevel::Create, 0);
+  env->AddFunction("KEdgeLevel", "c[str]i[thrs]f[repair]i[struv]i[show]b", KEdgeLevel::Create, 0);
 }
 

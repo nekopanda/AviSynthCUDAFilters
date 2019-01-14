@@ -669,10 +669,13 @@ void KFMTest::EdgeLevelTest(TEST_FRAMES tf, int repair, bool chroma)
     std::ofstream out(scriptpath);
 
     out << "src = LWLibavVideoSource(\"test.ts\")" << std::endl;
+		if (chroma) {
+			out << "src = src.ConvertToYUV444()" << std::endl;
+		}
     out << "srcuda = src.OnCPU(0)" << std::endl;
 
-    out << "ref = src.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ")" << std::endl;
-    out << "cuda = srcuda.KEdgeLevel(16, 10, " << repair << ", uv=" << (chroma ? "true" : "false") << ")" O_C(0) "" << std::endl;
+    out << "ref = src.KEdgeLevel(16, 10, " << repair << ", strUV=" << (chroma ? 32 : 0) << ")" << std::endl;
+    out << "cuda = srcuda.KEdgeLevel(16, 10, " << repair << ", strUV=" << (chroma ? 32 : 0) << ")" O_C(0) "" << std::endl;
 
     out << "ImageCompare(ref, cuda, 1)" << std::endl;
 

@@ -19,11 +19,12 @@ void Copy_(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_s
   if (src_pitch == 0) return;
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     if (((uintptr_t)dstp | (uintptr_t)srcp | dst_pitch | src_pitch) & 3) {
       // alignment‚È‚µ
       dim3 threads(32, 8);
       dim3 blocks(nblocks(row_size, threads.x), nblocks(height, threads.y));
-      kl_copy << <blocks, threads >> > (dstp, dst_pitch, srcp, src_pitch, row_size, height);
+      kl_copy << <blocks, threads, 0, stream >> > (dstp, dst_pitch, srcp, src_pitch, row_size, height);
       DEBUG_SYNC;
     }
     else if (((uintptr_t)dstp | (uintptr_t)srcp | dst_pitch | src_pitch) & 15) {
@@ -33,7 +34,7 @@ void Copy_(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_s
       int src_pitch4 = src_pitch >> 2;
       dim3 threads(32, 8);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-      kl_copy << <blocks, threads >> > ((int*)dstp, dst_pitch4, (const int*)srcp, src_pitch4, width4, height);
+      kl_copy << <blocks, threads, 0, stream >> > ((int*)dstp, dst_pitch4, (const int*)srcp, src_pitch4, width4, height);
       DEBUG_SYNC;
     }
     else {
@@ -43,7 +44,7 @@ void Copy_(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_s
       int src_pitch4 = src_pitch >> 4;
       dim3 threads(32, 8);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-      kl_copy << <blocks, threads >> > ((int4*)dstp, dst_pitch4, (const int4*)srcp, src_pitch4, width4, height);
+      kl_copy << <blocks, threads, 0, stream >> > ((int4*)dstp, dst_pitch4, (const int4*)srcp, src_pitch4, width4, height);
       DEBUG_SYNC;
     }
   }

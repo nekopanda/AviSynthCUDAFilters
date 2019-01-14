@@ -2194,7 +2194,7 @@ public:
     dim3 threads(256);
     dim3 blocks(nblocks(nbytes, threads.x));
     memcpy_kernel << <blocks, threads, 0, stream >> > ((uint8_t*)dst, (uint8_t*)src, nbytes);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void Copy(
@@ -2204,7 +2204,7 @@ public:
     dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
     kl_copy<pixel_t> << <blocks, threads, 0, stream >> > (
       dst, dst_pitch, src, src_pitch, width, height);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void PadFrame(pixel_t *ptr, int pitch, int hPad, int vPad, int width, int height)
@@ -2214,14 +2214,14 @@ public:
       dim3 blocks(2, nblocks(height, threads.y));
       kl_pad_frame_h<pixel_t> << <blocks, threads, 0, stream >> > (
         ptr + vPad * pitch, pitch, hPad, width, height);
-      DebugSync();
+      DEBUG_SYNC;
     }
     { // V方向（すでにPadされたH方向分も含む）
       dim3 threads(32, vPad);
       dim3 blocks(nblocks(width + hPad * 2, threads.x), 2);
       kl_pad_frame_v<pixel_t> << <blocks, threads, 0, stream >> > (
         ptr, pitch, vPad, width + hPad * 2, height);
-      DebugSync();
+      DEBUG_SYNC;
     }
   }
 
@@ -2235,7 +2235,7 @@ public:
     dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
     kl_vertical_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
       pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void HorizontalWiener(
@@ -2248,7 +2248,7 @@ public:
     dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
     kl_horizontal_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
       pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void RB2BilinearFiltered(
@@ -2258,7 +2258,7 @@ public:
     dim3 blocks(nblocks(nWidth * 2, RB2B_BILINEAR_W - 2), nblocks(nHeight, RB2B_BILINEAR_H));
     kl_RB2B_bilinear_filtered<pixel_t> << <blocks, threads, 0, stream >> > (
       pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   template <int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
@@ -2275,7 +2275,7 @@ public:
     kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> > (
       pdata, nBlkX, nBlkY, nPad,
       nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   typedef void (Me::*LAUNCH_SEARCH)(
@@ -2301,7 +2301,7 @@ public:
       nBlkX, nBlkY, vectors, dst_sad, nPad,
       pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
       nPitchY, nPitchUV, nImgPitchY, nImgPitchUV);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   typedef void (Me::*LAUNCH_CALC_ALL_SAD)(
@@ -2342,7 +2342,7 @@ public:
     {
       // set zeroMV and globalMV
       kl_init_const_vec << <dim3(2, batch), 1, 0, stream >> > (vectors, vectorsPitch, globalMV, nPel);
-      DebugSync();
+      DEBUG_SYNC;
     }
 
     { // prepare
@@ -2353,7 +2353,7 @@ public:
         penaltyZero, penaltyGlobal, penaltyNew,
         nPel, nPad, nBlkSizeOvr, nExtendedWidth, nExptendedHeight,
         vectors, vectorsPitch, sads, sadPitch, &vectors[nBlkX*nBlkY], searchblocks, prog, next);
-      DebugSync();
+      DEBUG_SYNC;
 
       //DataDebug<short2> v(vectors - 2, 2, env);
       //v.Show();
@@ -2455,7 +2455,7 @@ public:
           vectors + vectorsPitch * i, sads + sadPitch * i, nPad,
           pSrcY[i], pSrcU[i], pSrcV[i], pRefY[i], pRefU[i], pRefV[i],
           nPitchY, nPitchUV, nImgPitchY, nImgPitchUV, stream);
-        DebugSync();
+        DEBUG_SYNC;
       }
 
       //DataDebug<int> d(sads, nBlkX*nBlkY, env);
@@ -2466,11 +2466,11 @@ public:
   void EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV)
   {
     kl_most_freq_mv << <dim3(2, batch), 1024, 0, stream >> > (vectors, vectorsPitch, nBlkCount, globalMV);
-    DebugSync();
+    DEBUG_SYNC;
     //DataDebug<short2> v1(globalMV, 1, env);
     //v1.Show();
     kl_mean_global_mv << <dim3(1, batch), 1024, 0, stream >> > (vectors, vectorsPitch, nBlkCount, globalMV);
-    DebugSync();
+    DEBUG_SYNC;
     //DataDebug<short2> v2(globalMV, 1, env);
     //v2.Show();
   }
@@ -2489,7 +2489,7 @@ public:
       dst_vector, dstVectorPitch, dst_sad, dstSadPitch,
       nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
       normFactor, normov, atotal, aodd, aeven);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount)
@@ -2497,7 +2497,7 @@ public:
     dim3 threads(256);
     dim3 blocks(nblocks(nBlkCount, threads.x));
     kl_load_mv << <blocks, threads, 0, stream >> > (in, vectors, sads, nBlkCount);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount)
@@ -2505,7 +2505,7 @@ public:
     dim3 threads(256);
     dim3 blocks(nblocks(nBlkCount, threads.x));
     kl_store_mv << <blocks, threads, 0, stream >> > (out, vectors, sads, nBlkCount);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD)
@@ -2513,7 +2513,7 @@ public:
     dim3 threads(256);
     dim3 blocks(nblocks(nBlkCount, threads.x));
     kl_write_default_mv << <blocks, threads, 0, stream >> > (dst, nBlkCount, verybigSAD);
-    DebugSync();
+    DEBUG_SYNC;
   }
   void GetDegrainStructSize(int N, int& degrainBlock, int& degrainArg)
   {
@@ -2545,7 +2545,7 @@ public:
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
     kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT, BINOMIAL> << <blocks, threads, 0, stream >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nPitchSuper, nImgPitch);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   template <int N, int BLK_SIZE, int M>
@@ -2557,7 +2557,7 @@ public:
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
     kl_degrain_2x3<pixel_t, pixel_t, tmp_t, int, short, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   template <int N, int BLK_SIZE, int M>
@@ -2569,7 +2569,7 @@ public:
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
     kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, int4, short4, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, (vtmp_t*)pDst, pitch4, pitchsuper4);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   template <typename vpixel_t, typename vtmp_t>
@@ -2580,7 +2580,7 @@ public:
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
     kl_short_to_byte<vpixel_t, vtmp_t> << <blocks, threads, 0, stream >> > (
       dst, src, width4, height, pitch4, max_pixel_value);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   typedef void (Me::*DEGRAINN)(
@@ -2713,8 +2713,8 @@ public:
 
         // pTmp初期化
         launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
-          (vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
-        DebugSync();
+          (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, stream);
+        DEBUG_SYNC;
 
         void(Me::*degrain_func)(
           int nPatternX, int nPatternY,
@@ -2768,7 +2768,7 @@ public:
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
             (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
             (const vpixel_t*)(pSrc[p] + (nWidth_B >> shift)),
-            ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4);
+            ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, stream);
         }
 
         // bottom uncovered regionをsrcからコピー
@@ -2776,13 +2776,13 @@ public:
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
             (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
             (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch),
-            width4, (nHeight - nHeight_B) >> shift, pitch4);
+            width4, (nHeight - nHeight_B) >> shift, pitch4, stream);
         }
       }
       else {
         // srcからコピー
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], width4, height, pitch4);
+          (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], width4, height, pitch4, stream);
       }
     }
   }
@@ -2807,7 +2807,7 @@ public:
     int *sceneChangeF = sceneChange + N;
 
     kl_init_scene_change << <1, numRef, 0, stream >> > (sceneChange);
-    DebugSync();
+    DEBUG_SYNC;
     for (int i = 0; i < N; ++i) {
       dim3 threads(256);
       dim3 blocks(nblocks(numBlks, threads.x));
@@ -2817,7 +2817,7 @@ public:
       if (isUsableF[i]) {
         kl_scene_change << <blocks, threads, 0, stream >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
       }
-      DebugSync();
+      DEBUG_SYNC;
     }
 
     DEGRAINN degrain;
@@ -2862,7 +2862,7 @@ public:
     kl_prepare_compensate<pixel_t, NPEL, SHIFT> << <blocks, threads, 0, stream >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, time256, thSAD, ovrwins, sceneChange,
       mv, pRef0, pRef, pblocks, nPitchSuper, nImgPitch);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   template <int BLK_SIZE, int M>
@@ -2874,7 +2874,7 @@ public:
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
     kl_compensate_2x3<pixel_t, tmp_t, int, short, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   template <int BLK_SIZE, int M>
@@ -2886,7 +2886,7 @@ public:
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
     kl_compensate_2x3<pixel_t, vtmp_t, int4, short4, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, (vtmp_t*)pDst, pitch4, pitchsuper4);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void launch_short_to_byte_or_copy_src(
@@ -2897,7 +2897,7 @@ public:
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
     kl_short_to_byte_or_copy_src<vpixel_t, vtmp_t> << <blocks, threads, 0, stream >> > (
       pflag, dst, src, tmp, width4, height, pitch4, max_pixel_value);
-    DebugSync();
+    DEBUG_SYNC;
   }
 
   void Compensate(
@@ -2914,12 +2914,12 @@ public:
 
     // SceneChange検出
     kl_init_scene_change << <1, 1, 0, stream >> > (sceneChange);
-    DebugSync();
+    DEBUG_SYNC;
     {
       dim3 threads(256);
       dim3 blocks(nblocks(numBlks, threads.x));
       kl_scene_change << <blocks, threads, 0, stream >> > (mv, numBlks, nTh1, sceneChange);
-      DebugSync();
+      DEBUG_SYNC;
     }
 
     int nOverlap = nBlkSize / 2;
@@ -2981,8 +2981,8 @@ public:
 
       // pTmp初期化
       launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
-        (vtmp_t*)pTmp[p], width_b4, height_b, pitch4);
-      DebugSync();
+        (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, stream);
+      DEBUG_SYNC;
 
       void(Me::*compensate_func)(
         int nPatternX, int nPatternY,
@@ -3037,7 +3037,7 @@ public:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
           (const vpixel_t*)(pSrc[p] + (nWidth_B >> shift)),
-          ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4);
+          ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, stream);
       }
 
       // bottom uncovered regionをsrcからコピー
@@ -3045,7 +3045,7 @@ public:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
           (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch),
-          width4, (nHeight - nHeight_B) >> shift, pitch4);
+          width4, (nHeight - nHeight_B) >> shift, pitch4, stream);
       }
     }
   }

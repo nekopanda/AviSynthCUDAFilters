@@ -44,9 +44,23 @@ int GetYType(const VideoInfo& vi) {
 	return VideoInfo::CS_Y8;
 }
 
+int Get444Type(const VideoInfo& vi) {
+	switch (vi.BitsPerComponent()) {
+	case 8: return VideoInfo::CS_YV24;
+	case 10: return VideoInfo::CS_YUV444P10;
+	case 12: return VideoInfo::CS_YUV444P12;
+	case 14: return VideoInfo::CS_YUV444P14;
+	case 16: return VideoInfo::CS_YUV444P16;
+	case 32: return VideoInfo::CS_YUV444PS;
+	}
+	// ‚±‚êˆÈŠO‚Í’m‚ç‚ñ
+	return VideoInfo::CS_YV24;
+}
+
 Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
 {
   typedef typename VectorType<uint8_t>::type vpixel_t;
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
   Frame frame = env->NewVideoFrame(vi);
 
@@ -57,7 +71,7 @@ Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
   if (IS_CUDA) {
     dim3 threads(32, 8);
     dim3 blocks(nblocks(width, threads.x), nblocks(vi.height, threads.y));
-    kl_fill<vpixel_t, 0> << <blocks, threads >> > (flagp, width, vi.height, pitch);
+    kl_fill<vpixel_t, 0> << <blocks, threads, 0, stream >> > (flagp, width, vi.height, pitch);
   }
   else {
     cpu_fill<vpixel_t, 0>(flagp, width, vi.height, pitch);
@@ -521,6 +535,8 @@ template <typename pixel_t>
 void KFMFilterBase::PadFrame(Frame& dst, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
   vpixel_t* dstY = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
   vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
   vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
@@ -537,11 +553,11 @@ void KFMFilterBase::PadFrame(Frame& dst, PNeoEnv env)
     dim3 blocks(nblocks(width4, threads.x));
     dim3 threadsUV(32, vpadUV);
     dim3 blocksUV(nblocks(width4UV, threads.x));
-    kl_padv << <blocks, threads >> > (dstY, width4, srcvi.height, pitchY, VPAD);
+    kl_padv << <blocks, threads, 0, stream >> > (dstY, width4, srcvi.height, pitchY, VPAD);
     DEBUG_SYNC;
-    kl_padv << <blocksUV, threadsUV >> > (dstU, width4UV, heightUV, pitchUV, vpadUV);
+    kl_padv << <blocksUV, threadsUV, 0, stream >> > (dstU, width4UV, heightUV, pitchUV, vpadUV);
     DEBUG_SYNC;
-    kl_padv << <blocksUV, threadsUV >> > (dstV, width4UV, heightUV, pitchUV, vpadUV);
+    kl_padv << <blocksUV, threadsUV, 0, stream >> > (dstV, width4UV, heightUV, pitchUV, vpadUV);
     DEBUG_SYNC;
   }
   else {
@@ -561,9 +577,10 @@ void KFMFilterBase::LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
   PNeoEnv env)
 {
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-    kl_analyze_frame << <blocks, threads >> > (
+    kl_analyze_frame << <blocks, threads, 0, stream >> > (
       dst, dstPitch, base, sref, mref, width, height, pitch, threshM, threshS, threshLS);
   }
   else {
@@ -642,9 +659,10 @@ void KFMFilterBase::MergeUVFlags(Frame& flag, PNeoEnv env)
   int pitchUV = flag.GetPitch<uint8_t>(PLANAR_U);
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(srcvi.width, threads.x), nblocks(srcvi.height, threads.y));
-    kl_merge_uvflags << <blocks, threads >> > (fY,
+    kl_merge_uvflags << <blocks, threads, 0, stream >> > (fY,
       fU, fV, srcvi.width, srcvi.height, pitchY, pitchUV, logUVx, logUVy);
     DEBUG_SYNC;
   }
@@ -664,9 +682,10 @@ void KFMFilterBase::MergeUVCoefs(Frame& flag, PNeoEnv env)
   int pitchUV = flag.GetPitch<pixel_t>(PLANAR_U);
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
-    kl_merge_uvcoefs << <blocks, threads >> > (fY,
+    kl_merge_uvcoefs << <blocks, threads, 0, stream >> > (fY,
       fU, fV, vi.width, vi.height, pitchY, pitchUV, logUVx, logUVy);
     DEBUG_SYNC;
   }
@@ -691,9 +710,10 @@ void KFMFilterBase::ApplyUVCoefs(Frame& flag, PNeoEnv env)
   int heightUV = vi.height >> logUVy;
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-    kl_apply_uvcoefs_420 << <blocks, threads >> > (fY,
+    kl_apply_uvcoefs_420 << <blocks, threads, 0, stream >> > (fY,
       fU, fV, widthUV, heightUV, pitchY, pitchUV);
     DEBUG_SYNC;
   }
@@ -716,14 +736,15 @@ void KFMFilterBase::ExtendCoefs(Frame& src, Frame& dst, PNeoEnv env)
   int width4 = vi.width >> 2;
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
-    kl_extend_coef << <blocks, threads >> > (
+    kl_extend_coef << <blocks, threads, 0, stream >> > (
       dstY + pitchY, srcY + pitchY, width4, vi.height - 2, pitchY);
     DEBUG_SYNC;
     dim3 threadsB(32, 1);
     dim3 blocksB(nblocks(width4, threads.x));
-    kl_copy_border << <blocksB, threadsB >> > (
+    kl_copy_border << <blocksB, threadsB, 0, stream >> > (
       dstY, srcY, width4, vi.height, pitchY, 1);
     DEBUG_SYNC;
   }
@@ -740,6 +761,8 @@ template <typename pixel_t>
 void KFMFilterBase::CompareFields(Frame& src, Frame& flag, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
   const vpixel_t* srcY = src.GetReadPtr<vpixel_t>(PLANAR_Y);
   const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
   const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
@@ -754,14 +777,15 @@ void KFMFilterBase::CompareFields(Frame& src, Frame& flag, PNeoEnv env)
   int heightUV = vi.height >> logUVy;
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
     dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-    kl_calc_combe << <blocks, threads >> > (dstY, srcY, width4, vi.height, pitchY);
+    kl_calc_combe << <blocks, threads, 0, stream >> > (dstY, srcY, width4, vi.height, pitchY);
     DEBUG_SYNC;
-    kl_calc_combe << <blocksUV, threads >> > (dstU, srcU, width4UV, heightUV, pitchUV);
+    kl_calc_combe << <blocksUV, threads, 0, stream >> > (dstU, srcU, width4UV, heightUV, pitchUV);
     DEBUG_SYNC;
-    kl_calc_combe << <blocksUV, threads >> > (dstV, srcV, width4UV, heightUV, pitchUV);
+    kl_calc_combe << <blocksUV, threads, 0, stream >> > (dstV, srcV, width4UV, heightUV, pitchUV);
     DEBUG_SYNC;
   }
   else {
@@ -840,6 +864,8 @@ __global__ void kl_max_extend_blocks_v(pixel_t* dstp, const pixel_t* srcp, int p
 template <typename pixel_t>
 void KFMFilterBase::ExtendBlocks(Frame& dst, Frame& tmp, bool uv, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
   pixel_t* tmpY = tmp.GetWritePtr<pixel_t>(PLANAR_Y);
   pixel_t* tmpU = tmp.GetWritePtr<pixel_t>(PLANAR_U);
   pixel_t* tmpV = tmp.GetWritePtr<pixel_t>(PLANAR_V);
@@ -855,18 +881,19 @@ void KFMFilterBase::ExtendBlocks(Frame& dst, Frame& tmp, bool uv, PNeoEnv env)
   int heightUV = tmp.GetHeight(PLANAR_U);
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
     dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-    kl_max_extend_blocks_h << <blocks, threads >> > (tmpY, dstY, pitchY, width, height);
-    kl_max_extend_blocks_v << <blocks, threads >> > (dstY, tmpY, pitchY, width, height);
+    kl_max_extend_blocks_h << <blocks, threads, 0, stream >> > (tmpY, dstY, pitchY, width, height);
+    kl_max_extend_blocks_v << <blocks, threads, 0, stream >> > (dstY, tmpY, pitchY, width, height);
     DEBUG_SYNC;
     if (uv) {
-      kl_max_extend_blocks_h << <blocksUV, threads >> > (tmpU, dstU, pitchUV, widthUV, heightUV);
-      kl_max_extend_blocks_v << <blocksUV, threads >> > (dstU, tmpU, pitchUV, widthUV, heightUV);
+      kl_max_extend_blocks_h << <blocksUV, threads, 0, stream >> > (tmpU, dstU, pitchUV, widthUV, heightUV);
+      kl_max_extend_blocks_v << <blocksUV, threads, 0, stream >> > (dstU, tmpU, pitchUV, widthUV, heightUV);
       DEBUG_SYNC;
-      kl_max_extend_blocks_h << <blocksUV, threads >> > (tmpV, dstV, pitchUV, widthUV, heightUV);
-      kl_max_extend_blocks_v << <blocksUV, threads >> > (dstV, tmpV, pitchUV, widthUV, heightUV);
+      kl_max_extend_blocks_h << <blocksUV, threads, 0, stream >> > (tmpV, dstV, pitchUV, widthUV, heightUV);
+      kl_max_extend_blocks_v << <blocksUV, threads, 0, stream >> > (dstV, tmpV, pitchUV, widthUV, heightUV);
       DEBUG_SYNC;
     }
   }
@@ -919,6 +946,8 @@ template <typename pixel_t>
 void KFMFilterBase::MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env)
 {
   typedef typename VectorType<pixel_t>::type vpixel_t;
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
   const vpixel_t* src24Y = src24.GetReadPtr<vpixel_t>(PLANAR_Y);
   const vpixel_t* src24U = src24.GetReadPtr<vpixel_t>(PLANAR_U);
   const vpixel_t* src24V = src24.GetReadPtr<vpixel_t>(PLANAR_V);
@@ -940,16 +969,17 @@ void KFMFilterBase::MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& d
   int fpitchUV = flag.GetPitch<uchar4>(PLANAR_U);
 
   if (IS_CUDA) {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
     dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-    kl_merge << <blocks, threads >> > (
+    kl_merge << <blocks, threads, 0, stream >> > (
       dstY, src24Y, src60Y, width4, vi.height, pitchY, flagY, fpitchY);
     DEBUG_SYNC;
-    kl_merge << <blocksUV, threads >> > (
+    kl_merge << <blocksUV, threads, 0, stream >> > (
       dstU, src24U, src60U, width4UV, heightUV, pitchUV, flagC, fpitchUV);
     DEBUG_SYNC;
-    kl_merge << <blocksUV, threads >> > (
+    kl_merge << <blocksUV, threads, 0, stream >> > (
       dstV, src24V, src60V, width4UV, heightUV, pitchUV, flagC, fpitchUV);
     DEBUG_SYNC;
   }

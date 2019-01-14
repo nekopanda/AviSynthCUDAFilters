@@ -266,16 +266,17 @@ class KFMSuper : public KFMFilterBase
     int shift = srcvi.BitsPerComponent() - 8 + 4;
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(DC_BLOCK_SIZE, DC_BLOCK_TH_W, DC_BLOCK_TH_H);
       dim3 blocks(nblocks(width, DC_BLOCK_TH_W), nblocks(height, DC_BLOCK_TH_H));
       dim3 blocksUV(nblocks(widthUV, DC_BLOCK_TH_W), nblocks(heightUV, DC_BLOCK_TH_H));
-      kl_analyze_frame<pixel_t, parity> << <blocks, threads >> > (
+      kl_analyze_frame<pixel_t, parity> << <blocks, threads, 0, stream >> > (
         combeY, fpitchY, f0Y, f1Y, pitchY, width, height, shift);
       DEBUG_SYNC;
-      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> > (
+      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads, 0, stream >> > (
         combeU, fpitchUV, f0U, f1U, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
-      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads >> > (
+      kl_analyze_frame<pixel_t, parity> << <blocksUV, threads, 0, stream >> > (
         combeV, fpitchUV, f0V, f1V, pitchUV, widthUV, heightUV, shift);
       DEBUG_SYNC;
     }
@@ -415,16 +416,17 @@ class KCleanSuper : public KFMFilterBase
     int shift = srcvi.BitsPerComponent() - 8 + 4;
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, 32), nblocks(height, 16));
       dim3 blocksUV(nblocks(widthUV, 32), nblocks(heightUV, 16));
-      kl_clean_super << <blocks, threads >> > (
+      kl_clean_super << <blocks, threads, 0, stream >> > (
         dstY, prevY, curY, width, height, pitchY, thY);
       DEBUG_SYNC;
-      kl_clean_super << <blocksUV, threads >> > (
+      kl_clean_super << <blocksUV, threads, 0, stream >> > (
         dstU, prevU, curU, widthUV, heightUV, pitchUV, thC);
       DEBUG_SYNC;
-      kl_clean_super << <blocksUV, threads >> > (
+      kl_clean_super << <blocksUV, threads, 0, stream >> > (
         dstV, prevV, curV, widthUV, heightUV, pitchUV, thC);
       DEBUG_SYNC;
     }
@@ -589,18 +591,19 @@ public:
     combe1V += pitchUV + 1;
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(FM_COUNT_TH_W, FM_COUNT_TH_H);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_init_fmcount << <1, 2 >> > (fmcnt);
+      kl_init_fmcount << <1, 2, 0, stream >> > (fmcnt);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocks, threads >> > (
+      kl_count_cmflags << <blocks, threads, 0, stream >> > (
         fmcnt, combe0Y, combe1Y, pitch, width, height, parity, prmY.threshM, prmY.threshS, prmY.threshLS);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocksUV, threads >> > (
+      kl_count_cmflags << <blocksUV, threads, 0, stream >> > (
         fmcnt, combe0U, combe1U, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocksUV, threads >> > (
+      kl_count_cmflags << <blocksUV, threads, 0, stream >> > (
         fmcnt, combe0V, combe1V, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
       DEBUG_SYNC;
     }
@@ -826,6 +829,8 @@ class KTelecine : public KFMFilterBase
   void CopyField(int top, Frame* const * frames, int fnum, Frame& dst, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     Frame& frame0 = *frames[0];
     const vpixel_t* src0Y = frame0.GetReadPtr<vpixel_t>(PLANAR_Y);
     const vpixel_t* src0U = frame0.GetReadPtr<vpixel_t>(PLANAR_U);
@@ -854,11 +859,11 @@ class KTelecine : public KFMFilterBase
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
         dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
-        kl_copy << <blocks, threads >> > (dstY, src0Y, width4, vi.height / 2, pitchY * 2);
+        kl_copy << <blocks, threads, 0, stream >> > (dstY, src0Y, width4, vi.height / 2, pitchY * 2);
         DEBUG_SYNC;
-        kl_copy << <blocksUV, threads >> > (dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
+        kl_copy << <blocksUV, threads, 0, stream >> > (dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
-        kl_copy << <blocksUV, threads >> > (dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
+        kl_copy << <blocksUV, threads, 0, stream >> > (dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
       }
       else {
@@ -883,11 +888,11 @@ class KTelecine : public KFMFilterBase
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
         dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
-        kl_average << <blocks, threads >> > (dstY, src0Y, src1Y, width4, vi.height / 2, pitchY * 2);
+        kl_average << <blocks, threads, 0, stream >> > (dstY, src0Y, src1Y, width4, vi.height / 2, pitchY * 2);
         DEBUG_SYNC;
-        kl_average << <blocksUV, threads >> > (dstU, src0U, src1U, width4UV, heightUV / 2, pitchUV * 2);
+        kl_average << <blocksUV, threads, 0, stream >> > (dstU, src0U, src1U, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
-        kl_average << <blocksUV, threads >> > (dstV, src0V, src1V, width4UV, heightUV / 2, pitchUV * 2);
+        kl_average << <blocksUV, threads, 0, stream >> > (dstV, src0V, src1V, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
       }
       else {
@@ -1025,6 +1030,8 @@ class KTelecineSuper : public KFMFilterBase
 
   Frame CreateWeaveFrame(PClip clip, int fstart, int fnum, PNeoEnv env)
   {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     Frame first = child->GetFrame(fstart, env);
     if (fnum == 2) {
       return first;
@@ -1056,11 +1063,11 @@ class KTelecineSuper : public KFMFilterBase
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width, threads.x), nblocks(srcvi.height, threads.y));
         dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-        kl_max << <blocks, threads >> > (dstY, src0Y, src1Y, width, height, pitchY);
+        kl_max << <blocks, threads, 0, stream >> > (dstY, src0Y, src1Y, width, height, pitchY);
         DEBUG_SYNC;
-        kl_max << <blocksUV, threads >> > (dstU, src0U, src1U, widthUV, heightUV, pitchUV);
+        kl_max << <blocksUV, threads, 0, stream >> > (dstU, src0U, src1U, widthUV, heightUV, pitchUV);
         DEBUG_SYNC;
-        kl_max << <blocksUV, threads >> > (dstV, src0V, src1V, widthUV, heightUV, pitchUV);
+        kl_max << <blocksUV, threads, 0, stream >> > (dstV, src0V, src1V, widthUV, heightUV, pitchUV);
         DEBUG_SYNC;
       }
       else {
@@ -1273,9 +1280,10 @@ void launch_bilinear_v(
   uint8_t* __restrict__ dst, int width, int height, int dpitch,
   const uint8_t* __restrict__ src, int spitch, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(32, 8);
   dim3 h_blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_bilinear_v<SCALE, SHIFT> << <h_blocks, threads >> > (dst, width, height, dpitch, src, spitch);
+  kl_bilinear_v<SCALE, SHIFT> << <h_blocks, threads, 0, stream >> > (dst, width, height, dpitch, src, spitch);
   DEBUG_SYNC;
 }
 
@@ -1321,9 +1329,10 @@ void launch_bilinear_h(
   uint8_t* __restrict__ dst, int width, int height, int dpitch,
   const uint8_t* __restrict__ src, int spitch, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(32, 8);
   dim3 h_blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_bilinear_h<SCALE, SHIFT> << <h_blocks, threads >> > (dst, width, height, dpitch, src, spitch);
+  kl_bilinear_h<SCALE, SHIFT> << <h_blocks, threads, 0, stream >> > (dst, width, height, dpitch, src, spitch);
   DEBUG_SYNC;
 }
 
@@ -1387,14 +1396,15 @@ class KSwitchFlag : public KFMFilterBase
     int heightUV = src0.GetHeight(PLANAR_U);
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_temporal_soften << <blocks, threads >> > (dstY, src0Y, src1Y, src2Y, width, height, pitchY);
+      kl_temporal_soften << <blocks, threads, 0, stream >> > (dstY, src0Y, src1Y, src2Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_temporal_soften << <blocksUV, threads >> > (dstU, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      kl_temporal_soften << <blocksUV, threads, 0, stream >> > (dstU, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_temporal_soften << <blocksUV, threads >> > (dstV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      kl_temporal_soften << <blocksUV, threads, 0, stream >> > (dstV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1408,6 +1418,8 @@ class KSwitchFlag : public KFMFilterBase
 
   Frame MakeSwitchFlag(Frame& src, PNeoEnv env)
   {
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     Frame combe = env->NewVideoFrame(combvi);
     Frame combetmp = env->NewVideoFrame(combvi);
     Frame flagY = NewSwitchFlagFrame(vi, env);
@@ -1435,11 +1447,11 @@ class KSwitchFlag : public KFMFilterBase
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_copy_first << <blocks, threads >> > (combeY, pitchY, srcY, width, height, spitchY);
+      kl_copy_first << <blocks, threads, 0, stream >> > (combeY, pitchY, srcY, width, height, spitchY);
       DEBUG_SYNC;
-      kl_copy_first << <blocksUV, threads >> > (combeU, pitchUV, srcU, widthUV, heightUV, spitchUV);
+      kl_copy_first << <blocksUV, threads, 0, stream >> > (combeU, pitchUV, srcU, widthUV, heightUV, spitchUV);
       DEBUG_SYNC;
-      kl_copy_first << <blocksUV, threads >> > (combeV, pitchUV, srcV, widthUV, heightUV, spitchUV);
+      kl_copy_first << <blocksUV, threads, 0, stream >> > (combeV, pitchUV, srcV, widthUV, heightUV, spitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1452,7 +1464,7 @@ class KSwitchFlag : public KFMFilterBase
     if (IS_CUDA) {
       dim3 threads(32, 16);
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_max << <blocksUV, threads >> > (combeU, combeU, combeV, widthUV, heightUV, pitchUV);
+      kl_max << <blocksUV, threads, 0, stream >> > (combeU, combeU, combeV, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1480,7 +1492,7 @@ class KSwitchFlag : public KFMFilterBase
         if (IS_CUDA) {
           dim3 threads(32, 8);
           dim3 blocks(nblocks(fwidth, threads.x), nblocks(fheight, threads.y));
-          kl_combe_to_flag << <blocks, threads >> > (
+          kl_combe_to_flag << <blocks, threads, 0, stream >> > (
             flagptrs[i] + fpitch + 1, fwidth - 1, fheight - 1, fpitch, combeptrs[i] + pitchY + 1, pitchY);
           DEBUG_SYNC;
         }
@@ -1503,10 +1515,10 @@ class KSwitchFlag : public KFMFilterBase
       dim3 threads(32, 8);
       dim3 blocks(nblocks(fwidth, threads.x), nblocks(fheight, threads.y));
       for (int i = 0; i < 2; ++i) {
-        kl_sum_box3x3 << <blocks, threads >> > (
+        kl_sum_box3x3 << <blocks, threads, 0, stream >> > (
           flagtmpp, flagptrs[i], fwidth, fheight, fpitch, 255);
         DEBUG_SYNC;
-        kl_sum_box3x3 << <blocks, threads >> > (
+        kl_sum_box3x3 << <blocks, threads, 0, stream >> > (
           flagptrs[i], flagtmpp, fwidth, fheight, fpitch, 255);
         DEBUG_SYNC;
       }
@@ -1522,7 +1534,7 @@ class KSwitchFlag : public KFMFilterBase
     if (IS_CUDA) {
       dim3 threads(32, 8);
       dim3 binary_blocks(nblocks(fwidth, threads.x), nblocks(fheight, threads.y));
-      kl_binary_flag << <binary_blocks, threads >> > (
+      kl_binary_flag << <binary_blocks, threads, 0, stream >> > (
         flagpY, flagpY, flagpC, fwidth, fheight, fpitch, (int)thY, (int)thC);
       DEBUG_SYNC;
     }
@@ -1627,10 +1639,11 @@ class KContainsCombe : public GenericVideoFilter
     int height = flag.GetHeight();
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-      kl_init_contains_durty_block << <1, 1 >> > (pwork);
-      kl_contains_durty_block << <blocks, threads >> > (flagp, width, height, pitch, pwork);
+      kl_init_contains_durty_block << <1, 1, 0, stream >> > (pwork);
+      kl_contains_durty_block << <blocks, threads, 0, stream >> > (flagp, width, height, pitch, pwork);
     }
     else {
       *pwork = cpu_contains_durty_block(flagp, width, height, pitch, pwork);
@@ -1743,16 +1756,17 @@ class KCombeMask : public KFMFilterBase
     assert(scaleUVh == 8 || scaleUVh == 4);
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       {
         dim3 threads(32, 1);
         dim3 blocks(nblocks(fwidth, threads.x));
-        kl_padv << <blocks, threads >> > (flagp, fwidth, fheight, fpitch, 1);
+        kl_padv << <blocks, threads, 0, stream >> > (flagp, fwidth, fheight, fpitch, 1);
         DEBUG_SYNC;
       }
       {
         dim3 threads(1, 32);
         dim3 blocks(1, nblocks(fheight + 1 * 2, threads.y));
-        kl_padh << <blocks, threads >> > (flagp - fpitch, fwidth, fheight + 1 * 2, fpitch, 1);
+        kl_padh << <blocks, threads, 0, stream >> > (flagp - fpitch, fwidth, fheight + 1 * 2, fpitch, 1);
         DEBUG_SYNC;
       }
     }
@@ -1887,14 +1901,15 @@ class KRemoveCombe : public KFMFilterBase
     int heightUV = src.GetHeight(PLANAR_U);
 
     if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_remove_combe2 << <blocks, threads >> > (dstY, srcY, width, height, pitchY, combeY, fpitchY, thY);
+      kl_remove_combe2 << <blocks, threads, 0, stream >> > (dstY, srcY, width, height, pitchY, combeY, fpitchY, thY);
       DEBUG_SYNC;
-      kl_remove_combe2 << <blocksUV, threads >> > (dstU, srcU, widthUV, heightUV, pitchUV, combeU, fpitchUV, thC);
+      kl_remove_combe2 << <blocksUV, threads, 0, stream >> > (dstU, srcU, widthUV, heightUV, pitchUV, combeU, fpitchUV, thC);
       DEBUG_SYNC;
-      kl_remove_combe2 << <blocksUV, threads >> > (dstV, srcV, widthUV, heightUV, pitchUV, combeV, fpitchUV, thC);
+      kl_remove_combe2 << <blocksUV, threads, 0, stream >> > (dstV, srcV, widthUV, heightUV, pitchUV, combeV, fpitchUV, thC);
       DEBUG_SYNC;
     }
     else {

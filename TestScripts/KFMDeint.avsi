@@ -33,7 +33,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
     Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
     Assert(!(mode == 3 && pass == 2), "3clips mode does not support timing output pass")
-    Assert(!(mode == 3 && svp), "SVP cannot be used when output 3 clips")
+    Assert(mode == 2 || mode == 4 || !svp), "only mode 2 and 4 support SVP")
 
     # CUDAデバイスチェック
     if(cuda) {

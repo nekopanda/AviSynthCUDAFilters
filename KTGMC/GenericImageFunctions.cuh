@@ -20,11 +20,11 @@ __global__ void kl_elementwise(
 
 template <typename pixel_t, typename F>
 void launch_elementwise(
-  pixel_t* dst, int width, int height, int pitch)
+  pixel_t* dst, int width, int height, int pitch, cudaStream_t stream)
 {
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_elementwise<pixel_t, F> << <blocks, threads >> > (
+  kl_elementwise<pixel_t, F> << <blocks, threads, 0, stream >> > (
     dst, width, height, pitch);
 }
 
@@ -43,11 +43,11 @@ __global__ void kl_elementwise(
 
 template <typename d_type, typename s_type, typename F>
 void launch_elementwise(
-  d_type* dst, const s_type* src, int width, int height, int pitch)
+  d_type* dst, const s_type* src, int width, int height, int pitch, cudaStream_t stream)
 {
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_elementwise<d_type, s_type, F> << <blocks, threads >> > (
+  kl_elementwise<d_type, s_type, F> << <blocks, threads, 0, stream >> > (
     dst, src, width, height, pitch);
 }
 
@@ -66,11 +66,11 @@ __global__ void kl_elementwise(
 
 template <typename pixel_t, typename F>
 void launch_elementwise(
-  pixel_t* dst, const pixel_t* src0, const pixel_t* src1, int width, int height, int pitch)
+  pixel_t* dst, const pixel_t* src0, const pixel_t* src1, int width, int height, int pitch, cudaStream_t stream)
 {
   dim3 threads(32, 16);
   dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
-  kl_elementwise<pixel_t, F> << <blocks, threads >> > (
+  kl_elementwise<pixel_t, F> << <blocks, threads, 0, stream >> > (
     dst, src0, src1, width, height, pitch);
 }
 

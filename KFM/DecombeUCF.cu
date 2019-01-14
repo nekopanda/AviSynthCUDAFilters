@@ -88,6 +88,8 @@ class KFieldDiff : public KFMFilterBase
   unsigned long long int CalcFieldDiff(Frame& frame, Frame& work, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     const vpixel_t* srcY = frame.GetReadPtr<vpixel_t>(PLANAR_Y);
     const vpixel_t* srcU = frame.GetReadPtr<vpixel_t>(PLANAR_U);
     const vpixel_t* srcV = frame.GetReadPtr<vpixel_t>(PLANAR_V);
@@ -103,14 +105,14 @@ class KFieldDiff : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
       dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_init_uint64 << <1, 1 >> > (sum);
+      kl_init_uint64 << <1, 1, 0, stream >> > (sum);
       DEBUG_SYNC;
-      kl_calculate_field_diff << <blocks, threads >> > (srcY, nt6, width4, vi.height, pitchY, sum);
+      kl_calculate_field_diff << <blocks, threads, 0, stream >> > (srcY, nt6, width4, vi.height, pitchY, sum);
       DEBUG_SYNC;
       if (chroma) {
-        kl_calculate_field_diff << <blocksUV, threads >> > (srcU, nt6, width4UV, heightUV, pitchUV, sum);
+        kl_calculate_field_diff << <blocksUV, threads, 0, stream >> > (srcU, nt6, width4UV, heightUV, pitchUV, sum);
         DEBUG_SYNC;
-        kl_calculate_field_diff << <blocksUV, threads >> > (srcV, nt6, width4UV, heightUV, pitchUV, sum);
+        kl_calculate_field_diff << <blocksUV, threads, 0, stream >> > (srcV, nt6, width4UV, heightUV, pitchUV, sum);
         DEBUG_SYNC;
       }
       long long int result;
@@ -215,7 +217,7 @@ void cpu_add_block_sum(
   const vpixel_t* src1,
   int width, int height, int pitch,
   int blocks_w, int blocks_h, int block_pitch,
-  int *sumAbs, int* sumSig)
+  int *sumAbs, int* sumSig, PNeoEnv env)
 {
   for (int by = 0; by < blocks_h; ++by) {
     for (int bx = 0; bx < blocks_w; ++bx) {
@@ -298,11 +300,12 @@ void launch_add_block_sum(
   const vpixel_t* src1,
   int width, int height, int pitch,
   int blocks_w, int blocks_h, int block_pitch,
-  int *sumAbs, int* sumSig)
+  int *sumAbs, int* sumSig, PNeoEnv env)
 {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   dim3 threads(BLOCK_SIZE >> 2, BLOCK_SIZE, TH_Z);
   dim3 blocks(nblocks(blocks_w, TH_Z), blocks_h);
-  kl_add_block_sum<vpixel_t, BLOCK_SIZE, TH_Z> << <blocks, threads >> > (src0, src1,
+  kl_add_block_sum<vpixel_t, BLOCK_SIZE, TH_Z> << <blocks, threads, 0, stream >> > (src0, src1,
     width, height, pitch, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
 }
 
@@ -363,6 +366,8 @@ class KFrameDiffDup : public KFMFilterBase
   int CalcFrameDiff(Frame& src0, Frame& src1, Frame& work, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
     const vpixel_t* src0Y = src0.GetReadPtr<vpixel_t>(PLANAR_Y);
     const vpixel_t* src0U = src0.GetReadPtr<vpixel_t>(PLANAR_U);
     const vpixel_t* src0V = src0.GetReadPtr<vpixel_t>(PLANAR_V);
@@ -386,7 +391,7 @@ class KFrameDiffDup : public KFMFilterBase
       const vpixel_t* src1,
       int width, int height, int pitch,
       int blocks_w, int blocks_h, int block_pitch,
-      int *sumAbs, int* sumSig) =
+      int *sumAbs, int* sumSig, PNeoEnv env) =
     {
       {
         launch_add_block_sum<vpixel_t, 32, THREADS / (32 * (32 / 4))>,
@@ -410,23 +415,23 @@ class KFrameDiffDup : public KFMFilterBase
     }
 
     if (IS_CUDA) {
-      kl_init_block_sum << <64, nblocks(block_pitch * blocks_h, 64) >> > (
+      kl_init_block_sum << <64, nblocks(block_pitch * blocks_h, 64), 0, stream >> > (
         sumAbs, sumSig, maxSum, block_pitch * blocks_h);
       DEBUG_SYNC;
       table[0][f_idx](src0Y, src1Y,
-        width4, vi.height, pitchY, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+        width4, vi.height, pitchY, blocks_w, blocks_h, block_pitch, sumAbs, sumSig, env);
       DEBUG_SYNC;
       if (chroma) {
         table[0][f_idx + logUVx](src0U, src1U,
-          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig, env);
         DEBUG_SYNC;
         table[0][f_idx + logUVx](src0V, src1V,
-          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig, env);
         DEBUG_SYNC;
       }
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(blocks_w4, threads.x), nblocks(blocks_h, threads.y));
-      kl_block_sum_max << <blocks, threads >> > (
+      kl_block_sum_max << <blocks, threads, 0, stream >> > (
         (int4*)sumAbs, (int4*)sumSig, blocks_w4, blocks_h, block_pitch4, maxSum);
       int result;
       CUDA_CHECK(cudaMemcpy(&result, maxSum, sizeof(int), cudaMemcpyDeviceToHost));
@@ -436,12 +441,12 @@ class KFrameDiffDup : public KFMFilterBase
       cpu_init_block_sum(
         sumAbs, sumSig, maxSum, block_pitch * blocks_h);
       table[1][f_idx](src0Y, src1Y,
-        width4, vi.height, pitchY, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+        width4, vi.height, pitchY, blocks_w, blocks_h, block_pitch, sumAbs, sumSig, env);
       if (chroma) {
         table[1][f_idx + logUVx](src0U, src1U,
-          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig, env);
         table[1][f_idx + logUVx](src0V, src1V,
-          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig);
+          width4UV, heightUV, pitchUV, blocks_w, blocks_h, block_pitch, sumAbs, sumSig, env);
       }
       cpu_block_sum_max(
         (int4*)sumAbs, (int4*)sumSig, blocks_w4, blocks_h, block_pitch4, maxSum);
@@ -583,6 +588,7 @@ class KNoiseClip : public KFMFilterBase
   PVideoFrame GetFrameT(int n, PNeoEnv env)
   {
     typedef typename VectorType<uint8_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     Frame src = child->GetFrame(n, env);
     Frame noise = noiseclip->GetFrame(n, env);
@@ -609,11 +615,11 @@ class KNoiseClip : public KFMFilterBase
       dim3 threads(32, 8);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_noise_clip << <blocks, threads >> > (dstY, srcY, noiseY, width, height, pitchY, nmin_y, range_y);
+      kl_noise_clip << <blocks, threads, 0, stream >> > (dstY, srcY, noiseY, width, height, pitchY, nmin_y, range_y);
       DEBUG_SYNC;
-      kl_noise_clip << <blocksUV, threads >> > (dstU, srcU, noiseU, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
+      kl_noise_clip << <blocksUV, threads, 0, stream >> > (dstU, srcU, noiseU, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
       DEBUG_SYNC;
-      kl_noise_clip << <blocksUV, threads >> > (dstV, srcV, noiseV, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
+      kl_noise_clip << <blocksUV, threads, 0, stream >> > (dstV, srcV, noiseV, widthUV, heightUV, pitchUV, nmin_uv, range_uv);
       DEBUG_SYNC;
     }
     else {
@@ -905,7 +911,8 @@ class KAnalyzeNoise : public KFMFilterBase
 
   void InitAnalyze(uint64_t* result, PNeoEnv env) {
     if (IS_CUDA) {
-      kl_init_uint64 << <1, sizeof(NoiseResult) * 2 / sizeof(uint64_t) >> > (result);
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+      kl_init_uint64 << <1, sizeof(NoiseResult) * 2 / sizeof(uint64_t), 0, stream >> > (result);
       DEBUG_SYNC;
     }
     else {
@@ -916,6 +923,7 @@ class KAnalyzeNoise : public KFMFilterBase
   void AnalyzeNoise(uint64_t* resultY, uint64_t* resultUV, Frame noise0, Frame noise1, Frame noise2, PNeoEnv env)
   {
     typedef typename VectorType<uint8_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     const vpixel_t* src0Y = noise0.GetReadPtr<vpixel_t>(PLANAR_Y);
     const vpixel_t* src0U = noise0.GetReadPtr<vpixel_t>(PLANAR_U);
@@ -938,11 +946,11 @@ class KAnalyzeNoise : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_analyze_noise << <blocks, threads >> > (resultY, src0Y, src1Y, src2Y, width, height, pitchY);
+      kl_analyze_noise << <blocks, threads, 0, stream >> > (resultY, src0Y, src1Y, src2Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_analyze_noise << <blocksUV, threads >> > (resultUV, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      kl_analyze_noise << <blocksUV, threads, 0, stream >> > (resultUV, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_analyze_noise << <blocksUV, threads >> > (resultUV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      kl_analyze_noise << <blocksUV, threads, 0, stream >> > (resultUV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -955,6 +963,7 @@ class KAnalyzeNoise : public KFMFilterBase
   void AnalyzeDiff(uint64_t* resultY, uint64_t* resultUV, Frame frame0, Frame frame1, PNeoEnv env)
   {
     typedef typename VectorType<uint8_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     const vpixel_t* src0Y = frame0.GetReadPtr<vpixel_t>(PLANAR_Y);
     const vpixel_t* src0U = frame0.GetReadPtr<vpixel_t>(PLANAR_U);
@@ -974,11 +983,11 @@ class KAnalyzeNoise : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_analyze_diff << <blocks, threads >> > (resultY, src0Y, src1Y, width, height, pitchY);
+      kl_analyze_diff << <blocks, threads, 0, stream >> > (resultY, src0Y, src1Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_analyze_diff << <blocksUV, threads >> > (resultUV, src0U, src1U, widthUV, heightUV, pitchUV);
+      kl_analyze_diff << <blocksUV, threads, 0, stream >> > (resultUV, src0U, src1U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_analyze_diff << <blocksUV, threads >> > (resultUV, src0V, src1V, widthUV, heightUV, pitchUV);
+      kl_analyze_diff << <blocksUV, threads, 0, stream >> > (resultUV, src0V, src1V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {

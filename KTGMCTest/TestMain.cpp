@@ -11,7 +11,7 @@
 
 int main(int argc, char **argv)
 {
-  ::testing::GTEST_FLAG(filter) = "*.Resize_*";
+  ::testing::GTEST_FLAG(filter) = "*.GenericScriptTest*";
   ::testing::InitGoogleTest(&argc, argv);
 
   //_crtBreakAlloc = 7978;

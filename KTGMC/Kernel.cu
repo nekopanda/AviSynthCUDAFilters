@@ -19,17 +19,6 @@
 #include "GenericImageFunctions.cuh"
 #include "Misc.h"
 
-#ifndef NDEBUG
-//#if 1
-#define DEBUG_SYNC \
-			CUDA_CHECK(cudaGetLastError()); \
-      CUDA_CHECK(cudaDeviceSynchronize())
-#else
-#define DEBUG_SYNC
-#endif
-
-#define IS_CUDA (env->GetDeviceType() == DEV_TYPE_CUDA)
-
 #define LOG_PRINT 0
 
 class CUDAFilterBase : public GenericVideoFilter {
@@ -680,7 +669,7 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
       int pitch4 = pitch >> 2;
 
       if (chroma == false && p > 0) {
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(pDst, pSrc, width4, height, pitch4);
+        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(pDst, pSrc, width4, height, pitch4, stream);
         DEBUG_SYNC;
         continue;
       }
@@ -1064,7 +1053,7 @@ class KRemoveGrain : public CUDAFilterBase {
 
       if (mode == 0) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, stream);
         DEBUG_SYNC;
         continue;
       }
@@ -1237,7 +1226,7 @@ class KRepair : public CUDAFilterBase {
 
       if (mode == 0) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, stream);
         DEBUG_SYNC;
         continue;
       }
@@ -1408,7 +1397,7 @@ class KVerticalCleaner : public CUDAFilterBase {
 
       if (mode == 0) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, stream);
         DEBUG_SYNC;
         continue;
       }
@@ -1667,6 +1656,7 @@ protected:
   PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     PVideoFrame src0 = childs[0]->GetFrame(n, env);
     PVideoFrame src1 = (numChilds >= 2) ? childs[1]->GetFrame(n, env) : PVideoFrame();
@@ -1701,7 +1691,7 @@ protected:
 
       if (mode == 0) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4, stream);
         DEBUG_SYNC;
         continue;
       }
@@ -1709,7 +1699,7 @@ protected:
       switch (modes[p]) {
       case 2:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4, stream);
         DEBUG_SYNC;
         break;
       case 3:
@@ -1717,12 +1707,12 @@ protected:
         break;
       case 4:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc1, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc1, width4, height, pitch4, stream);
         DEBUG_SYNC;
         break;
       case 5:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc2, width4, height, pitch4);
+          (vpixel_t*)pDst, (const vpixel_t*)pSrc2, width4, height, pitch4, stream);
         DEBUG_SYNC;
         break;
       }

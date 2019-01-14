@@ -20,15 +20,6 @@ public:
     stream = static_cast<cudaStream_t>(env->GetDeviceStream());
   }
 
-  void DebugSync()
-  {
-#ifndef NDEBUG
-    //#if 1
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
-#endif
-  }
-
   void VerifyCUDAPointer(void* ptr)
   {
 #ifndef NDEBUG

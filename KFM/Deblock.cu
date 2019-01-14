@@ -849,9 +849,10 @@ class QPForDeblock : public KFMFilterBase
 		int qp_height = (height + 7 + 8) >> 3;
 
 		if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 			dim3 threads(32, 8);
 			dim3 blocks(nblocks(qp_width, threads.x), nblocks(qp_height, threads.y));
-			kl_make_qp_table << <blocks, threads >> > (
+			kl_make_qp_table << <blocks, threads, 0, stream >> > (
 				(srcvi.width + 15) >> 4, (srcvi.height + 15) >> 4,
 				qpTable0, qpTableNonB0, qpTable1, qpTableNonB1,
 				qpStride, qpTable0 ? qpScaleType : force_qp, dc_coeff,
@@ -873,6 +874,7 @@ class QPForDeblock : public KFMFilterBase
 	Frame MakeMask(PVideoFrame dcframe, PNeoEnv env)
 	{
 		typedef typename VectorType<uint8_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
 		int width = dcframe->GetRowSize();
 		int height = dcframe->GetHeight();
@@ -891,11 +893,11 @@ class QPForDeblock : public KFMFilterBase
 		int width4 = (width + 3) >> 2;
 
 		if (IS_CUDA) {
-			kl_padv<vpixel_t> << <dim3(nblocks(width4, 32)), dim3(32, 8) >> > (
+			kl_padv<vpixel_t> << <dim3(nblocks(width4, 32)), dim3(32, 8), 0, stream >> > (
 				pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
 				width4, height, pad.GetPitch<vpixel_t>(), 8);
 			DEBUG_SYNC;
-			kl_padh<uint8_t> << <dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32) >> > (
+			kl_padh<uint8_t> << <dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream >> > (
 				pad.GetWritePtr<uint8_t>() + 8, width, height + 8 * 2,
 				pad.GetPitch<uint8_t>(), 8);
 			DEBUG_SYNC;
@@ -910,12 +912,12 @@ class QPForDeblock : public KFMFilterBase
 		}
 
 		if (IS_CUDA) {
-			kl_max_v<5> << <dim3(nblocks(width4, 32), nblocks(height, 8)), dim3(32, 8) >> > (
+			kl_max_v<5> << <dim3(nblocks(width4, 32), nblocks(height, 8)), dim3(32, 8), 0, stream >> > (
 				tmp.GetWritePtr<vpixel_t>() + 2 + 8 * tmp.GetPitch<vpixel_t>(),
 				pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
 				width4, height, pad.GetPitch<vpixel_t>());
 			DEBUG_SYNC;
-			kl_max_h<5> << <dim3(nblocks(width, 32), nblocks(height, 8)), dim3(32, 8) >> > (
+			kl_max_h<5> << <dim3(nblocks(width, 32), nblocks(height, 8)), dim3(32, 8), 0, stream >> > (
 				pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
 				tmp.GetWritePtr<uint8_t>() + 8 + 8 * tmp.GetPitch<uint8_t>(),
 				width, height, pad.GetPitch<uint8_t>());
@@ -1343,11 +1345,12 @@ class SharpenFilter : public KFMFilterBase
 		int qph = coeffvi.height >> shifty;
 		
 		if (IS_CUDA) {
+			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 			{
 				// qp -> coeff 変換
 				dim3 threads(32, 8);
 				dim3 blocks(nblocks(qpw, threads.x), nblocks(qph, threads.y));
-				kl_sharpen_coeff << <blocks, threads >> > (
+				kl_sharpen_coeff << <blocks, threads, 0, stream >> > (
 					coeff.GetWritePtr<uint8_t>(plane), qpw, qph, coeff.GetPitch<uint8_t>(plane),
 					qp.GetReadPtr<uint16_t>(plane), qp.GetPitch<uint16_t>(plane));
 				DEBUG_SYNC;
@@ -1365,12 +1368,12 @@ class SharpenFilter : public KFMFilterBase
 				dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
 
 				if (show) {
-					kl_show_sharpen_coeff << <blocks, threads >> > (
+					kl_show_sharpen_coeff << <blocks, threads, 0, stream >> > (
 						dst.GetWritePtr<pixel_t>(plane), width, height, dst.GetPitch<pixel_t>(plane), texCoeff);
 					DEBUG_SYNC;
 				}
 				else {
-					kl_sharpen << <blocks, threads >> > (
+					kl_sharpen << <blocks, threads, 0, stream >> > (
 						dst.GetWritePtr<pixel_t>(plane), width, height, dst.GetPitch<pixel_t>(plane),
 						texSrc, texCoeff, unsharp.GetReadPtr<pixel_t>(plane));
 					DEBUG_SYNC;
@@ -1484,6 +1487,7 @@ class KDeblock : public KFMFilterBase
     const uint16_t* qpTmp, int qpTmpPitch, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
+		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     VideoInfo padvi = vi;
 		// 有効なデータは外周8ピクセルまでだが、
@@ -1499,11 +1503,11 @@ class KDeblock : public KFMFilterBase
       pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
 
     if (IS_CUDA) {
-      kl_padv<vpixel_t> << <dim3(nblocks(width >> 2, 32)), dim3(32, 8) >> > (
+      kl_padv<vpixel_t> << <dim3(nblocks(width >> 2, 32)), dim3(32, 8), 0, stream >> > (
         pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
         width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
       DEBUG_SYNC;
-      kl_padh<pixel_t> << <dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32) >> > (
+      kl_padh<pixel_t> << <dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream >> > (
         pad.GetWritePtr<pixel_t>() + 8, width, height + 8 * 2,
         pad.GetPitch<pixel_t>(), 8);
       DEBUG_SYNC;
@@ -1534,7 +1538,7 @@ class KDeblock : public KFMFilterBase
       if (IS_CUDA) {
         dim3 threads(8, 8);
         dim3 blocks(qpvi.width, qpvi.height);
-        kl_deblock_show << <blocks, threads >> > (
+        kl_deblock_show << <blocks, threads, 0, stream >> > (
           dst, dstPitch, width, height, qpvi.width, qpvi.height,
 					qpTmp, qpTmpPitch, thresh_a, thresh_b);
         DEBUG_SYNC;
@@ -1571,7 +1575,7 @@ class KDeblock : public KFMFilterBase
       if (IS_CUDA) {
         dim3 threads(8, count);
         dim3 blocks(qpvi.width, qpvi.height);
-        kl_deblock << <blocks, threads, sizeof(float) * 72 * count >> > (
+        kl_deblock << <blocks, threads, sizeof(float) * 72 * count, stream >> > (
           pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
           qpvi.width, qpvi.height,
           tmpOut.GetWritePtr<ushort2>(), tmpOut.GetPitch<ushort2>(),
@@ -1838,9 +1842,10 @@ public:
 				int qpStride = (int)src.GetProperty("QP_Stride")->GetInt();
 				int qpScaleType = (int)src.GetProperty("QP_ScaleType")->GetInt();
 				if (IS_CUDA) {
+					cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 					dim3 threads(32, 8);
 					dim3 blocks(nblocks(vi.width, threads.x), nblocks(vi.height, threads.y));
-					kl_scale_qp << <blocks, threads >> > (vi.width, vi.height,
+					kl_scale_qp << <blocks, threads, 0, stream >> > (vi.width, vi.height,
 						dst.GetWritePtr<uint8_t>(), dst.GetPitch<uint8_t>(),
 						qpTable.GetReadPtr<uint8_t>(), qpStride, qpScaleType);
 					DEBUG_SYNC;

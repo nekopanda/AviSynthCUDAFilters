@@ -3467,7 +3467,7 @@ public:
       kdata2 += nBlks;
     }
 
-    if (misCount > 100) {
+    if (misCount > 1000) {
       env->ThrowError("Motion vector too many miss!! (%d)", misCount);
     }
 
