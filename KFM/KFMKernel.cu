@@ -156,7 +156,7 @@ class KFMSwitch : public KFMFilterBase
   PClip combemaskclip;
   PClip containscombeclip;
   PClip ucfclip;
-  float thswitch;
+  float thswitch; // <0で60fps無効
   int mode; // 0:通常 1:通常+timecode生成 2:timecode生成のみ
   bool show;
   bool showflag;
@@ -276,7 +276,7 @@ class KFMSwitch : public KFMFilterBase
     FrameInfo info = { 0 };
 
     // 60p判定は 1パスの場合はコスト 2パスの場合はKFMCycleAnalyzeの結果 を使う
-    if ((analyzeMode == 0 && fm.cost > thswitch) || (analyzeMode != 0 && fm.is60p)) {
+    if (thswitch >= 0 && ((analyzeMode == 0 && fm.cost > thswitch) || (analyzeMode != 0 && fm.is60p))) {
       // コストが高いので60pと判断
       info.baseType = ucfclip ? FRAME_UCF : FRAME_60;
 
@@ -372,7 +372,7 @@ class KFMSwitch : public KFMFilterBase
   {
     int duration = 1;
     // 60fpsマージ部分がある場合は60fps
-    if (info.maskType == 0) {
+    if (thswitch < 0 || info.maskType == 0) {
       int source;
       // 最大durationを設定
       switch (info.baseType) {
